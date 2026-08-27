@@ -3,6 +3,7 @@ import { type NextRequest } from "next/server";
 import { ApiError } from "@/lib/api/types";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
+import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { validateRequest, providerCreateSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { listProvidersHandler, createProviderHandler } from "../_handler";
@@ -16,8 +17,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) return fail("unauthenticated", "Auth required.", 401, { requestId });
 
-  const authz = await requireRole("agent", { requestId, resource: "scheduling" });
-  if (!authz.ok) return authz.response;
+  const authUser = await loadAuthUser();
+  const orgId = authUser ? (await resolveActiveOrg(authUser))?.orgId : undefined;
 
   const url = new URL(req.url);
   const specialty = url.searchParams.get("specialty") ?? undefined;
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   try {
     const providers = await listProvidersHandler(supabase, {
-      organization_id: authz.org.orgId,
+      organization_id: orgId ?? "",
       actor: { type: "user", id: user.id },
       requestId,
     }, {
