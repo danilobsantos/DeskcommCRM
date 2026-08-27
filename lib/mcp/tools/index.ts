@@ -71,6 +71,15 @@ import {
   crmCloseDemand,
   crmProposeReactivation,
 } from "./retencao";
+import {
+  schedulingListProviders,
+  schedulingListAppointments,
+  schedulingCheckAvailability,
+  schedulingCreateAppointment,
+  schedulingUpdateAppointment,
+  schedulingCancelAppointment,
+  schedulingConfirmAppointment,
+} from "./agendamento";
 
 // Cast via `unknown` porque McpToolDefinition<TInput> nao e covariante
 // em TInput (handler usa TInput em posicao contravariante). Coletar
@@ -133,6 +142,14 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmAddCaseNote,
   crmCloseHumanCase,
   crmResumeAiAttendance,
+  // scheduling
+  schedulingListProviders,
+  schedulingListAppointments,
+  schedulingCheckAvailability,
+  schedulingCreateAppointment,
+  schedulingUpdateAppointment,
+  schedulingCancelAppointment,
+  schedulingConfirmAppointment,
   // handoff (special)
   crmRequestHumanHandoff,
 ] as unknown as ReadonlyArray<McpToolDefinition>;

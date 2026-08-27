@@ -45,6 +45,7 @@ export const DICIONARIO: Traducoes = {
   Inbox: { es: "Inbox" },
   Radar: { es: "Radar" },
   "Respostas rápidas": { es: "Respuestas rápidas" },
+  Agenda: { es: "Agenda" },
   Contatos: { es: "Contactos" },
   // A CHAVE É O TEXTO PT-BR, então renomear um rótulo no registro de navegação
   // sem mexer aqui NÃO quebra teste nenhum — degrada em silêncio: `traduzir()`

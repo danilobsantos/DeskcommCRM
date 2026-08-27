@@ -336,6 +336,13 @@ export const AUDIT_ACTIONS = [
   // demais para a chamada seguinte do expurgo alcançar — a trilha registra
   // a própria erosão em vez de encolher sem deixar marca.
   "retention.sweep_run",
+
+  // ── Agendamento de consultas (migration 0176) ──────────────────────────
+  "appointment.created",
+  "appointment.updated",
+  "appointment.cancelled",
+  "appointment.confirmed",
+  "appointment.reminders_sent",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

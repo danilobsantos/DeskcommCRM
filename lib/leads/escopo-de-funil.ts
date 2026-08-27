@@ -82,6 +82,12 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
   crm_create_webhook_source: "sem_funil",
   crm_set_webhook_source_active: "sem_funil",
   crm_set_automation_rule_active: "sem_funil",
+
+  // ---- agendamento: não tocam funil ----
+  scheduling_create_appointment: "sem_funil",
+  scheduling_update_appointment: "sem_funil",
+  scheduling_cancel_appointment: "sem_funil",
+  scheduling_confirm_appointment: "sem_funil",
 };
 
 export type VereditoDoEscopo =
