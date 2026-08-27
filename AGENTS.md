@@ -31,7 +31,19 @@ que a major já não cobrisse — issue #235. Para a versão exata, `package.jso
 
 Runtime: **Node ≥22** (`.nvmrc` = 22; os quatro workflows fixam `node-version: 22` —
 `ci` ×2, `perf`, `e2e`). Gerenciador: **pnpm 9.15.9** (`packageManager`).
-Versão do produto: **1.0.0** (`CHANGELOG.md`, SemVer — mudança que afeta quem roda VPS entra lá).
+Versão do produto: **não está escrita aqui, de propósito.** Esta linha afirmava `1.0.0` até a
+v1.6.0 — seis minors de atraso, e nenhum teste a vigiava. Afirmação de versão envelhece a cada
+release; comando não. A que está publicada agora:
+
+```bash
+git ls-remote --tags --refs origin 'refs/tags/v*' \
+  | sed 's#.*refs/tags/v##' | awk '!/-/' | sort -V | tail -1   # awk, nao grep -v -- '-':
+                                                                # em maquina com ugrep aquele nao roda
+```
+
+O `package.json` **não** é a fonte da versão do produto (segue em `0.1.0`, e é assim de
+propósito). A fonte é a tag `v*` mais a seção do `CHANGELOG.md` — que é tela de produto, lida
+pelo dono da VPS. Como o número é decidido: [`docs/doctrine/versionamento.md`](docs/doctrine/versionamento.md).
 
 ## Estrutura que importa
 

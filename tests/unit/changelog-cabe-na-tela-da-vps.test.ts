@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { parseFragmento } from "@/lib/release/fragmento";
+import { montarSecao } from "@/lib/release/montar-secao";
 import { extractChangelogSection } from "@/lib/system/changelog";
 
 /**
@@ -143,6 +145,39 @@ function fimDaSecao(texto: string, versao: string): number {
   throw new Error(`seção [${versao}] não encontrada`);
 }
 
+/**
+ * Os fragmentos de `.changes/`, já validados. Um fragmento malformado é erro de
+ * quem o escreveu e reprova em `fragmentos-de-release.test.ts` — aqui ele é
+ * pulado para a mensagem de falha não trocar "seção grande demais" por um erro
+ * de parse que confundiria o conserto.
+ */
+function fragmentosDeChanges(): ReturnType<typeof parseFragmento>[] {
+  const dir = path.join(RAIZ, ".changes");
+  if (!fs.existsSync(dir)) return [];
+  const lidos = [];
+  for (const arquivo of fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort()) {
+    try {
+      lidos.push(parseFragmento(arquivo, fs.readFileSync(path.join(dir, arquivo), "utf8")));
+    } catch {
+      continue;
+    }
+  }
+  return lidos;
+}
+
+/** O arquivo como ele ficará na TAG: `[Não lançado]` vazio, a seção nova abaixo. */
+function comSecaoMontada(raw: string, fragmentos: ReturnType<typeof parseFragmento>[]): string {
+  const { cabecalho, secoes } = fatiar(raw);
+  const numeradas = secoes.filter((s) => s.versao !== null);
+  return (
+    cabecalho +
+    "## [Não lançado]\n\n" +
+    montarSecao(fragmentos, "9.9.9", "2099-01-01").texto +
+    "\n\n" +
+    numeradas.map((s) => s.texto).join("")
+  );
+}
+
 const RAW = fs.readFileSync(CHANGELOG, "utf8");
 const TETO = tetoDoAgente();
 
@@ -174,6 +209,24 @@ const CANDIDATAS: Array<{ nome: string; versao: string; texto: string; conserto:
       versao: "9.9.9",
       texto: comoFicaNaTag(RAW, "9.9.9"),
       conserto: "Enxugue os itens de [Não lançado] (veja o cabeçalho deste arquivo).",
+    });
+  }
+
+  // A partir de `docs/doctrine/versionamento.md`, o texto da próxima release
+  // não mora mais em `[Não lançado]` — ele chega em fragmentos, um por PR, e
+  // `[Não lançado]` fica PERMANENTEMENTE vazio. Sem esta candidata, a guarda
+  // acima passaria a nunca ter o que medir antes de uma release: continuaria
+  // verde por vacuidade, que é o modo de falha que o cabeçalho deste arquivo
+  // existe para evitar.
+  const fragmentos = fragmentosDeChanges();
+  if (fragmentos.length > 0) {
+    CANDIDATAS.push({
+      nome: `a seção que os ${fragmentos.length} fragmento(s) de .changes/ vão produzir`,
+      versao: "9.9.9",
+      texto: comSecaoMontada(RAW, fragmentos),
+      conserto:
+        "Enxugue o corpo dos fragmentos em `.changes/` — item de changelog longo costuma ser " +
+        "explicação que só interessa a quem escreveu o código.",
     });
   }
 }

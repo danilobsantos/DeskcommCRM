@@ -424,4 +424,14 @@ Antes de declarar uma task pronta:
     Onde a afirmação puder virar **comando**, troque em vez de corrigir: um número corrigido
     envelhece de novo; um `rode isto para saber` não envelhece nunca
 
+17. **Se o PR muda comportamento visível a quem opera uma VPS, ele traz o seu fragmento em
+    `.changes/`** (lei em [`docs/doctrine/versionamento.md`](docs/doctrine/versionamento.md)).
+    O fragmento declara **o efeito no operador** — `nada_mudou` / `capacidade_nova` /
+    `exige_acao` —, nunca o número: o número é calculado a partir do conjunto, e é por isso
+    que duas sessões paralelas não colidem mais. Confira com `pnpm release:conferir`.
+    O CI valida a FORMA de todo fragmento, mas **não** cobra a presença de um — cobrar
+    presença num check obrigatório reprovaria PR de Dependabot, PR de fork, e o próprio PR
+    de release, que consome os fragmentos e deixa o diretório vazio. A presença é cobrada
+    aqui, e por quem revisa.
+
 Um staff engineer aprovaria? Se não, itera.

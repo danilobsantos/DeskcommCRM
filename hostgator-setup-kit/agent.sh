@@ -157,7 +157,17 @@ if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$CURRENT" ]; then
   # HEARTBEAT INTEIRO morreria com 422 — sem short-circuit, isso morre calado.
   # 30000 cru garante ≤60000 escapado mesmo no pior caso (100% do texto
   # escapando 2x), com folga sobre o teto de 64000.
-  CHANGELOG="$(git show "${LATEST_TAG}:CHANGELOG.md" 2>/dev/null | head -c 30000 || true)"
+  # O corte deixou de ser cego. O `awk` para de imprimir AO IMPRIMIR o cabeçalho
+  # da versão instalada — e o cabeçalho entra de propósito: é ele que prova ao
+  # app que a faixa está completa. Isso encolhe o payload no caso comum (uma ou
+  # duas versões de salto) em vez de subir o teto, que mataria o heartbeat
+  # inteiro com 422, calado. O `head -c 30000` continua depois, como teto para o
+  # salto grande. `index()` e não regex: o rótulo tem `[` e `]`, e escapar isso
+  # em awk é onde se erra. Instalação fora de release (CURRENT é um SHA) nunca
+  # casa, cai no arquivo inteiro cortado, e o app declara que não alcançou.
+  # MANTENHA numa linha física só: tests/unit/changelog-cabe-na-tela-da-vps.test.ts
+  # lê o teto daqui por regex de linha única e EXPLODE se ela for quebrada.
+  CHANGELOG="$(git show "${LATEST_TAG}:CHANGELOG.md" 2>/dev/null | awk -v cur="## [${CURRENT#v}]" 'index($0, cur) == 1 { print; exit } { print }' | head -c 30000 || true)"
   # `head -c` corta em byte fixo, e o CHANGELOG tem emoji/acento multi-byte
   # (UTF-8) — um corte no meio de um caractere quebraria o JSON de um jeito
   # difícil de rastrear. `iconv -c` descarta o byte incompleto do final sem
