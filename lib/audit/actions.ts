@@ -338,6 +338,8 @@ export const AUDIT_ACTIONS = [
   "retention.sweep_run",
 
   // ── Agendamento de consultas (migration 0176) ──────────────────────────
+  "provider.created",
+  "provider.updated",
   "appointment.created",
   "appointment.updated",
   "appointment.cancelled",
