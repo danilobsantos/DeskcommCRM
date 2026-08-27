@@ -22,6 +22,7 @@ export function ThemeToggle() {
       size="icon"
       onClick={cycle}
       aria-label={`Tema: ${theme}. Cmd+Shift+L para alternar.`}
+      suppressHydrationWarning
     >
       <Icon size={16} aria-hidden />
     </Button>
