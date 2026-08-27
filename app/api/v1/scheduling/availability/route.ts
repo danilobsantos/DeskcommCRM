@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 import { ApiError } from "@/lib/api/types";
 import { ok, fail } from "@/lib/api/wrappers";
-import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { requireRole } from "@/lib/auth/require-role";
 import { availabilityQuerySchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { getAvailabilityHandler } from "../_handler";
@@ -11,13 +11,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-  const supabase = await createClient();
-
-  const { data: { user }, error: authErr } = await supabase.auth.getUser();
-  if (authErr || !user) return fail("unauthenticated", "Auth required.", 401, { requestId });
-
-  const authUser = await loadAuthUser();
-  const orgId = authUser ? (await resolveActiveOrg(authUser))?.orgId : undefined;
+  const authz = await requireRole("agent", { requestId, resource: "scheduling" });
+  if (!authz.ok) return authz.response;
 
   const url = new URL(req.url);
   const qsParsed = availabilityQuerySchema.safeParse({
@@ -32,12 +27,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     });
   }
 
+  const supabase = await createClient();
+
   try {
     const result = await getAvailabilityHandler(
       supabase,
       {
-        organization_id: orgId ?? "",
-        actor: { type: "user", id: user.id },
+        organization_id: authz.org.orgId,
+        actor: { type: "user", id: authz.user.id },
         requestId,
       },
       qsParsed.data,

@@ -2,10 +2,11 @@ import { ProviderScheduleClient } from "./_client";
 
 export const dynamic = "force-dynamic";
 
-export default function ProviderSchedulePage({
+export default async function ProviderSchedulePage({
   params,
 }: {
-  params: { providerId: string };
+  params: Promise<{ providerId: string }>;
 }) {
-  return <ProviderScheduleClient providerId={params.providerId} />;
+  const { providerId } = await params;
+  return <ProviderScheduleClient providerId={providerId} />;
 }

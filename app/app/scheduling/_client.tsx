@@ -27,10 +27,14 @@ export function SchedulingListClient() {
       if (search) params.set("specialty", search);
 
       const res = await fetch(`/api/v1/scheduling/providers?${params}`);
-      if (!res.ok) throw new Error("Erro ao carregar profissionais");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error?.message ?? "Erro ao carregar profissionais");
+      }
 
       const data = await res.json();
-      setProviders(data.data?.providers ?? []);
+      const list = Array.isArray(data.data) ? data.data : (data.data?.providers ?? []);
+      setProviders(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {

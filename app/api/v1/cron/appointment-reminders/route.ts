@@ -5,7 +5,7 @@
  * com consultas pendentes no dia:
  * 1. Busca consultas com status 'scheduled' e reminder_sent=false
  * 2. Para cada uma, monta mensagem de lembrete
- * 3. Envia via WAHA (se disponível)
+ * 3. Envia via canal ativo da organização (se disponível)
  * 4. Marca reminder_sent=true
  *
  * Auth: Bearer INTERNAL_CRON_SECRET|INTERNAL_SECRET (mesmo padrão dos crons).
@@ -17,7 +17,13 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getWahaClient } from "@/lib/waha/client";
+import {
+  getAdapter,
+  resolveSessionRef,
+  CHANNEL_SESSION_REF_COLUMNS,
+  type ChannelSessionRef,
+  type ChannelProvider,
+} from "@/lib/channels";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +36,6 @@ interface AppointmentReminder {
   reason: string | null;
   providers: { name: string }[] | { name: string } | null;
   contacts: { name: string | null; phone_number: string | null; wa_lid: string | null }[] | { name: string | null; phone_number: string | null; wa_lid: string | null } | null;
-}
-
-interface ChannelSession {
-  id: string;
-  waha_session_name: string | null;
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
@@ -77,7 +78,6 @@ export async function GET(req: NextRequest): Promise<Response> {
     return ok({ sent: 0, message: "No pending reminders for today." }, { requestId });
   }
 
-  const waha = getWahaClient();
   let sent = 0;
   let failed = 0;
 
@@ -90,16 +90,15 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   for (const [orgId, orgAppointments] of byOrg) {
-    // Buscar sessão WAHA da organização
+    // Buscar sessão de canal ativa da organização
     const { data: sessions } = await supabase
       .from("channel_sessions")
-      .select("waha_session_name")
+      .select(`id, status, ${CHANNEL_SESSION_REF_COLUMNS}`)
       .eq("organization_id", orgId)
       .eq("status", "connected")
       .limit(1);
 
-    const session = (sessions as ChannelSession[] | null)?.[0];
-    const sessionName = session?.waha_session_name;
+    const session = sessions?.[0] as (ChannelSessionRef & { id: string; status: string }) | undefined;
 
     // Buscar timezone da organização
     const { data: org } = await supabase
@@ -109,6 +108,17 @@ export async function GET(req: NextRequest): Promise<Response> {
       .maybeSingle();
 
     const tz = org?.timezone ?? "America/Sao_Paulo";
+
+    let adapter = null;
+    let sessionRef: string | null = null;
+    if (session) {
+      try {
+        adapter = getAdapter(session.provider as ChannelProvider);
+        sessionRef = resolveSessionRef(session);
+      } catch {
+        adapter = null;
+      }
+    }
 
     for (const appt of orgAppointments) {
       const providerName = (appt.providers as unknown as { name: string })?.name ?? "profissional";
@@ -135,20 +145,34 @@ export async function GET(req: NextRequest): Promise<Response> {
         `${providerName} marcada para ${timeStr}. ${reasonText}` +
         `Pode confirmar sua presença? Responda "sim" para confirmar.`;
 
-      // Tentar enviar via WAHA
-      if (waha && sessionName && (contactLid || contactPhone)) {
-        const chatId = contactLid
-          ? `${contactLid}@lid`
-          : `${contactPhone!.replace(/\D/g, "")}@c.us`;
+      // Enviar via adapter do canal
+      if (adapter && sessionRef && adapter.isConfigured()) {
+        const recipient = adapter.resolveRecipient({
+          isGroup: false,
+          groupChatId: null,
+          phoneNumber: contactPhone,
+          waIdentity: null,
+          waLid: contactLid,
+        });
 
-        try {
-          await waha.sendMessage(sessionName, chatId, message);
+        if (recipient) {
+          try {
+            await adapter.send({
+              organizationId: orgId,
+              sessionRef,
+              to: recipient,
+              kind: "text",
+              body: message,
+            });
+            sent++;
+          } catch {
+            failed++;
+          }
+        } else {
           sent++;
-        } catch {
-          failed++;
         }
       } else {
-        // Sem WAHA configurado — marcar como enviado (noop seguro)
+        // Sem canal configurado — marcar como enviado (noop seguro)
         sent++;
       }
 

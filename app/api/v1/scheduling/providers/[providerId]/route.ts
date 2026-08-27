@@ -3,7 +3,6 @@ import { type NextRequest } from "next/server";
 import { ApiError } from "@/lib/api/types";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
-import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { validateRequest, providerUpdateSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { getProviderHandler, updateProviderHandler } from "../../_handler";
@@ -15,21 +14,18 @@ export async function GET(
   { params }: { params: Promise<{ providerId: string }> },
 ): Promise<Response> {
   const requestId = randomUUID();
+  const authz = await requireRole("agent", { requestId, resource: "scheduling" });
+  if (!authz.ok) return authz.response;
+
   const { providerId } = await params;
   const supabase = await createClient();
-
-  const { data: { user }, error: authErr } = await supabase.auth.getUser();
-  if (authErr || !user) return fail("unauthenticated", "Auth required.", 401, { requestId });
-
-  const authUser = await loadAuthUser();
-  const orgId = authUser ? (await resolveActiveOrg(authUser))?.orgId : undefined;
 
   try {
     const provider = await getProviderHandler(
       supabase,
       {
-        organization_id: orgId ?? "",
-        actor: { type: "user", id: user.id },
+        organization_id: authz.org.orgId,
+        actor: { type: "user", id: authz.user.id },
         requestId,
       },
       providerId,

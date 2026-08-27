@@ -144,7 +144,7 @@ export async function listSchedulesHandler(
     .select("*")
     .eq("organization_id", ctx.organization_id)
     .eq("provider_id", providerId)
-    .order("dow")
+    .order("day_of_week")
     .order("start_time");
 
   if (error) throw new ApiError(500, "database_error", undefined, ctx.requestId, error.message);
@@ -182,10 +182,10 @@ export async function upsertSchedulesBulkHandler(
   const rows = input.schedules.map((s) => ({
     organization_id: ctx.organization_id,
     provider_id: input.provider_id,
-    dow: s.dow,
+    day_of_week: s.dow,
     start_time: s.start_time,
     end_time: s.end_time,
-    slot_minutes: s.slot_minutes,
+    slot_duration_minutes: s.slot_minutes,
   }));
 
   const { data, error } = await supabase
@@ -436,10 +436,10 @@ export async function getAvailabilityHandler(
 
   const { data: schedules } = await supabase
     .from("provider_schedules")
-    .select("start_time, end_time, slot_minutes")
+    .select("start_time, end_time, slot_duration_minutes")
     .eq("organization_id", ctx.organization_id)
     .eq("provider_id", query.provider_id)
-    .eq("dow", dow);
+    .eq("day_of_week", dow);
 
   if (!schedules || schedules.length === 0) {
     return { slots: [], message: "Sem agenda neste dia." };
@@ -470,7 +470,7 @@ export async function getAvailabilityHandler(
       dayOfWeek: dow,
       startTime: s.start_time,
       endTime: s.end_time,
-      slotDurationMinutes: s.slot_minutes,
+      slotDurationMinutes: s.slot_duration_minutes,
       active: true,
     };
     return computeAvailableSlots(window, booked, dow);

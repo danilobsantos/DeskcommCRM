@@ -173,3 +173,6 @@ drop trigger if exists trg_appointments_updated_at on public.appointments;
 create trigger trg_appointments_updated_at
   before update on public.appointments
   for each row execute function public.fn_set_updated_at();
+
+notify pgrst, 'reload schema';
+

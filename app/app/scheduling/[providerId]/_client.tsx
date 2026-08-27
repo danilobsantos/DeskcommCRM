@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Clock, ArrowBendUpLeft } from "@/lib/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -74,17 +74,19 @@ export function ProviderScheduleClient({ providerId }: { providerId: string }) {
 
       if (providerRes.ok) {
         const data = await providerRes.json();
-        setProvider(data.data?.provider ?? null);
+        setProvider(data.data?.provider ?? data.data ?? null);
       }
 
       if (appointmentsRes.ok) {
         const data = await appointmentsRes.json();
-        setAppointments(data.data?.appointments ?? []);
+        const list = Array.isArray(data.data) ? data.data : (data.data?.appointments ?? []);
+        setAppointments(list);
       }
 
       if (schedulesRes.ok) {
         const data = await schedulesRes.json();
-        setSchedules(data.data?.schedules ?? []);
+        const list = Array.isArray(data.data) ? data.data : (data.data?.schedules ?? []);
+        setSchedules(list);
       }
     } catch {
       // Errors handled silently — UI degrades gracefully
@@ -376,7 +378,7 @@ function WeekView({
             );
           })}
           {hours.map((hour) => (
-            <>
+            <Fragment key={`hour-row-${hour}`}>
               <div key={`h-${hour}`} className="bg-background p-2 text-xs text-muted-foreground text-right">
                 {String(hour).padStart(2, "0")}:00
               </div>
@@ -400,7 +402,7 @@ function WeekView({
                   </div>
                 );
               })}
-            </>
+            </Fragment>
           ))}
         </div>
       </div>

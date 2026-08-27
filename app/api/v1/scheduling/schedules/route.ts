@@ -3,9 +3,9 @@ import { type NextRequest } from "next/server";
 import { ApiError } from "@/lib/api/types";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
-import { validateRequest, appointmentCreateSchema, appointmentListQuerySchema } from "@/lib/schemas";
+import { validateRequest, scheduleBulkSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
-import { listAppointmentsHandler, createAppointmentHandler } from "../_handler";
+import { listSchedulesHandler, upsertSchedulesBulkHandler } from "../_handler";
 
 export const dynamic = "force-dynamic";
 
@@ -15,19 +15,10 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!authz.ok) return authz.response;
 
   const url = new URL(req.url);
-  const qsParsed = appointmentListQuerySchema.safeParse({
-    provider_id: url.searchParams.get("provider_id") ?? undefined,
-    contact_id: url.searchParams.get("contact_id") ?? undefined,
-    status: url.searchParams.get("status") ?? undefined,
-    date_from: url.searchParams.get("date_from") ?? undefined,
-    date_to: url.searchParams.get("date_to") ?? undefined,
-    cursor: url.searchParams.get("cursor") ?? undefined,
-    limit: url.searchParams.get("limit") ?? undefined,
-  });
+  const providerId = url.searchParams.get("provider_id");
 
-  if (!qsParsed.success) {
-    return fail("validation_failed", "Query inválida.", 422, {
-      details: qsParsed.error.flatten().fieldErrors,
+  if (!providerId) {
+    return fail("validation_failed", "Parâmetro provider_id é obrigatório.", 422, {
       requestId,
     });
   }
@@ -35,34 +26,30 @@ export async function GET(req: NextRequest): Promise<Response> {
   const supabase = await createClient();
 
   try {
-    const result = await listAppointmentsHandler(
+    const schedules = await listSchedulesHandler(
       supabase,
       {
         organization_id: authz.org.orgId,
         actor: { type: "user", id: authz.user.id },
         requestId,
       },
-      qsParsed.data,
+      providerId,
     );
-    return ok(result.appointments, {
-      requestId,
-      meta: { cursor: result.cursor, has_more: result.has_more },
-    });
+    return ok(schedules, { requestId });
   } catch (err) {
     if (err instanceof ApiError) return fail(err.code, err.message, err.status, { requestId });
     throw err;
   }
 }
 
-export async function POST(req: NextRequest): Promise<Response> {
+export async function PUT(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-
   const authz = await requireRole("agent", { requestId, resource: "scheduling" });
   if (!authz.ok) return authz.response;
 
   let input;
   try {
-    input = await validateRequest(appointmentCreateSchema, req);
+    input = await validateRequest(scheduleBulkSchema, req);
   } catch (err) {
     if (err instanceof ApiError) {
       return fail(err.code, err.message, err.status, {
@@ -74,7 +61,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const result = await createAppointmentHandler(
+    const result = await upsertSchedulesBulkHandler(
       await createClient(),
       {
         organization_id: authz.org.orgId,
@@ -83,7 +70,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       },
       input,
     );
-    return ok(result, { status: 201, requestId });
+    return ok(result, { requestId });
   } catch (err) {
     if (err instanceof ApiError) return fail(err.code, err.message, err.status, { requestId });
     throw err;
