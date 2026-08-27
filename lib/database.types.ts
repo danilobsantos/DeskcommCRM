@@ -5891,6 +5891,153 @@ export type Database = {
           },
         ]
       }
+      appointments: {
+        Row: {
+          contact_id: string
+          created_at: string
+          end_time: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          provider_id: string
+          reason: string | null
+          reminder_sent: boolean
+          start_time: string
+          status: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          end_time?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          provider_id: string
+          reason?: string | null
+          reminder_sent?: boolean
+          start_time: string
+          status?: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          end_time?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          provider_id?: string
+          reason?: string | null
+          reminder_sent?: boolean
+          start_time?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointments_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      provider_schedules: {
+        Row: {
+          created_at: string
+          dow: number
+          end_time: string
+          id: string
+          organization_id: string
+          provider_id: string
+          slot_minutes: number
+          start_time: string
+        }
+        Insert: {
+          created_at?: string
+          dow: number
+          end_time: string
+          id?: string
+          organization_id: string
+          provider_id: string
+          slot_minutes?: number
+          start_time: string
+        }
+        Update: {
+          created_at?: string
+          dow?: number
+          end_time?: string
+          id?: string
+          organization_id?: string
+          provider_id?: string
+          slot_minutes?: number
+          start_time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_schedules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "provider_schedules_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      providers: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          name: string
+          organization_id: string
+          specialties: string[]
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name: string
+          organization_id: string
+          specialties?: string[]
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          specialties?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "providers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       ai_provider_credentials_safe: {
