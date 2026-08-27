@@ -41,6 +41,7 @@ services:
       WHATSAPP_DEFAULT_ENGINE: NOWEB
       # Storage de mídia: Supabase Storage via Backend (NÃO inline base64).
       WAHA_DASHBOARD_ENABLED: "true"
+      WAHA_DASHBOARD_PASSWORD: "${WAHA_DASHBOARD_PASSWORD:-}"
       # Sem isto o container volta (ou o Docker Desktop acorda) e as sessões
       # ficam STOPPED — o front abre em "Conectando…" e as mensagens do período
       # fora não chegam. True retoma as que já existiam; não pede QR de novo.
@@ -74,6 +75,9 @@ services:
       # dentro do container, localhost é o próprio worker — o WAHA está na rede
       # do compose (serviço waha, porta interna 3000). Sobrepõe o .env.local.
       WAHA_API_BASE_URL: http://waha:3000
+      # Postgres local (supabase start) escuta no host — 127.0.0.1 dentro do
+      # container é o próprio worker. host.docker.internal resolve pro host.
+      SUPABASE_DB_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
     ports:
       - "8787:8787"
     healthcheck:
