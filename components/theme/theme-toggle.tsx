@@ -20,7 +20,13 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <Button variant="ghost" size="icon" disabled aria-label="Tema: system">
+      <Button
+        variant="ghost"
+        size="icon"
+        disabled
+        aria-label="Tema: system"
+        suppressHydrationWarning
+      >
         <Sun size={16} aria-hidden />
       </Button>
     );
@@ -34,6 +40,7 @@ export function ThemeToggle() {
       size="icon"
       onClick={cycle}
       aria-label={`Tema: ${theme}. Cmd+Shift+L para alternar.`}
+      suppressHydrationWarning
     >
       <Icon size={16} aria-hidden />
     </Button>
