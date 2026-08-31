@@ -27,10 +27,12 @@
     "test:shell": "bash tests/shell/update-guard.test.sh && bash tests/shell/dono-do-projeto.test.sh && bash tests/shell/scheduler-entrypoint.test.sh && bash hostgator-setup-kit/test-validators.sh",
     "test:invariants": "bash scripts/test-db.sh",
     "lint:channels": "tsx scripts/lint-channels.ts",
+    "lint:role-rank": "tsx scripts/lint-role-rank.ts",
     "release:conferir": "tsx scripts/cortar-release.ts",
     "release:cortar": "tsx scripts/cortar-release.ts --escrever",
-    "gov:verify": "pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm test:unit",
+    "gov:verify": "pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm lint:role-rank && pnpm test:unit",
     "worker": "tsx --env-file=.env --env-file=.env.local workers/agent-worker/main.ts",
+    "dev:crons": "tsx --env-file=.env --env-file=.env.local scripts/dev-crons.ts",
     "flywheel:judge": "tsx --env-file=.env --env-file=.env.local scripts/flywheel-judge-live.ts"
   },
   "dependencies": {
@@ -87,6 +89,7 @@
     "resend": "^6.20.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -101,6 +104,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "@types/web-push": "^3.6.4",
     "@vercel/config": "^0.6.1",
     "@vitest/coverage-v8": "^4.1.11",
     "autoprefixer": "^10.5.4",

@@ -48,6 +48,10 @@ export const actionSchema = z.discriminatedUnion("type", [
       secret_enc: z.string().max(4000).optional(),
     }),
   }),
+  z.object({
+    type: z.literal("start_message_flow"),
+    config: z.object({ flow_pointer_id: z.string().uuid() }),
+  }),
 ]);
 
 export const createWebhookSourceSchema = z.object({

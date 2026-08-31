@@ -31,6 +31,20 @@ export const ApiErrorCodes = {
   // 404
   not_found: "not_found",
 
+  // ⚠️ AGENDA — declarados AQUI, e não no `fail()`, porque `fail()` NÃO protege.
+  //
+  // A assinatura é `code: ApiErrorCode | (string & {})`, e o segundo ramo aceita
+  // qualquer string: um `"slot_taken"` inventado no call site vira contrato de
+  // wire sem passar por lista nenhuma, e o consumidor do outro lado nunca sabe
+  // que ele existe. Quem confia que a união protege está lendo o arquivo errado.
+  agenda_horario_indisponivel: "agenda_horario_indisponivel",
+  agenda_fora_da_jornada: "agenda_fora_da_jornada",
+  agenda_tipo_desativado: "agenda_tipo_desativado",
+  agenda_sem_responsavel: "agenda_sem_responsavel",
+  agenda_disponibilidade_invalida: "agenda_disponibilidade_invalida",
+  agenda_ja_cancelado: "agenda_ja_cancelado",
+  agenda_listagem_sem_recorte: "agenda_listagem_sem_recorte",
+
   // 409 — conflito
   idempotency_conflict: "idempotency_conflict",
   state_conflict: "state_conflict",

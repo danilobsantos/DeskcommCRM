@@ -30,12 +30,15 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
+import { camposDoFunil, settingsDoEmbed } from "@/lib/leads/campos-do-funil";
 import { createClient } from "@/lib/supabase/server";
 import { nomesDosAtendentes } from "@/lib/users/nome-do-atendente";
 
 export const dynamic = "force-dynamic";
 
-const LEAD_COLS = "id, title, status, value_cents, currency, updated_at";
+/** Sem o embed do funil o painel não consegue montar os campos customizados. */
+const LEAD_COLS =
+  "id, title, status, value_cents, currency, updated_at, pipeline_id, custom_fields, crm_pipelines(settings)";
 const ORDER_COLS = "id, external_id, status, total_cents, currency, created_at";
 /** Acompanha o que a timeline mostra — `reason` e `actor_kind` inclusive. */
 /**
@@ -133,7 +136,7 @@ export async function GET(
 
   return ok(
     {
-      leads: leads.data ?? [],
+      leads: (leads.data ?? []).map((row) => comCamposDoFunil(row as Record<string, unknown>)),
       orders: orders.data ?? [],
       activities: linhas.map((a) => ({
         ...a,
@@ -145,4 +148,12 @@ export async function GET(
     },
     { requestId },
   );
+}
+
+function comCamposDoFunil(row: Record<string, unknown>) {
+  const { crm_pipelines, ...lead } = row;
+  return {
+    ...lead,
+    field_defs: camposDoFunil(settingsDoEmbed(crm_pipelines)),
+  };
 }

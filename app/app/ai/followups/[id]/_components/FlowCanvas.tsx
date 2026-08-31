@@ -37,6 +37,7 @@ import {
 } from "@/lib/followup/graph-schema";
 import { rotuloDoRamo } from "@/lib/followup/rotulo-do-ramo";
 import { useFollowupFlow, type FollowupFlowDetailRow } from "@/hooks/followup/useFollowupFlow";
+import { useT } from "@/hooks/i18n/useT";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Plus, X } from "@/lib/ui/icons";
@@ -49,6 +50,8 @@ import { TriggerNode } from "./nodes/TriggerNode";
 import { WaitNode } from "./nodes/WaitNode";
 import { ConditionNode } from "./nodes/ConditionNode";
 import { ClassifyNode } from "./nodes/ClassifyNode";
+import { MatchReplyNode } from "./nodes/MatchReplyNode";
+import { RepeatNode } from "./nodes/RepeatNode";
 import { ActionNode } from "./nodes/ActionNode";
 import { EndNode } from "./nodes/EndNode";
 
@@ -62,6 +65,8 @@ const nodeTypes: NodeTypes = {
   wait: WaitNode,
   condition: ConditionNode,
   ai_classify: ClassifyNode,
+  match_reply: MatchReplyNode,
+  repeat: RepeatNode,
   action: ActionNode,
   end: EndNode,
 };
@@ -72,6 +77,7 @@ interface Props {
 }
 
 function FlowCanvasInner({ flowId, initialData }: Props) {
+  const t = useT();
   const { data: flow } = useFollowupFlow(flowId, { initialData });
   // `initial` seeds React Flow state ONCE on mount — it must NOT react to
   // `flow` changing on every refetch (that would clobber in-progress edits).
@@ -154,11 +160,11 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
           : undefined;
         return {
           ...e,
-          label: branch ? rotuloDoRamo(branch) : conditionLabel(condition),
+          label: branch ? t(rotuloDoRamo(branch)) : t(conditionLabel(condition)),
           selected: e.id === selectedEdgeId,
         };
       }),
-    [edges, nodes, selectedEdgeId],
+    [edges, nodes, selectedEdgeId, t],
   );
 
   // Quais saídas do nó selecionado já têm aresta. Quem sabe isso é o canvas —
@@ -205,11 +211,11 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
         id,
         type,
         position,
-        data: { label: visual.defaultLabel, config: visual.defaultConfig() },
+        data: { label: t(visual.defaultLabel), config: visual.defaultConfig() },
       };
       setNodes((nds) => nds.concat(newNode));
     },
-    [setNodes],
+    [setNodes, t],
   );
 
   const onPaletteAdd = useCallback(
@@ -255,7 +261,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
             vira um drawer, disparado por este botão flutuante. */}
         <Sheet open={paletteOpen} onOpenChange={setPaletteOpen}>
           <SheetContent side="left" className="w-72 max-w-[85vw] gap-0 p-0 lg:hidden">
-            <SheetTitle className="sr-only">Adicionar nó</SheetTitle>
+            <SheetTitle className="sr-only">{t("Adicionar nó")}</SheetTitle>
             <NodePalette
               variant="mobile"
               onAdd={(type) => {
@@ -289,7 +295,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
             className="absolute bottom-4 left-4 z-10 shadow-md lg:hidden"
             onClick={() => setPaletteOpen(true)}
           >
-            <Plus size={14} aria-hidden /> Adicionar nó
+            <Plus size={14} aria-hidden /> {t("Adicionar nó")}
           </Button>
         </div>
 
@@ -316,7 +322,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
                 variant="ghost"
                 size="icon"
                 onClick={() => setSelectedNodeId(null)}
-                aria-label="Fechar"
+                aria-label={t("Fechar")}
               >
                 <X size={16} aria-hidden />
               </Button>
@@ -343,7 +349,7 @@ function FlowCanvasInner({ flowId, initialData }: Props) {
                 variant="ghost"
                 size="icon"
                 onClick={() => setSelectedEdgeId(null)}
-                aria-label="Fechar"
+                aria-label={t("Fechar")}
               >
                 <X size={16} aria-hidden />
               </Button>

@@ -82,6 +82,21 @@ describe("a tag nasce no CI, e nunca do GITHUB_TOKEN", () => {
     expect(t).toMatch(/::error::/);
   });
 
+  it("a tag exige que o push tenha CONSUMIDO fragmentos, não só que haja versão nova no CHANGELOG", () => {
+    // Só a condição "o CHANGELOG anuncia versão sem tag" deixaria QUALQUER PR
+    // cortar a release: bastaria escrever `## [1.7.0]` à mão e a tag nasceria
+    // no merge dele, levando junto as três imagens e o canal `stable`.
+    // Medido em 2026-08-27: o PR #354 já trazia uma seção de versão escrita à
+    // mão. A segunda condição é a assinatura do corte — havia `.changes/*.md`
+    // antes e não há depois — e um PR comum não a produz: ele ACRESCENTA
+    // fragmento, nunca esvazia o diretório.
+    const t = job(release, "cortar-tag");
+    expect(t).toMatch(/git ls-tree[^\n]*HEAD\^[^\n]*\.changes\//);
+    expect(t).toMatch(/git ls-tree[^\n]*HEAD[^\n]*\.changes\//);
+    // O ramo que RECUSA precisa existir e cobrir os dois lados da assinatura.
+    expect(t).toMatch(/antes[^\n]*-eq 0[^\n]*depois[^\n]*-ne 0/);
+  });
+
   it("a tag só é criada em push na main, nunca num dispatch de branch qualquer", () => {
     expect(job(release, "cortar-tag")).toMatch(/if:\s*github\.event_name == 'push'/);
     expect(release).toMatch(/push:\s*\n\s*branches:\s*\[main\]/);

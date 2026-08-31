@@ -43,6 +43,7 @@ export {
   ArrowBendUpLeft,
   List,
   Bell,
+  BellSlash,
   PaperPlaneTilt,
   Smiley,
   Check,
@@ -122,4 +123,13 @@ export {
   ClockCounterClockwise,
   // inbox no celular: voltar para a lista e abrir a ficha do contato
   IdentificationCard,
+  // agenda (o barril não tinha NENHUM ícone de calendário até aqui)
+  CalendarBlank,
+  CalendarDots,
+  CalendarPlus,
+  CalendarX,
+  CalendarCheck,
+  GoogleLogo,
+  MapPin,
+  ArrowsOutSimple,
 } from "@phosphor-icons/react/dist/ssr";

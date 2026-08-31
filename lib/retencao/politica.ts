@@ -48,6 +48,28 @@ export const RETENCAO_AUDITORIA_DIAS_PISO = 90;
  * é de meses atrás), mas também não é rastro legal de 5 anos. Um ano fiscal
  * inteiro, a ~1 kB por formulário: 300 leads/dia dão ~110 MB.
  */
+/**
+ * Quantos dias de PASSADO o espelho da agenda conectada guarda.
+ *
+ * `calendar_external_events` é cache do que o Google já tem: reconstruível pelo
+ * sync, apagado em cascata quando a conexão sai. Sem prazo, "espelho" vira só um
+ * nome mais simpático para um arquivo permanente de compromissos de terceiros —
+ * guardado por um produto que declarou não ser o controlador daquele dado.
+ *
+ * O corte é por `ends_at`, nunca por `created_at`: compromisso futuro não
+ * envelhece, e apagá-lo faria a agenda marcar em cima de hora ocupada.
+ */
+export const RETENCAO_ESPELHO_AGENDA_DIAS_PADRAO = 90;
+
+/**
+ * Piso BAIXO de propósito, ao contrário do da auditoria.
+ *
+ * 90 dias de piso existem lá para o knob não virar apagador de rastro depois de
+ * um incidente. Aqui é cache: quem quiser mais passado pede ao sync, que repõe.
+ * Piso alto não protegeria ninguém — só guardaria mais tempo dado de terceiro.
+ */
+export const RETENCAO_ESPELHO_AGENDA_DIAS_PISO = 7;
+
 export const RETENCAO_CAPTACAO_DIAS_PADRAO = 365;
 /**
  * Piso da captação: o knob nunca vira apagador de ORIGEM.

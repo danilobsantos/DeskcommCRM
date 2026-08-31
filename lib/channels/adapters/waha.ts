@@ -9,7 +9,10 @@ import { wahaContactPayload } from "@/lib/waha/contact-card";
 import { fetchWahaMedia } from "@/lib/messaging/media/waha-source";
 import { getWahaClient } from "@/lib/waha/client";
 import { wahaSendPlanFor } from "@/lib/waha/media-send";
-import { resolveWhatsappIdForContactCard } from "@/lib/waha/resolve-contact-whatsapp-id";
+import {
+  resolveCanonicalCusChatId,
+  resolveWhatsappIdForContactCard,
+} from "@/lib/waha/resolve-contact-whatsapp-id";
 import { bareWaMessageId, parseWahaMessageId } from "@/lib/waha/message-id";
 import { resolveWahaChatId } from "@/lib/waha/send";
 import type { FetchedMedia } from "@/lib/messaging/media/types";
@@ -175,6 +178,8 @@ export const wahaAdapter: ChannelAdapter = {
     // comportamento visível — proibido nas Fases 0–2.
     if (!client) return { externalId: null };
 
+    const to = await resolveCanonicalCusChatId(client, envelope.sessionRef, envelope.to);
+
     // A estrutura de três caminhos é do upstream (o cartão de contato entrou
     // depois da citação). O que se enxerta aqui é o `replyToExternalId` no
     // caminho de TEXTO — os outros dois não citam: o WAHA aceita `reply_to` só
@@ -192,17 +197,17 @@ export const wahaAdapter: ChannelAdapter = {
         envelope.contact.phoneNumber,
         resolvedId ?? envelope.contact.whatsappId,
       );
-      res = await client.sendContactVcard(envelope.sessionRef, envelope.to, [contact]);
+      res = await client.sendContactVcard(envelope.sessionRef, to, [contact]);
     } else if (envelope.media) {
       res = await client.sendMedia(
         envelope.sessionRef,
-        envelope.to,
+        to,
         wahaSendPlanFor(envelope.kind, envelope.media),
       );
     } else {
       res = await client.sendMessage(
         envelope.sessionRef,
-        envelope.to,
+        to,
         envelope.body ?? "",
         // A citação é enfeite da conversa, nunca condição de envio: quando não
         // há, o envio segue igual. Ver `OutboundEnvelope.replyToExternalId`.

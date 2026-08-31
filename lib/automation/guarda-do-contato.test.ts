@@ -118,4 +118,43 @@ describe("checarGuardasDeContato", () => {
     const r = checarGuardasDeContato(ctxComContato(null));
     expect(r).toEqual({ ok: false, reason: "no_contact" });
   });
+
+  /**
+   * Regressão pedida pelo dono do produto (simplificação do fluxo Respondi,
+   * 2026-08-26): a classificação inicial (`lib/leads/classificacao-inicial.ts`
+   * — score A/B/C/D, "desqualificado", "revisao_humana") NÃO É UMA GUARDA DE
+   * ENVIO. Quem decide se `send_whatsapp_message`/`send_ai_message` disparam é
+   * só telefone + consentimento, e este teste prova isso no nível estrutural:
+   * mesmo com um lead marcado "desqualificado" classe D no MESMO contexto que
+   * a ação recebe, a guarda passa — porque `checarGuardasDeContato` só lê
+   * `ctx.context.contact`, nunca `ctx.context.lead`. Sabotado (fazendo a
+   * função também olhar `ctx.context.lead.custom_fields`) este teste reprova.
+   */
+  it("lead classificado como 'desqualificado'/classe D no mesmo contexto NÃO bloqueia — a guarda só lê ctx.context.contact, nunca ctx.context.lead", () => {
+    const ctx: ActionCtx = {
+      admin: {} as ActionCtx["admin"],
+      organizationId: "org-1",
+      ruleId: "rule-1",
+      ruleName: "regra de teste",
+      event: {} as ActionCtx["event"],
+      requestId: "req-1",
+      context: {
+        contact: {
+          id: "c1",
+          phone_number: "+5511999999999",
+          consent: { marketing: { granted_at: "2026-08-25T00:00:00Z" } },
+        },
+        lead: {
+          id: "lead-1",
+          custom_fields: {
+            classificacao_inicial_status: "desqualificado",
+            classificacao_inicial_motivo: "sem_consentimento",
+            classificacao_inicial_classe: "D",
+          },
+        },
+      },
+    };
+    const r = checarGuardasDeContato(ctx);
+    expect(r).toEqual({ ok: true, contact: { id: "c1", phone_number: "+5511999999999" } });
+  });
 });

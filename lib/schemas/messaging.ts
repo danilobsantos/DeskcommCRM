@@ -167,7 +167,7 @@ export type PatchConversationInput = z.infer<typeof patchConversationSchema>;
 /** POST /conversations/open-with-contact — abrir inbox a partir de cartão de contato. */
 export const openConversationWithContactSchema = z
   .object({
-    channel_session_id: z.string().uuid(),
+    channel_session_id: z.string().uuid().optional(),
     contact_id: z.string().uuid().optional(),
     phone_number: z.string().min(8).max(32).optional(),
     name: z.string().trim().min(1).max(200).optional(),

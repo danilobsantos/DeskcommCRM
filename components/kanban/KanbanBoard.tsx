@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useMemo, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
+import { useT } from "@/hooks/i18n/useT";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBoard } from "@/hooks/kanban/useBoard";
@@ -13,6 +14,7 @@ import type { Lead } from "@/lib/types/leads";
 import type { Pipeline, Stage } from "@/lib/kanban/types";
 import { StageColumn } from "./StageColumn";
 import { LeadDossier } from "./LeadDossier";
+import { camposDoFunil } from "@/lib/leads/campos-do-funil";
 
 interface KanbanBoardProps {
   pipelineId: string;
@@ -77,6 +79,7 @@ export function KanbanBoard({
   onSelectionChange,
   leadInicial,
 }: KanbanBoardProps) {
+  const t = useT();
   const useExternal = stagesProp !== undefined && leadsProp !== undefined;
   const queryResult = useBoard(useExternal ? null : pipelineId);
   const moveCard = useMoveCard(pipelineId);
@@ -220,7 +223,7 @@ export function KanbanBoard({
   if (isError) {
     return (
       <Card className="m-4 p-6 text-sm text-text-muted">
-        Falha ao carregar o board.
+        {t("Falha ao carregar o board.")}
         {error instanceof Error ? ` ${error.message}` : null}
       </Card>
     );
@@ -233,7 +236,7 @@ export function KanbanBoard({
   if (data.stages.length === 0) {
     return (
       <Card className="m-4 p-6 text-sm text-text-muted">
-        Nenhum lead nesta pipeline ainda.
+        {t("Nenhum lead nesta pipeline ainda.")}
       </Card>
     );
   }
@@ -261,9 +264,10 @@ export function KanbanBoard({
       {leadDoDossie && (
         <LeadDossier
           open
-          onOpenChange={(v) => !v && setDossieId(null)}
+          onOpenChange={(v: boolean) => !v && setDossieId(null)}
           lead={leadDoDossie}
           pipelineId={pipelineId}
+          fieldDefs={camposDoFunil(data.pipeline.settings ?? null)}
           stageName={
             data.stages.find((s) => s.id === leadDoDossie.stage_id)?.name ?? "—"
           }

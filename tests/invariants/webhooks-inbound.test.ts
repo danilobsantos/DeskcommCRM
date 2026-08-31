@@ -44,7 +44,7 @@ function sqlLiteral(v: unknown): string {
 type QResult = { data: unknown; error: { message: string; code?: string } | null };
 type RowResult = { data: Record<string, unknown> | null; error: { message: string; code?: string } | null };
 
-type FilterOp = "eq" | "is";
+type FilterOp = "eq" | "is" | "in";
 interface Filter {
   op: FilterOp;
   col: string;
@@ -97,6 +97,11 @@ class FakeQuery implements PromiseLike<QResult> {
     return this;
   }
 
+  in(col: string, val: unknown[]): this {
+    this.filters.push({ op: "in", col, val });
+    return this;
+  }
+
   is(col: string, val: unknown): this {
     this.filters.push({ op: "is", col, val });
     return this;
@@ -115,9 +120,14 @@ class FakeQuery implements PromiseLike<QResult> {
 
   private buildWhere(): string {
     if (!this.filters.length) return "";
-    const clauses = this.filters.map((f) =>
-      f.op === "is" ? `${f.col} is ${f.val === null ? "null" : sqlLiteral(f.val)}` : `${f.col} = ${sqlLiteral(f.val)}`,
-    );
+    const clauses = this.filters.map((f) => {
+      if (f.op === "is") return `${f.col} is ${f.val === null ? "null" : sqlLiteral(f.val)}`;
+      if (f.op === "in") {
+        const list = Array.isArray(f.val) ? f.val : [];
+        return `${f.col} in (${list.map((v) => sqlLiteral(v)).join(", ")})`;
+      }
+      return `${f.col} = ${sqlLiteral(f.val)}`;
+    });
     return ` where ${clauses.join(" and ")}`;
   }
 

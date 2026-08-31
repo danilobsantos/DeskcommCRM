@@ -164,6 +164,14 @@ describe("a segunda rede: voltar para a aba", () => {
     expect(fonte).toMatch(/refetchOnWindowFocus: true/);
   });
 
+  it("useConversationsRealtime monta UMA vez na árvore do inbox — duplicar dobra refetch", () => {
+    const layout = readFileSync("components/inbox/InboxLayout.tsx", "utf8");
+    const lista = readFileSync("components/inbox/ConversationList.tsx", "utf8");
+    expect(layout.match(/useConversationsRealtime\(/g)?.length).toBe(1);
+    expect(lista).not.toMatch(/useConversationsRealtime\(/);
+    expect(lista).toMatch(/listQuery/);
+  });
+
   it("e o padrão GLOBAL segue desligado — isto é exceção, não virada de chave", () => {
     // Recarregar tudo a cada troca de aba é gasto sem retorno numa tela que
     // muda devagar. O inbox é o oposto, e só ele.

@@ -76,7 +76,7 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 >
 > O que travava a virada era o editor novo exigir `credential_id`, enquanto instalação pelo kit funciona com a chave de plataforma do `.env` e não tem nenhuma linha em `ai_provider_credentials` — o dono cairia numa tela onde não consegue salvar nada. Resolvido nas duas pontas: `versionShapeSchema` aceita `credential_id: null` (= a chave da instalação), o seletor oferece essa opção, e a rota de versões **recusa** o nulo quando o ambiente não tem chave daquele provedor (falha fechada — senão publicaria um agente que morre em toda mensagem).
 >
-> MEDIDO na tela, num tenant fresco: o funcionário criado no wizard abre no editor atual, com "Chave de acesso: A chave desta instalação (anthropic)", "12 de 20 capacidades ligadas" e "Vender e mover o funil" ativo.
+> MEDIDO na tela, num tenant fresco: o funcionário criado no wizard abre no editor atual, com "Chave de acesso: A chave desta instalação (anthropic)", o pacote "Vender e mover o funil" ativo, e a contagem de capacidades que ele traz. (O número saiu daqui: já dizia 12 quando eram 16, e o teto foi de 20 para 25. Para o valor de hoje: `pnpm exec tsx -e 'import("@/lib/ai/agents/capacidades-padrao").then(m => console.log(m.capacidadesPadraoDoOnboarding().length))'`.)
 
 ## J2 — Conectar WhatsApp e Central de Conexões `[P0]`
 
@@ -106,9 +106,9 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J3.10 | Escolher o que o agente pode fazer, por jornada de trabalho | 6 pacotes em português, com explicação e contagem — não uma lista de `crm_*` monoespaçado · **PASS** (`tests/e2e/capacidades-do-agente.spec.ts`) |
 | J3.11 | Ligar "Atender e responder" NÃO dá direito de mandar WhatsApp | a capacidade de risco crítico fica destacada, exigindo marcação individual; desligar a jornada leva ela junto · **PASS** |
 | J3.12 | Modo avançado: ficha por capacidade + nome técnico | o `name` técnico só aparece aqui; fora dele o leigo lê rótulo, o que toca e risco · **PASS** |
-| J3.13 | A escolha sobrevive ao salvar e recarregar | o servidor aceita a lista (mesmo teto de 20 da tela) e o estado volta igual · **PASS** |
+| J3.13 | A escolha sobrevive ao salvar e recarregar | o servidor aceita a lista (o mesmo teto da tela, `TETO_TOOLS_POR_AGENTE`, fonte única) e o estado volta igual · **PASS** |
 | J3.14 | Ver se o que está ligado está funcionando (aba Capacidades) | usos, falhas, quantos vieram de teste, última vez — e o que fazer com cada número · **PASS** (números escritos pelo emissor real de audit) |
-| J3.15 | Teto de 20 recusa a passagem, explicando em português | **NÃO EXERCITÁVEL HOJE**: com 16 capacidades no catálogo, ligar tudo não chega a 20. Coberto por teste unitário; vira exercitável quando as waves de capacidades entregarem |
+| J3.15 | O teto recusa a passagem, explicando em português | **PASS** — exercitável desde que o catálogo cresceu (57 capacidades). `capacidades-do-agente.spec.ts` liga "Atender" sobre as 8 do seed e prova a recusa por 1 vaga. A afirmação "não exercitável hoje, com 16 capacidades no catálogo" VENCEU |
 
 ## J4 — CRM e Pipelines `[P1]`
 
@@ -149,6 +149,7 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J4.26 | **Salvar o e-mail de um contato pela tela** | fica salvo, aparece na ficha e sobrevive ao reload. Era **500** até 2026-08-06: o handler escrevia em `email_normalized`, coluna GERADA, e o Postgres abortava o UPDATE inteiro (`contato-salva-email.spec.ts`) |
 | J4.27 | Anonimizar um contato (LGPD) | mesma causa da J4.26 na rota `/api/v1/lgpd/anonymize` — **a anonimização não acontecia**. Corrigido; guardado pelo invariante de colunas geradas, ainda **sem prova de tela** |
 | J4.25 | ⚠️ O funil de entrada de uma org nova é de **e-commerce** | `fn_seed_default_pipeline_for_org` semeia "Pedidos" com *Carrinho abandonado · Pago · Em separação…*. Numa clínica ou imobiliária, o lead nasce em **"Carrinho abandonado"**. Achado em 2026-08-06 ao provar J4.22; conserto é decisão de produto (spec 17 passo 4) |
+| J4.36 | **Editar campos do funil pela barra da conversa** | só os customizados (`settings.fields`) aparecem como inputs; título/valor ficam no dossiê. Salvar grava `custom_fields` no mesmo PATCH do quadro e a seção relê · `tests/unit/inbox-campos-lead.test.tsx` |
 
 ## J5 — Time: convites e atuação de atendentes `[P0]` (convite) / `[P1]` (rotina)
 
@@ -419,6 +420,321 @@ divide o servidor. Só aparece exercitando o produto pela tela.
 > não roda quando um caso falha). Corrigidos antes da primeira execução; o
 > resultado real entra aqui quando o CI disser.
 
+## J12 — A tela diz o que ESTA instalação consegue fazer `[P0]`
+
+**Por que P0:** é primeira impressão pura. **Nenhuma instalação nasce com o par
+VAPID** — o `.env.hostgator.example` grava as duas linhas vazias e gerar o par é
+um passo opcional que ninguém é obrigado a dar. Ou seja, o estado testado aqui é
+o estado em que 100% das instalações começam, e a tela de Notificações tem porta
+na navegação (`lib/navigation/registry.ts:470`), então qualquer pessoa chega nela
+no primeiro dia.
+
+**O defeito era de tela, e o backend estava certo o tempo todo.**
+`GET /api/v1/notifications/push` já devolvia `enabled:false` sem as chaves, e o
+`PUT` já recusava com 503 «Web Push não configurado nesta instalação». Quem nunca
+perguntou foi `app/app/settings/notifications/page.tsx`, que afirmava «In-app
+(toast) e Push (Chrome) já funcionam para as cinco categorias» de forma
+incondicional. A sequência que a pessoa vivia:
+
+1. a tela promete Push;
+2. ela liga o interruptor e o navegador pede permissão — incômodo real, cobrado dela;
+3. ela concede, e `syncPushSubscription()` faz `return` em silêncio
+   (`if (!cfg?.data?.enabled || !publicKey) return`);
+4. o interruptor fica ligado prometendo o que a instalação não entrega, e **nada
+   no produto** conta que faltam duas variáveis no `.env`, nem como consegui-las.
+
+Informação que existe no servidor e não chega a quem decide é o mesmo que
+informação ausente.
+
+**O conserto exagerado, recusado de propósito:** desabilitar o interruptor sem
+VAPID. Sem as chaves o aviso na bandeja **ainda funciona com a aba aberta** —
+é `new Notification()` em `lib/notifications/emit.ts`, que não depende de
+inscrição nenhuma. Desabilitar trocaria prometer demais por entregar de menos, e
+o segundo não deixa rastro. **J12.5** existe para impedir esse conserto (era
+J12.3, no `e2e`, até a medição mostrar que ali ela não era observável — ver
+abaixo).
+
+Spec: `tests/e2e/notificacoes-diz-o-que-falta.spec.ts` (estado SEM as chaves —
+o do `.env.e2e` e o do primeiro deploy).
+Evidência: `.superpowers/evidence/notificacoes-sem-chaves/`.
+Os DOIS estados: `tests/unit/notificacoes-tela-diz-o-que-falta.test.tsx` — o
+servidor lê `vapidPronto()` uma vez por processo, então provar o estado COM as
+chaves pela tela exigiria um segundo `next start` só para trocar duas variáveis,
+num job que já leva meia hora.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J12.1 | Sem VAPID, a tela não fica muda | aviso `push-status-faltando-chaves` visível, e o de «pronto» ausente | PASS |
+| J12.2 | Ela diz o que FAZER, não só o que falta | o comando `npx web-push generate-vapid-keys` e as duas chaves, nominalmente | PASS |
+| J12.3 | O controle de Push não some, e a tela diz por que está travado | interruptor visível + «o navegador bloqueou as notificações» | PASS |
+| J12.5 | VAPID ausente NÃO desabilita o Push | com `granted` e sem chaves, nasce habilitado | PASS (unit) |
+| J12.4 | Com VAPID, anuncia a aba fechada | e para de mandar gerar o par que já existe | PASS (unit) |
+
+**Por que J12.5 não é `e2e`, medido e não suposto.** Ela nasceu como asserção
+`toBeEnabled()` na spec, e não podia viver lá. Medido no Chromium do Playwright,
+contra um servidor HTTP local:
+
+    baseline headless                              -> denied
+    grantPermissions(["notifications"]) sem origin -> denied
+    grant com origin explícito                     -> denied
+    headless:false + grant                         -> granted
+
+`Notification.permission` é **`denied` em headless, sempre**, e o CI roda
+headless. Como `_client.tsx` desabilita por `denied || unsupported`, o controle
+está travado ali por um motivo que nada tem a ver com VAPID — e nenhuma
+permissão concedida muda isso. A asserção passou uma vez só porque ganhava a
+corrida contra a hidratação; fechada a janela (`useSyncExternalStore` no hook),
+ela passaria a falhar sempre, e com razão.
+
+**NÃO COBERTO, declarado:** a notificação chegando na bandeja do sistema com a
+aba fechada. Depende do serviço de push do navegador (FCM), de rede externa e de
+um par VAPID real — não é reproduzível num runner, e fingir com mock seria pior
+que a ausência declarada. O que está provado é o contrato entre a TELA e o
+SERVIDOR. Continua aberto na issue #366.
+
+## J13 — A Agenda como o dono do produto a usou na VPS `[P0]`
+
+**Por que P0:** é a primeira impressão de um módulo que acabou de sair (v1.7.0).
+O dono instalou na VPS dele, usou como um cliente usaria, e achou **seis defeitos
+em quinze minutos**. Um sétimo aparecia no log de produção a cada cinco minutos e
+ninguém tinha visto; um oitavo saiu de varredura. Todo módulo novo tem uma janela
+em que ninguém o usou de verdade — esta jornada existe porque ela custou oito.
+
+**O que a suíte não conseguia enxergar, e por quê.** Toda spec até aqui roda com
+usuário de UMA organização. O defeito de escopo (D4) é invisível nesse cenário
+por construção: sem duas organizações, a RLS e o filtro explícito devolvem
+exatamente o mesmo conjunto. `scripts/seed-e2e-duas-organizacoes.ts` monta o
+cenário que faltava — o MESMO usuário em duas orgs, com um tipo exclusivo em cada
+uma, para a asserção poder ser sobre o CONJUNTO DE NOMES e não sobre a contagem.
+
+| # | Caso | Resultado |
+|---|---|---|
+| J13.1 | Membro de duas organizações abre a Agenda e vê só os tipos da org ativa; trocar de organização troca a lista | **PASS** — `agenda-escopo-da-organizacao.spec.ts`, contra o app real. Evidência: `evidence/calendario/d4-agenda-escopo-org-b.png` |
+| J13.2 | O aviso "você ainda não publicou seus horários" LEVA até onde se publica, e a aba de Atendimento se anuncia como o lugar dos horários | **PASS** — `agenda-caminho-ate-os-horarios.spec.ts`. Evidência: `evidence/calendario/d1-aba-atendimento.png` |
+| J13.3 | Endereço de aba desconhecido cai na aba padrão, não numa tela sem conteúdo | **PASS** — mesma spec |
+| J13.4 | O tipo de agendamento NASCE com responsável; quem escolhe "Definir depois" é avisado e o aviso ABRE o seletor | **PASS** — `agenda-tipos-de-agendamento.spec.ts`. Evidência: `evidence/calendario/d6-tipo-com-responsavel.png` |
+| J13.5 | O dia apagado diz POR QUÊ, e o rótulo genérico antigo não volta | **PASS** — `agenda-kit-visual.spec.ts` |
+| J13.6 | O teto de capacidades recusa a passagem explicando quantas vagas faltam | **PASS** — `capacidades-do-agente.spec.ts`, com o teto em 25 |
+| J13.7 | A ida ao Google seleciona os pendentes (o filtro antigo devolvia HTTP 400) | **PASS** — medido contra o PostgREST real do ambiente e2e: filtro antigo `400 / 22007`, filtro novo `200` com as linhas pendentes |
+| J13.8 | Sincronizar tira a linha da fila, e editar recoloca (o laço dos dois relógios) | **PASS** — medido no Postgres real: `true` → `false` com delta `00:00:00` → `true` |
+| J13.9 | A credencial do Google não é servida pelo PostgREST | **PASS** — `anon` recebe `42501 permission denied`; `service_role` recebe 200 (controle positivo) |
+| J13.10 | Cadastrar a credencial do Google pela tela do admin | **NÃO EXERCITADO** — a tela e a server action existem e o `next build` passa, mas o ambiente e2e não tem a chave mestra de cifra semeada (`fn_encrypt_oauth` levanta `NUVEMSHOP_OAUTH_ENCRYPTION_KEY ausente`), que é justamente o caminho em que a action RECUSA gravar. Falta o caso pela tela com a chave presente |
+
+**Registro honesto do que NÃO foi exercitado:** `pnpm test:db` não rodou nesta
+máquina — o daemon do Docker travou depois de o disco encher, e o harness de
+invariantes exige contêiner. Os dois invariantes novos
+(`agenda-ida-ao-google-termina`, `credencial-do-google-e-server-side`) estão
+escritos e a SUBSTÂNCIA deles foi medida à mão contra o Postgres real do
+ambiente e2e; falta a passada do harness no CI.
+
+---
+
+## J14 — Marcar um horário, na tela em que o dono marcou `[P0]`
+
+**Por que P0:** os dois defeitos aqui impedem a ação central do módulo — escolher
+um horário e chegar até ele. O dono achou os dois usando a v1.8.0 na VPS.
+
+**A crítica que originou esta jornada, e ela é justa:** havia 20 casos Playwright
+sobre esta tela (a J13) e nenhum pegou. Todos assertam PRESENÇA (`toBeVisible`,
+`toHaveCount`), e **elemento cortado continua presente** — está no DOM, tem
+tamanho, e o Playwright o considera visível. A borda que o corta é do PAI.
+Presença nunca vai medir isto; só geometria mede.
+
+| # | Caso | Resultado |
+|---|---|---|
+| J14.1 | A coluna de horários cabe no painel, e o painel no Sheet que o hospeda | **PASS** — `agenda-painel-cabe-na-tela.spec.ts`, por `boundingBox` em cinco larguras. Antes: painel de 982px num Sheet de 768, transbordando 239px |
+| J14.2 | A coluna de horários fica dentro da VIEWPORT | **PASS** — antes, só 42 dos 280px apareciam, em 1280, 1440 e 1920 |
+| J14.3 | Dá para CLICAR num horário | **PASS** — a geometria é o diagnóstico; a ação é o desfecho. Evidência: `evidence/calendario/d1-painel-cabe-1280.png` |
+| J14.4 | Abaixo de `lg` os horários empilham sob o calendário | **PASS** — caso de 900px |
+| J14.5 | O limiar de 1024px, onde as 3 colunas passam a valer com 44px de folga | **PASS** — é onde um ajuste de padding estoura primeiro |
+| J14.6 | "Ver na agenda" leva até o compromisso, inclusive em outra semana | **PASS** — `agenda-ver-na-agenda.spec.ts`. O botão não tinha `onClick` nenhum. Evidência: `evidence/calendario/d2-ver-na-agenda.png` |
+
+**Duas correções ao diagnóstico inicial, ambas medidas:**
+1. O defeito de largura **não sumia em tela grande** — em 1920 o transbordo era
+   idêntico, porque o Sheet é fixo em 768px e ancorado à direita.
+2. A primeira versão da asserção de geometria media "coluna contra painel" e
+   ficava vermelha — mas por medir no meio da transição de `width`. No estado
+   estável ela PASSA. Falso vermelho hoje é falso verde amanhã; a spec passou a
+   esperar a largura estabilizar, e a régua certa é o painel contra o Sheet.
+
+**Sobre um diagnóstico que a medição derrubou:** ao ver 4 falhas num run de 5
+specs juntas, atribuí ao `AUTH_RATE_LIMIT_LOGIN_IP` que o CI define e o ensaio
+local não. **Estava errado** — o run seguinte passou 30/30 sem essa variável, e o
+seguinte também. A diferença era tempo: 51s contra 11,2min, com um `next build`
+disputando CPU. A diferença de ambiente entre ensaio e CI é real e vale saber,
+mas não era a causa desta falha.
+
+## J15 — A grade da Agenda como agenda de verdade `[P0]`
+
+**Por que P0:** é a tela que quem atende deixa aberta o dia inteiro, e ela era
+**desenho**. Sete colunas, faixas de hora, cards — e nenhum gesto: clicar num
+espaço vazio não fazia nada, arrastar um compromisso não fazia nada. Marcar
+exigia sair da grade, abrir "Novo agendamento" e reescolher no mini-calendário a
+data que a pessoa acabara de apontar com o dedo. Nenhuma spec reprovava, porque
+nenhuma spec tentava: as irmãs entram pelo botão e pelo histórico, que são
+caminhos que já existiam.
+
+**O jeito errado de consertar, e o que o vigia.** Calcular o horário a partir do
+pixel clicado. A tela passaria a oferecer instantes que a disponibilidade
+publicada não tem — 422 `agenda_disponibilidade_invalida` na cara de quem
+clicou, e a agenda discordando do agente sobre o que está livre. A defesa é de
+construção: a grade **pergunta** a `GET /api/v1/agenda/horarios-livres` (a mesma
+rota do painel e do agente) e um bloco só é clicável quando existe horário
+publicado ali. Ela não tem de onde tirar um instante que a regra não deu.
+
+| # | Caso | Resultado |
+|---|---|---|
+| J15.1 | Clicar num bloco livre abre a marcação **naquele horário** — a asserção é o horário exibido, não que "algo abriu" | **PASS** — `agenda-grade-interativa.spec.ts`. Evidência: `evidence/calendario/grade-clique-abre-no-horario.png` |
+| J15.2 | Bloco fora da disponibilidade não é clicável **e diz por quê** (`disabled` + razão no `aria-label` e no `title`) | **PASS** — mesma spec. Evidência: `evidence/calendario/grade-bloco-recusado-diz-por-que.png` |
+| J15.3 | Arrastar um card remarca, e o horário novo é conferido **na API depois do reload** — não só na tela | **PASS** — mesma spec. Evidência: `evidence/calendario/grade-arraste-fantasma.png` e `evidence/calendario/grade-confirma-antes-de-remarcar.png` |
+| J15.4 | Arrastar para fora da disponibilidade é recusado com o motivo, **nenhum PATCH sai**, e o card volta ao lugar (medido por `boundingBox`) | **PASS** — mesma spec. Evidência: `evidence/calendario/grade-arraste-recusado.png` |
+| J15.5 | Geometria por ferramenta: o topo do card remarcado contra o topo da faixa daquela hora, tolerância de 2px | **PASS** — mesma spec |
+| J15.6 | Remarcar pelo **teclado** (`Alt+↑/↓` salta de vaga em vaga, `Enter` confirma, `Esc` desfaz) pelo mesmo mecanismo do arraste | **PASS** — `tests/unit/agenda-grade-aceita-clique.test.tsx` (jsdom — o arraste por ponteiro precisa de geometria real e fica no Playwright) |
+
+**As asserções foram provadas vermelhas antes**, e não só escritas depois:
+
+| Sabotagem | Previsão | Medido |
+|---|---|---|
+| A camada de blocos vazios volta a não existir (a grade de antes) | 4 vermelhas | **4 vermelhas**, todas em "nenhum bloco livre na semana desenhada" |
+| A recusa vira pergunta **e** o destino válido remarca sem confirmar | J15.3 e J15.4 vermelhos, J15.1 e J15.2 verdes | **exatamente isso** — "soltar remarcou sem perguntar" e `remarcacao-recusada` não encontrado |
+
+**Dois defeitos que só apareceram executando** (nenhum apareceria lendo o código):
+
+1. A grade oferecia a disponibilidade de `tiposIniciais[0]` — o primeiro tipo em
+   **ordem alfabética**, escolhido por ninguém e sem seletor fora do painel de
+   marcação. Numa organização com quatro tipos e jornada publicada em um só, a
+   grade inteira travava com "não consegui carregar os horários" **enquanto
+   havia vaga**. O tipo ganhou superfície na tela.
+2. Card de compromisso **cancelado** cobria o bloco vazio e comia o clique — e
+   cancelar é justamente o que devolve o horário (`cancelled` está em
+   `SITUACOES_QUE_LIBERAM`). Numa clínica com uma semana de cancelamentos, todo
+   horário reaberto ficaria inalcançável pela grade. O card perdeu o ponteiro e
+   manteve a presença: é registro, não ação.
+
+---
+
+## J16 — Conectar o Google, e conseguir enxergar que conectou `[P0]`
+
+**Por que P0:** o dono instalou a v1.9.0 e relatou quatro sintomas numa frase só
+— "conecto, ELE DESLOGA DA MINHA CONTA, quando logo de novo diz que conectou, mas
+nada funciona e o botão Conectar continua lá". Três defeitos independentes, e o
+mais humilhante é que **a conexão sempre funcionou**: ninguém conseguia ver.
+
+| # | Caso | Resultado |
+|---|---|---|
+| J16.1 | Voltar do consentimento não cai no `/login` | **PASS** — `agenda-google-volta-nao-desloga.spec.ts`. Sem o conserto, o usuário logado para em `/login?next=%2Fapp%2Fagenda%3Ferro%3D...`, medido em Chromium |
+| J16.2 | O CHECK do banco proíbe o valor que três consultas procuravam | **PASS** — invariante `agenda-conexao-do-google-e-encontrada`, contra Postgres real |
+| J16.3 | A conexão que o callback grava é encontrada pelo predicado do worker | **PASS** — mesmo invariante: 1 achada com o valor certo, 0 com o antigo |
+| J16.4 | Nenhuma consulta filtra por valor que a coluna proíbe | **PASS** — varredura `consulta-usa-o-vocabulario-do-banco`; previ 3 achados antes de rodar e vieram os 3 |
+| J16.5 | A lista de horários rola, e o último horário é clicável | **PASS** — `agenda-painel-cabe-na-tela.spec.ts`, viewport 1280×700. Evidência: `evidence/calendario/d4-lista-rola-1280x700.png` |
+
+**Três correções ao briefing, todas medidas:**
+1. A retenção do cookie no segundo salto era **dedução** marcada NÃO MEDIDA. Foi
+   observada em navegador: é real, em Chromium. (Firefox não foi medido.)
+2. A régua anti-regressão proposta (`body.scrollHeight - innerHeight <= 1`) vinha
+   com a nota "já passa hoje". **Não passa** — e o crescimento é idêntico com e
+   sem o conserto (1566px nos dois), portanto pré-existente. A régua passou a
+   medir o que queria proteger: que o Sheet continua `position: fixed`.
+3. A pré-condição de suficiência da lista comparava o conteúdo com a altura da
+   JANELA; a régua certa é o espaço abaixo do topo da lista. Da primeira forma
+   ela reprovou um cenário suficiente.
+
+**Dívida declarada, não consertada aqui:** com o painel aberto em 1280×700 o body
+vai a 1566px contra 700 de janela. É anterior a este PR e misturá-la esconderia
+as duas.
+
+---
+
+## J17 — Trocar de organização, incluindo a que não foi configurada `[P0]`
+
+**Por que P0:** o seletor de organização fica no topo de toda tela do produto e
+é uma das ações mais banais do cabeçalho — e ela podia terminar num beco sem
+saída. `app/app/layout.tsx:51` manda para `/onboarding` toda organização ativa
+sem `onboarded_at`; o layout de `/app` sai inteiro da árvore e leva o
+`TenantSwitcher` junto. Quem foi convidado para uma organização nova e trocou
+para ver o que era **perdia o caminho de volta**: no wizard sobravam "Termos de
+Uso", "Política de Privacidade" e um "Continuar" desabilitado — medido no
+snapshot de uma falha do CI (run 33164258175), não deduzido. A saída real era
+limpar os dados do site.
+
+**Como o defeito apareceu, e por que ele estava escondido:** ele não foi
+reportado por ninguém — saiu de uma `main` vermelha. Dois seeds
+(`seed-e2e-funis` e `seed-e2e-duas-organizacoes`) inseriam em `organizations`
+com o mesmo slug e colunas diferentes, e quem rodasse primeiro vencia. Com a org
+de teste chegando sem `onboarded_at`, `agenda-escopo-da-organizacao` reprovava
+com `element(s) not found` no seletor. O conserto do harness devolveu o CI ao
+verde; o defeito de produto que ele expôs sobrevive a esse conserto, e é o que
+esta jornada prende.
+
+| # | Caso | Resultado |
+|---|---|---|
+| J17.1 | Trocar para uma organização não configurada leva ao wizard — o destino está certo, a organização não foi configurada mesmo | **PASS** — `troca-de-organizacao-tem-volta.spec.ts` |
+| J17.2 | O seletor de organização **não** sobrevive ao redirect (é a razão de o wizard precisar de saída própria) | **PASS** — mesma spec, `toHaveCount(0)` |
+| J17.3 | O wizard oferece o caminho de volta, e voltar traz para a organização de ANTES (conferido pelo nome, não por "saiu de lá") | **PASS** — mesma spec. Evidência: `evidence/onboarding/troca-de-org-tem-volta.png` |
+| J17.4 | Sem outra organização, o controle não existe — prometer ação vazia é o controle decorativo | **PASS** — `tests/unit/onboarding-tem-saida.test.tsx` |
+| J17.5 | Trocar **navega**: `setActiveOrg` revalida `/app`, não `/onboarding`, e sem o `replace` o clique pareceria não fazer nada | **PASS** — mesma unit |
+| J17.6 | Dois seeds não criam a mesma organização (a classe, não a instância) | **PASS** — `tests/unit/seeds-nao-disputam-organizacao.test.ts`, com controle positivo contra a regex cegar |
+
+**As asserções foram provadas vermelhas antes:**
+
+| Sabotagem | Previsão | Medido |
+|---|---|---|
+| O layout volta a não montar a saída (o estado de antes) | J17.3 vermelho, `agenda-escopo` verde ao lado | **exatamente isso** — a cerca discrimina, não reage a qualquer estrago |
+| A saída nunca renderiza | 3 unit vermelhos | **3** |
+| Troca sem navegar | 1 unit vermelho | **1** |
+| O slug compartilhado volta ao seed | o gate de seeds reprova nomeando os dois arquivos | **reprovou**, com `e2e-segunda-org ← seed-e2e-duas-organizacoes.ts + seed-e2e-funis.ts` |
+| Seed antigo restaurado (`git show HEAD~1`) e re-semeado | `agenda-escopo` reprova como no CI | **reprovou** com `não terminou` + `element(s) not found`, literal |
+## J18 — O follow-up anda em hospedagem sem agendador `[P0]`
+
+**Por que P0:** para quem **não tem** o `scheduler` da VPS — o plano gratuito da
+Vercel é o caso comum, e é o cenário inteiro do runbook
+[`vercel-hobby-relogio.md`](../runbooks/vercel-hobby-relogio.md) — o relógio
+externo não é conveniência: é o **único** motor do follow-up. E a falha dele é
+silenciosa: os follow-ups não andam, ninguém recebe erro, e a instalação parece
+saudável.
+
+**O que existia media TEXTO.** `tests/unit/relogio-hobby-workflow.test.ts`
+confere que o `.yml` cita o caminho do tick, a variável e o `exit 1` — ancora o
+contrato do arquivo, não prova que uma batida faz alguma coisa. Nenhum teste, em
+lugar nenhum, chegava a bater na rota. Era o item 2 da issue #366.
+
+**O emissor é externo de propósito.** `execFileSync("curl", …)` — outro
+processo, sem contexto de browser, sem cookie: é literalmente o comando que
+`comandoCurlDoRelogio()` gera e que o runbook manda colar no cron-job.org.
+`page.request` compartilharia o contexto do teste e provaria menos, já que a
+rota está em `PUBLIC_PATHS` justamente porque quem a chama não tem sessão.
+
+Spec: `tests/e2e/relogio-http-cron-externo.spec.ts` (`SPECS_PARTE_1`).
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J18.1 | Segredo errado é recusado | 403 **e** o enrollment não se move | PASS |
+| J18.2 | 1ª batida executa o `wait` | agenda a espera para o futuro, `steps_taken` sobe | PASS |
+| J18.3 | 2ª batida, vencido o prazo, avança | `current_node_id` chega ao nó final | PASS |
+
+**Duas batidas, e não uma — medido.** A primeira versão do caso esperava avanço
+numa batida só, e o run devolveu `{claimed:1, advanced:0, scheduled:1}`: um
+enrollment vencido *parado* num nó `wait` significa "chegou a hora de EXECUTAR o
+wait", e executar um wait é **agendar** a espera. O avanço só vem na batida
+depois do prazo — que é exatamente o que um cron externo faz, batendo de poucos
+em poucos minutos. O relógio do fixture é adiantado entre as duas porque o
+mínimo do `wait` é 5 min por regra de produto (`graph-schema.ts` recusa
+`duration_ms` abaixo de `300000`; com `1` o tick devolve `failed: 1`).
+
+**Sabotado, com a previsão declarada antes de rodar:**
+
+    auth aceita qualquer segredo   -> caso 1 vermelho, casos 2/3 verdes
+    tick responde 200 e não acha
+      o que avançar (claim vazio)  -> caso 1 verde, casos 2/3 vermelhos
+    restaurado                     -> 2 de 2
+
+**NÃO COBERTO, declarado:** o `.github/workflows/relogio.yml` em si — ele nasce
+desligado (`RELOGIO_LIGADO`) e quem o exercitaria é o Actions de um fork, não
+este job. O que está provado é que **a batida faz efeito**; que o agendador do
+GitHub dispara no horário é do GitHub.
+
+---
+
 ## J7 — Exploração completa `[P2]`
 
 Andar por TODAS as rotas navegáveis logado como admin e como agent: settings, contacts,
@@ -592,6 +908,49 @@ espaço e acento, que era o gatilho do defeito #6.
 | 28 | 🟠 **CI vermelho por lentidão, não por defeito.** O teste que abre processo filho (`npx tsx`) leva ~5s e o timeout padrão do vitest é 5s — derrubou a `main` num PR que só mexia em documentação | corrigido — timeout explícito de 60s; 3 rodadas seguidas verdes. O controle positivo continua provando o aparato |
 
 **Nota de ambiente:** o `.env` da VPS foi apontado para `ghcr.io/...:latest` durante o QA, porque o fluxo de release novo fixa a imagem numa tag (`1.1.0`) e as correções desta sessão estão à frente dela. Para voltar ao comportamento de release, basta repor `APP_IMAGE` com a tag desejada.
+
+## Acervo de conhecimento — o acervo é da organização (2026-08-26)
+
+> **O que o CI NÃO prova aqui.** `tests/e2e/acervo-de-conhecimento.spec.ts` tem 6
+> casos, e **4 deles pulam no CI** por falta de `OPENAI_API_KEY_E2E` — chave paga,
+> que não vai para segredo de repositório público. Medido, não suposto: a parte 2
+> do `e2e` era `73 passed / 0 skipped` na main sem a spec e virou `75 passed /
+> 4 skipped` com ela. O CI prova que a tela DIZ que falta chave e que o material
+> sem chave fica esperando; **que o material vira trecho buscável — o produto — só
+> é provado rodando a spec com a chave**, e essa rodada está em
+> `evidence/acervo-de-conhecimento/`. Mesmo formato do aviso que a doutrina já dá
+> sobre `vps-fresh-onboarding`: um `skip` silencioso é indistinguível de um `pass`
+> no placar agregado.
+
+**A afirmação de 2026-07-30 abaixo ("implementado e provado") era verdadeira para
+UM caminho e falsa para o produto.** O que estava provado era: FAQ colada, pelo
+agente padrão, numa organização com a chave no `.env`. Fora disso, medido agora:
+
+| # | Achado | O que a pessoa via |
+|---|---|---|
+| 1 | 🔴 **O indexador resolvia o agente pela ORGANIZAÇÃO** (`resolveAgent(organizationId)` → `is_default desc, created_at asc, limit 1`) e ignorava o `agent_id` que os três emissores mandavam no payload | com dois assistentes, o material do segundo nunca virava trecho. Sem erro, sem estado, sem nada na tela |
+| 2 | 🔴 **A tela de conhecimento era presa a `is_default = true`** — e todo agente criado pela interface nasce `is_default: false` | o acervo de qualquer assistente que você criasse era inalcançável |
+| 3 | 🔴 **Cadastrar a chave da OpenAI pela tela não habilitava nada.** `lib/ai/embed.ts` lia só `process.env`, enquanto `lib/ai/pontos/provedores.ts` promete na tela que a OpenAI é "necessária para indexar o seu material" | a pessoa cadastrava a chave em IA › Credenciais e o material continuava parado |
+| 4 | 🔴 **Sem chave, o evento era consumido para sempre.** O worker devolvia `skipped`, e `drain.ts` conta `skipped` como sucesso | cadastrar a chave depois não recuperava o que ficou para trás |
+| 5 | 🔴 **Upload de arquivo extraía o texto e DESCARTAVA** (`ingestPolicyFile` devolvia `{ chunkCount }` sem persistir), e a rota não tinha chamador nenhum na interface | o PDF subia e o agente nunca sabia o que estava nele |
+| 6 | 🔴 **Preparar um material derrubava o outro**: a ingestão de conversas e a de FAQ competiam pelo único `active_kb_version_id` do agente | quem indexasse por último apagava o acervo do outro |
+| 7 | 🔴 **Debounce sem timeout travava o evento para SEMPRE.** Com o Redis configurado e inalcançável — VPS com o contêiner caído —, `redis.set()` não voltava; `drainEventLog` marca `processing` ANTES do handler e **nada devolvia a linha** (o `job_queue` tem reaper, o `event_log` não tinha) | material cadastrado, nada acontece, e nem tentar de novo resolve |
+| 8 | 🟠 **Arquivar não liberava o espaço** — nenhuma linha do repo jamais escreveu `is_active = false` | não dava para criar outro material do mesmo tipo, nunca mais |
+| 9 | 🟠 **O limiar do código (0.72) vencia o calibrado (0.40)** em três sítios | paráfrase descartada: "posso trocar se não servir?" não achava a resposta escrita |
+| 10 | 🟠 **Duplicar assistente perdia `pipeline_ids`**, e três INSERTs aceitavam `operator_*`/`pipeline_ids` no corpo e os descartavam | a cópia nascia sem escopo, com 201 dizendo que deu certo |
+| 11 | 🔴 **Segurança**: as 4 tabelas do acervo aceitavam escrita de `viewer` pelo PostgREST | qualquer membro apagava a base de conhecimento da organização |
+| 12 | 🟠 **O diálogo de cadastro não cabia na tela** — o botão "Adicionar ao acervo" ficava fora da viewport em 720px | o formulário existia e não se enviava (achado pela prova de tela) |
+
+**Prova**: `tests/e2e/acervo-de-conhecimento.spec.ts` (6 casos, jornada inteira
+pela tela) + `tests/invariants/rag-acervo-da-organizacao.test.ts` (recorte da
+busca, versões legadas, imutabilidade do escopo, RBAC das 4 tabelas) +
+`tests/unit/dreno-nao-perde-evento.test.ts`.
+
+**NÃO MEDIDO**: o comportamento com acervo grande (milhares de trechos). O índice
+vetorial `ivfflat` existe e o planner não o escolhe com o recorte de tenant — a
+busca é exata e linear, correta e sem teto de recall. Vira issue.
+
+---
 
 ## RAG do tenant — implementado e provado (2026-07-30)
 
@@ -1102,3 +1461,50 @@ commit, com o motivo) e o gate lê a declaração. Três ganhos: não há falso 
 vira imposto, porque uma linha de declaração custa menos que uma linha vazia de changelog —
 que é o risco real, já que ela polui a tela de produto do operador. Não é convenção nova: o
 `tests/unit/navegacao-completude.test.ts` já aceita exceção **com justificativa escrita**.
+
+## J19 — Quem instala em espanhol usa o sistema em espanhol? `[P0]` (2026-08-27)
+
+Primeira impressão de quem instala fora do Brasil, que é o público do
+espanhol: a pessoa escolhe o idioma na instalação e abre o produto. Se a tela
+vier em português, ela conclui que a opção não funciona — e ela teria razão,
+porque até este passe o seletor da organização era gravado no banco e **não era
+lido por ninguém**.
+
+**Como foi provado.** Supabase local pg17 com o `baseline.sql` (o que o
+`install.sh` aplica, não a cadeia de migrations, que não sobe do zero), `next
+build` + `next start` de produção, login com conta de teste real, cinco telas
+percorridas pelo browser. Spec: `tests/e2e/i18n-espanhol-na-tela.spec.ts`.
+Evidência: `evidence/i18n-es/01-inbox-em-espanhol.png` e
+`evidence/i18n-es/02-inbox-de-volta-em-portugues.png`.
+
+**Achados, todos consertados neste mesmo passe:**
+
+1. **A troca se desfazia sozinha na primeira navegação.** O `revalidatePath`
+   invalida o cache do servidor; o Router Cache do cliente guarda o layout de
+   `/app`, que é quem monta o provider de idioma. Logo após o clique a tela
+   mostrava o idioma novo, ao navegar voltava ao antigo, e só um reload
+   acertava. `router.refresh()` melhora e não resolve — medido: a primeira
+   navegação ainda vinha antiga, só a segunda vinha certa.
+2. **Os rótulos do Índice de Atrito** (`lib/metrics/atrito.ts`) chegavam à tela
+   sem passar por `t()`. São montados em lógica pura, e o guarda estático não
+   os alcança porque `{par.titulo}` é expressão, não literal.
+3. **"Atendente" e "Funil" crus** em `/app/metrics` — o guarda estático não os
+   viu porque a régua dele é ortográfica (ç, ã, õ, lh/nh) e nenhuma das duas
+   palavras tem acento. É o falso negativo assumido dele, e é a razão de os
+   dois guardas existirem: o estático alcança todo arquivo, o e2e alcança o que
+   a régua do estático não distingue.
+
+**A data, que a primeira versão desta jornada declarava como não coberta,
+passou a ser medida aqui.** Existe `lib/i18n/datas.ts`, e a spec reprova se
+achar mês ou dia da semana em português com a interface em espanhol.
+
+⚠️ Essa asserção nasceu VACUOSA, e o registro do porquê vale mais que ela: as
+telas percorridas não imprimiam data por extenso naquele banco, então a régua
+não tinha o que achar — sabotei a camada de idioma e o teste passou VERDE.
+Hoje ela tem um **controle positivo** (exige achar data em português no retrato
+inicial, senão falha dizendo que o problema é o teste) e uma **fixture** que
+garante o dado: `ContactsTable` só escreve a data por extenso quando é de hoje
+ou ontem, e fora disso imprime `dd/MM/yyyy` — idêntico nos dois idiomas.
+
+**O que segue fora:** e-mail e o PDF de LGPD, com o motivo escrito em
+`tests/unit/i18n-a-data-segue-o-idioma.test.ts`.

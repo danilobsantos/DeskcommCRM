@@ -14,6 +14,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { audit } from "@/lib/audit";
 import { sincronizarSaudeDaConexao } from "@/lib/channels/health";
 import { aplicarEfeitosPosEntrada } from "@/lib/channels/pos-entrada";
+import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
+import { canonicalPhoneBR } from "@/lib/channels/phone-variants";
 import { estamparAtribuicaoDoContato } from "@/lib/leads/atribuicao-de-anuncio";
 import { extrairAtribuicaoWaha } from "@/lib/waha/atribuicao-de-anuncio";
 import type { createAdminClient } from "@/lib/supabase/admin";
@@ -22,7 +24,68 @@ import type { WahaEnvelope, WahaPayload } from "@/lib/waha/envelope";
 import { bareWaMessageId, chatIdFromWaMessageId } from "@/lib/waha/message-id";
 import { logger } from "@/lib/logger";
 
-type Admin = ReturnType<typeof createAdminClient>;
+export type Admin = ReturnType<typeof createAdminClient>;
+
+/**
+ * Janela de silêncio automático do bot quando um humano responde direto pelo
+ * WhatsApp (fromMe=true, fora do composer/IA do CRM) — ver `handleOutboundFromUserPhone`.
+ *
+ * Antes disto, `ignore_self` (`lib/ai/dispatcher/triggers.ts`) só ignorava a PRÓPRIA
+ * mensagem do humano (não disparava turno pra ela), mas não silenciava nada — a
+ * PRÓXIMA mensagem do lead fazia o agente rodar normalmente, cego ao que o humano
+ * acabou de tratar manualmente. Medido em produção (tenant YADEA): um humano
+ * negociou preço/pagamento de peça direto no WhatsApp, e a IA, sem saber disso, se
+ * meteu de volta na conversa afirmando que "os dados do PIX estão sendo
+ * confirmados" — algo que ela não tem nenhuma ferramenta para saber.
+ *
+ * 3h é deliberadamente curto (não é um handoff formal, que usa `bot_silenced_until`
+ * = 'infinity' até alguém reativar): dá ao humano que já está no WhatsApp uma
+ * janela de controle sem precisar "assumir" a conversa no CRM, e o bot volta
+ * sozinho depois — reduz o risco de um teste do próprio dono ("oi", só verificando
+ * o número) travar o atendimento automático por muito tempo sem ninguém perceber.
+ */
+export const HUMAN_TAKEOVER_SILENCE_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * Silencia o bot na conversa por `HUMAN_TAKEOVER_SILENCE_MS`, best-effort — NUNCA
+ * encurta um silêncio maior já em vigor (ex.: handoff formal com 'infinity'; um
+ * `Date` inválido, como "infinity" vindo do Postgres, compara sempre `false` contra
+ * qualquer timestamp finito, então o `if` abaixo naturalmente não regride). Falha
+ * aqui não pode derrubar a ingestão da mensagem — só loga.
+ */
+export async function silenciarBotPorRetomadaHumana(
+  admin: Admin,
+  organizationId: string,
+  conversationId: string,
+): Promise<void> {
+  const proposto = new Date(Date.now() + HUMAN_TAKEOVER_SILENCE_MS);
+  const { data: conv, error: erroLeitura } = await admin
+    .from("conversations")
+    .select("bot_silenced_until")
+    .eq("id", conversationId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (erroLeitura) {
+    console.error("[waha.ingest] silenciar bot (retomada humana): leitura falhou", erroLeitura.message);
+    return;
+  }
+  if (conv?.bot_silenced_until) {
+    const atualMs = new Date(conv.bot_silenced_until).getTime();
+    // `Number.isNaN` cobre 'infinity' (handoff formal, ver `lib/ai/handoff/orchestrator.ts`)
+    // e qualquer outro valor não-parseável — tratado como silêncio permanente, nunca
+    // encurtado. NaN não "vence" comparação nenhuma (`NaN >= x` é sempre false), por
+    // isso o caso precisa de checagem explícita em vez de reusar `>=` abaixo.
+    if (Number.isNaN(atualMs) || atualMs >= proposto.getTime()) return;
+  }
+  const { error: erroUpdate } = await admin
+    .from("conversations")
+    .update({ bot_silenced_until: proposto.toISOString() })
+    .eq("id", conversationId)
+    .eq("organization_id", organizationId);
+  if (erroUpdate) {
+    console.error("[waha.ingest] silenciar bot (retomada humana): update falhou", erroUpdate.message);
+  }
+}
 
 interface Session {
   id: string;
@@ -363,7 +426,11 @@ async function upsertContact(
     // ele já é um número, ou de `_data.key.remoteJidAlt` quando o chat é `@lid`.
     // Resolver aqui, e não no SQL, foi o que permitiu manter a assinatura da
     // função (e portanto os grants e os invariantes de hardening) intacta.
-    p_phone: parsed.kind === "phone" ? parsed.phone : telefoneAlt,
+    p_phone: parsed.kind === "phone"
+      ? canonicalPhoneBR(parsed.phone)
+      : telefoneAlt
+        ? canonicalPhoneBR(telefoneAlt)
+        : null,
     p_lid: parsed.kind === "lid" ? parsed.lid : null,
     p_chat_id: chatId,
     p_notify: notifyName,
@@ -454,6 +521,25 @@ async function markConversation(
 /**
  * Mensagem recebida (fromMe=false). Contato = remetente (`from`).
  */
+async function mensagemIngeridaPorExternalId(
+  admin: Admin,
+  orgId: string,
+  externalId: string,
+): Promise<{ id: string; contact_id: string; body: string | null } | null> {
+  const { data, error } = await admin
+    .from("messages")
+    .select("id, contact_id, body")
+    .eq("organization_id", orgId)
+    .eq("external_id", externalId)
+    .eq("direction", "inbound")
+    .maybeSingle();
+  if (error) {
+    logger.warn("waha.ingest: dedup sem ler mensagem existente", { detail: error.message });
+    return null;
+  }
+  return data ?? null;
+}
+
 async function handleInbound(
   admin: Admin,
   session: Session,
@@ -543,6 +629,26 @@ async function handleInbound(
       external_id: p.id,
       direcao: "inbound",
     });
+    // A 1ª entrega pode ter gravado a mensagem e estourado o tempo ANTES de
+    // `aplicarEfeitosPosEntrada` — a reentrega cai aqui. Reacelerar só o
+    // pipeline (sem re-despachar o agente) destrava o match_reply.
+    const existente = await mensagemIngeridaPorExternalId(admin, session.organization_id, p.id);
+    if (existente) {
+      try {
+        await acelerarPipelineDeEventos(admin, {
+          organizationId: session.organization_id,
+          contactId: existente.contact_id,
+          messageId: existente.id,
+          texto: existente.body,
+        });
+      } catch (err) {
+        logger.warn("waha.ingest: dedup nao reacelerou pipeline", {
+          organization_id: session.organization_id,
+          external_id: p.id,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     return;
   }
 
@@ -744,6 +850,11 @@ async function handleOutboundFromUserPhone(
   }
 
   await markConversation(admin, session.organization_id, conversationId, "outbound", previewFromMessage(p), now);
+
+  // Ver `silenciarBotPorRetomadaHumana` — um humano acabou de responder direto pelo
+  // WhatsApp dele, fora do composer/IA; dá a ele uma janela curta de controle da
+  // conversa sem precisar "assumir" formalmente no CRM.
+  await silenciarBotPorRetomadaHumana(admin, session.organization_id, conversationId);
 
   await audit({
     action: "message.sent",

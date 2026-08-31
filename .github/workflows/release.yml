@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.token.outputs.token }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -105,23 +105,46 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.token.outputs.token }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: A main anuncia uma versão que ainda não tem tag?
+      - name: Este push foi um corte de release?
         id: pendente
         run: |
           set -euo pipefail
+
+          # DUAS condições, e a segunda é a que importa. Só a primeira ("o
+          # CHANGELOG anuncia versão que não tem tag") deixaria QUALQUER PR
+          # cortar a release: bastaria escrever `## [1.7.0]` no CHANGELOG à mão
+          # e a tag nasceria no merge dele, pulando o PR de release inteiro —
+          # e com ela as três imagens e o canal `stable`.
+          #
+          # Isso não é hipótese: medido em 2026-08-27, o PR #354 (RAG) já
+          # trazia uma seção de versão escrita à mão no CHANGELOG.
+          #
+          # A segunda condição é a ASSINATURA do corte, e um PR comum não a
+          # produz nem por engano: o commit CONSUMIU fragmentos — havia
+          # `.changes/*.md` antes e não há depois. PR comum ACRESCENTA
+          # fragmento; só o corte esvazia o diretório.
           versao=$(pnpm exec tsx scripts/cortar-release.ts --versao-do-changelog)
+
+          antes=$(git ls-tree -r --name-only HEAD^ -- .changes/ | grep -c '\.md$' || true)
+          depois=$(git ls-tree -r --name-only HEAD  -- .changes/ | grep -c '\.md$' || true)
+          echo "fragmentos em .changes/: antes=${antes} depois=${depois}"
+
           if git rev-parse -q --verify "refs/tags/v${versao}" >/dev/null; then
-            echo "v${versao} já existe — nada a cortar (este push não era um merge de release)"
+            echo "v${versao} já existe — nada a cortar"
+            echo "cortar=nao" >> "$GITHUB_OUTPUT"
+          elif [ "${antes}" -eq 0 ] || [ "${depois}" -ne 0 ]; then
+            echo "::notice::O CHANGELOG anuncia ${versao} sem tag, mas este push NÃO consumiu fragmentos."
+            echo "::notice::Tag não criada. Uma release sai do workflow 'release' (Run workflow), nunca de um merge comum."
             echo "cortar=nao" >> "$GITHUB_OUTPUT"
           else
-            echo "v${versao} ainda não existe — esta main traz uma versão nova"
+            echo "corte de release: ${antes} fragmento(s) consumido(s), v${versao} ainda não existe"
             echo "cortar=sim"       >> "$GITHUB_OUTPUT"
             echo "versao=${versao}" >> "$GITHUB_OUTPUT"
           fi
@@ -138,6 +161,34 @@ jobs:
           # --exact-match` do agent.sh espera encontrar na VPS.
           git tag -a "v${VERSAO}" -m "v${VERSAO}"
           git push origin "v${VERSAO}"
+
+      # A tag basta para a VPS (o `agent.sh` faz `git fetch --tags`), mas não
+      # para quem chega pelo GitHub: sem a release publicada, a página do
+      # projeto continua anunciando a versão anterior como a mais recente.
+      # Medido em 2026-08-27: a v1.7.0 nasceu como tag e o `gh release list`
+      # seguiu mostrando a v1.6.0 como Latest até alguém publicar à mão.
+      #
+      # Publicar a release NÃO reconstrói imagem: `publish-image.yml` reage a
+      # `push: tags`, e o gatilho `release:` é proibido lá por teste — ele já
+      # esteve, e o efeito medido na v1.3.0 foi o mesmo commit construído duas
+      # vezes, movendo uma tag de versão já publicada.
+      - name: Publicar a release no GitHub
+        if: steps.pendente.outputs.cortar == 'sim'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          VERSAO: ${{ steps.pendente.outputs.versao }}
+        run: |
+          set -euo pipefail
+          pnpm exec tsx -e '
+            import fs from "node:fs";
+            import { extractChangelogSection } from "./lib/system/changelog";
+            const v = process.env.VERSAO ?? "";
+            const s = extractChangelogSection(fs.readFileSync("CHANGELOG.md", "utf8"), v);
+            if (!s) { console.error(`seção [${v}] não achada no CHANGELOG`); process.exit(1); }
+            const atencao = s.requiresAttention ? `### ⚠️ Requer atenção\n\n${s.requiresAttention}\n\n` : "";
+            fs.writeFileSync("/tmp/notas.md", atencao + s.body);
+          '
+          gh release create "v${VERSAO}" --title "v${VERSAO}" --notes-file /tmp/notas.md
 
       # A falha desta cadeia é silenciosa por natureza — a tag existe e ninguém
       # vê erro —, então o workflow prova a CONSEQUÊNCIA em vez de supô-la.

@@ -18,7 +18,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
-import { requireAuth } from "@/lib/auth/server";
+import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -28,13 +28,20 @@ export default async function LeadPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireAuth();
+  const user = await requireAuth();
+  const activeOrg = await resolveActiveOrg(user);
+  if (!activeOrg) notFound();
+
   const { id } = await params;
 
   const supabase = await createClient();
+  // A RLS enxerga TODAS as organizações do usuário (`fn_user_org_ids()`), então
+  // sem este filtro um link para lead de outra org redirecionava para o funil de
+  // lá — trocando a organização ativa por baixo do usuário sem ele pedir.
   const { data: lead } = await supabase
     .from("crm_leads")
     .select("id, pipeline_id")
+    .eq("organization_id", activeOrg.orgId)
     .eq("id", id)
     .maybeSingle();
 

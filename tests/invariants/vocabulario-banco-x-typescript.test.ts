@@ -208,6 +208,16 @@ const PARES: Array<{
     simbolo: "ModoDeOrcamento",
   },
   {
+    tabela: "followup_flow_pointers",
+    coluna: "surface",
+    // lib/followup/api-schemas.ts → FOLLOWUP_FLOW_SURFACES (tupla `as const`).
+    // O type alias `FollowupFlowSurface = (typeof …)[number]` não carrega
+    // literais no fonte — o extrator lê a const, que é a fonte em runtime
+    // (`z.enum` / UI) e a que o CHECK do banco precisa espelhar.
+    arquivo: "lib/followup/api-schemas.ts",
+    simbolo: "FOLLOWUP_FLOW_SURFACES",
+  },
+  {
     tabela: "webhook_lead_captures",
     coluna: "outcome",
     // lib/schemas/lead-captures.ts → DESFECHOS_DA_CAPTACAO.
