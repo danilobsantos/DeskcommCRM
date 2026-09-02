@@ -21,7 +21,7 @@ services:
       waha:
         condition: service_started
     healthcheck:
-      test: ["CMD", "node", "-e", "require('net').connect(3000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      test: [ "CMD", "node", "-e", "require('net').connect(3000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))" ]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -75,8 +75,9 @@ services:
     networks:
       - internal
       - proxy
+      - supabase
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8787/healthz"]
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8787/healthz" ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -105,9 +106,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: [ "redis-server", "--save", "", "--appendonly", "no" ]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -156,3 +157,8 @@ networks:
   proxy:
     external: true
     name: "${TRAEFIK_NETWORK:-dokploy-network}"
+  dokploy-network:
+    external: true
+  supabase:
+    external: true
+    name: servios-pre0225supabase-sapknj_default
