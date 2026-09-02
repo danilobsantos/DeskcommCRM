@@ -11,8 +11,9 @@ x-logging: &default-logging
 services:
   app:
     mem_limit: 768m
-    image: ${APP_IMAGE:-ghcr.io/melgarafael/deskcommcrm:stable}
-    pull_policy: ${APP_PULL_POLICY:-always}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
     depends_on:
@@ -63,8 +64,6 @@ services:
 
   worker:
     mem_limit: 512m
-    image: ${WORKER_IMAGE:-ghcr.io/melgarafael/deskcomm-worker:stable}
-    pull_policy: ${WORKER_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -131,8 +130,6 @@ services:
       - internal
 
   scheduler:
-    image: ${SCHEDULER_IMAGE:-ghcr.io/melgarafael/deskcomm-scheduler:stable}
-    pull_policy: ${SCHEDULER_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: Dockerfile.scheduler
