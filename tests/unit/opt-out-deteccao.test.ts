@@ -35,6 +35,9 @@ const PEDE_PARA_SAIR = [
   "não quero mais receber nada de vocês",
   "nao quero receber mais",
   "não me mande mais mensagens",
+  // CONTROLE do lookahead da #435, lado português.
+  "nao me mandem mais mensagens",
+  "nao me ligue mais",
   "me tira dessa lista",
   "me remove da lista por favor",
   // CONTROLE do lookahead novo: continua bloqueando quando o objeto É a
@@ -53,6 +56,14 @@ const NAO_PEDE_PARA_SAIR = [
   // Bloquearia um cliente pedindo para mudar a ENTREGA.
   "pare de mandar o pedido nesse endereco",
   "para de mandar a fatura por aqui",
+  // MESMA CLASSE, outra construção: "não me mande mais X" ancorava só no
+  // verbo, como o padrão de cessação acima ancorava. O lookahead de
+  // OBJETOS_NAO_COMUNICATIVOS estava num e faltava no outro — e este é o mais
+  // comum dos dois, porque é como se reclama direto (issue #435).
+  "nao me mande mais boletos",
+  "nao me mande mais faturas por email",
+  "nao me mandem mais cobrancas duplicadas",
+  "nao me envie mais os produtos errados",
   // clínica — o caso que motivou este arquivo
   "tem como parar a dor?",
   "dá pra parar o sangramento em casa?",
@@ -120,6 +131,11 @@ const ESPANHOL_PEDE_PARA_SAIR = [
   "denme de baja",
   // `contactar`, que faltava na lista de verbos de comunicação.
   "no me contacten mas",
+  // CONTROLE do lookahead da #435: quando o objeto É a comunicação, a regra
+  // segue valendo. O lookahead exclui uma lista fechada, não apaga o padrão.
+  "no me manden mas mensajes",
+  "no me escriban mas",
+  "no me llamen mas",
   "no quiero que me contacten",
   "borrame de tus contactos",
   "eliminame de la base de datos",
@@ -162,6 +178,11 @@ const ESPANHOL_NAO_PEDE = [
   // está pedindo para mudar a ENTREGA, não para parar de ser atendido.
   "deja de mandar el pedido a esa direccion",
   "deja de cobrarme el envio",
+  // O espelho espanhol da issue #435 — o objeto é a cobrança, não a conversa.
+  "no me manden mas cobros duplicados",
+  "no me manden mas facturas por correo",
+  "no me manden mas paquetes a esa direccion",
+  "no me mande mas boletas, ya pague",
   // OBJEÇÃO COMERCIAL — o buraco que faltava neste corpus, e por onde um
   // falso positivo entrou. `ESPANHOL_NAO_PEDE` tinha controle de clínica, de
   // e-commerce e de troca de canal, mas nenhum da recusa de VENDA: a frase

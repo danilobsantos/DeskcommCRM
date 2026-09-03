@@ -179,7 +179,20 @@ const FRASES_DE_OPT_OUT: readonly RegExp[] = [
   /\bnao\s+(?:quero|desejo|gostaria)\s+(?:de\s+)?(?:mais\s+)?receber\b(?!\s+(?:ligacao|ligacoes|chamada|chamadas|telefonema|telefonemas|telefone)\b)/u,
   /\bnao\s+quero\s+receber\s+mais\b/u,
   /\bnao\s+quero\s+mais\s+(?:mensagem|mensagens|contato|nada\s+de\s+voces)\b/u,
-  /\bnao\s+me\s+(?:mande|manda|mandem|envie|envia|enviem|chame|chama|ligue|liga)\s+mais\b/u,
+  // "não me mande mais" — mas NÃO "não me mande mais boletos": esta regra
+  // ancorava só no VERBO, e mandar é verbo de comunicação mesmo quando o
+  // objeto é uma cobrança. Bloqueava um cliente que está RECLAMANDO e quer
+  // continuar sendo atendido, com o objeto escrito na própria frase.
+  //
+  // É a mesma classe que o lookahead de `OBJETOS_NAO_COMUNICATIVOS` já
+  // resolvia no padrão de cessação ("parar de mandar o pedido"), e que ficou
+  // sem ele aqui — conserto por instância, não por classe. Esta é a forma
+  // mais COMUM das duas: "não me mande mais X" é como se reclama direto.
+  new RegExp(
+    `\\bnao\\s+me\\s+(?:mande|manda|mandem|envie|envia|enviem|chame|chama|ligue|liga)\\s+mais\\b` +
+      `(?!\\s+(?:${DETERMINANTES_DE_OBJETO})?\\s*(?:${OBJETOS_NAO_COMUNICATIVOS})\\b)`,
+    "u",
+  ),
   /\bme\s+(?:tira|tire|tirem|remove|remova|removam|retira|retire|exclui|exclua|apaga|apague)\s+(?:da|dessa|desta|de\s+sua|da\s+sua)\s+lista\b/u,
   /\bsair\s+d(?:a|essa|esta)\s+lista\b/u,
   /\bcancelar?\s+(?:a\s+)?(?:inscricao|assinatura)\b/u,
@@ -221,7 +234,14 @@ const FRASES_DE_OPT_OUT: readonly RegExp[] = [
   // `lista`, abaixo, mas objeto diferente: quem pede isto não está trocando
   // de assunto, está pedindo para ser esquecido.
   /\b(?:borrame|borrar|eliminame|elimina|sacame|quitame)\s+de\s+(?:tus\s+|mis\s+|la\s+)?(?:contactos|base\s+de\s+datos)\b/u,
-  /\bno\s+me\s+(?:escriba|escriban|escribas|mande|manden|mandes|llame|llamen|contacte|contacten|contactes)\s+mas\b/u,
+  // Espelho exato da regra portuguesa acima, com o mesmo lookahead e pelo
+  // mesmo motivo: "no me manden mas cobros duplicados" é reclamação de
+  // cobrança, não pedido de descadastro.
+  new RegExp(
+    `\\bno\\s+me\\s+(?:escriba|escriban|escribas|mande|manden|mandes|llame|llamen|contacte|contacten|contactes)\\s+mas\\b` +
+      `(?!\\s+(?:${DETERMINANTES_DE_OBJETO})?\\s*(?:${OBJETOS_NAO_COMUNICATIVOS})\\b)`,
+    "u",
+  ),
   // "deja de escribirme", "para de mandarme mensajes" — o pronome PRESO ao
   // infinitivo ("escribirme"), diferente do português, onde ele vem solto
   // ANTES do verbo ("de me mandar"). Sem o sufixo opcional, a construção

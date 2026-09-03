@@ -8,6 +8,65 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [1.11.1] — 2026-08-31
+
+### Corrigido
+
+- **A Fila mostra quem realmente espera uma pessoa, e a aba do automático deixa de ficar vazia** A Inbox dizia quem estava no comando de cada conversa olhando um campo que o
+  atendimento automático nunca consulta. O efeito era grande e silencioso: a aba
+  **Fila** listava como "aguardando atendente" conversas que o robô estava
+  respondendo naquele instante, e a aba do automático ficava quase vazia mesmo com
+  ele atendendo a maior parte da caixa. Numa instalação real, medido: a Fila
+  mostrava 83 conversas, a aba do automático mostrava 2, e o robô atendia 47.
+
+  Quem via isso concluía a coisa errada em qualquer direção — ou que havia uma
+  montanha de gente esperando, ou que a IA tinha parado de trabalhar.
+
+  Agora as duas abas perguntam a mesma coisa que o motor: quem responde a próxima
+  mensagem deste cliente. A Fila passa a listar só o que precisa de uma pessoa de
+  verdade — conversas que a IA escalou, contatos travados para atendimento humano —
+  e a aba do automático mostra o que ele está de fato conduzindo.
+
+  **O número da Fila vai encolher bastante no primeiro acesso depois de atualizar.**
+  Isso é o número certo aparecendo, não trabalho sumindo.
+
+  A mesma correção alcança o "você é o Nº da fila" que o cliente ouve pelo WhatsApp,
+  a numeração na tela e o painel de espera do gerente — os três passam a contar a
+  mesma fila. Antes eles podiam divergir entre si.
+
+  Para quem opera: nada a fazer. Nenhuma configuração nova, nenhum passo de
+  atualização, nenhum dado alterado — só a leitura de quem está no comando.
+
+- **Reclamar de cobrança errada não bloqueia mais o cliente** Quem escrevia "não me mande mais boletos" — ou "no me manden más cobros
+  duplicados" — era tratado como se tivesse pedido para sair, e parava de ser
+  atendido. É o oposto do que a pessoa quis dizer: ela está reclamando de uma
+  cobrança e quer continuar falando com você.
+
+  A regra olhava só o verbo ("mandar"), que é o mesmo de "não me mande mais
+  mensagens". Agora ela olha também o que vem depois: quando o objeto é uma
+  cobrança, uma fatura, um pedido ou um produto, deixa de ser pedido de saída.
+
+  Pedir para sair de verdade continua funcionando igual, nas duas línguas.
+
+- **O atendente de IA volta a achar horário quando consulta a agenda** Numa clínica, o atendente de IA tentou marcar um procedimento e não conseguiu —
+  duas vezes seguidas. Ele fez tudo certo: descobriu o tipo de atendimento,
+  resolveu a data que a pessoa pediu e foi consultar os horários. Mesmo assim
+  respondeu que a equipe precisava confirmar, e abriu um chamado interno.
+
+  A causa não era a agenda nem o atendente. Quando a IA não tem um dado opcional
+  para preencher — no caso, qual profissional atenderia —, alguns modelos escrevem
+  um código vazio em vez de simplesmente não mandar o campo. O sistema aceitava
+  esse código como se fosse um profissional de verdade, procurava a agenda de
+  alguém que não existe, e concluía que não havia horário publicado. Nenhum erro
+  aparecia em lugar nenhum: a consulta era registrada como bem-sucedida.
+
+  O sistema agora reconhece esses códigos vazios e os ignora, voltando a usar o
+  profissional configurado no tipo de atendimento. Isso valia para dezenas de
+  lugares além da agenda — inclusive a busca no acervo de conhecimento, em que o
+  efeito era o atendente responder "não sei" com o material publicado ao lado, e o
+  cadastro de negócios, em que um responsável inexistente ficava gravado e sumia
+  dos filtros por dono.
+
 ## [1.11.0] — 2026-08-31
 
 ### Adicionado
@@ -1662,7 +1721,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.11.0...HEAD
+[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/melgarafael/DeskcommCRM/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.10.0...v1.10.1
