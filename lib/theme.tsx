@@ -40,12 +40,25 @@ function applyTheme(resolved: ResolvedTheme) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Lê do storage no primeiro render do client (não causa hydration mismatch
-  // porque o inline script no layout já setou o data-theme antes do paint).
-  const [theme, setThemeState] = React.useState<Theme>(() => readStoredTheme());
+  // Initializa com "system" em server E client (sem ler localStorage no
+  // useState). Isso garante hydration idêntico. O inline script no layout
+  // já setou data-theme no DOM antes do paint, então não há flash visual.
+  // O useEffect abaixo sincroniza o state com o storage depois da hidratação.
+  const [theme, setThemeState] = React.useState<Theme>("system");
   const [systemTheme, setSystemTheme] = React.useState<ResolvedTheme>(() =>
     getSystemTheme(),
   );
+
+  // Sincroniza theme e systemTheme com o real estado do client depois da
+  // hidratação. No server, getSystemTheme() retorna "light" e readStoredTheme()
+  // retorna "system" — ambos os valores são seguros como default porque o
+  // inline script no layout já aplicou o data-theme correto no DOM antes do paint.
+  React.useEffect(() => {
+    const stored = readStoredTheme();
+    if (stored !== theme) setThemeState(stored);
+    const real = getSystemTheme();
+    if (real !== systemTheme) setSystemTheme(real);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listener pra mudanças do prefers-color-scheme.
   React.useEffect(() => {
