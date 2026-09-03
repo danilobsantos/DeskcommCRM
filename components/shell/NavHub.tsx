@@ -69,7 +69,7 @@ export function NavHub({ group, isPlatformAdmin, role, title, subtitle, locale =
             {items.map((item) => {
               const Icon = item.icon;
               return (
-                <Link key={item.href} href={item.href} className="block">
+                <Link key={item.href} href={item.href} prefetch={false} className="block">
                   <Card className="flex h-full gap-3 p-4 transition-colors hover:border-border-strong">
                     <Icon size={20} weight="regular" aria-hidden className="mt-0.5 shrink-0 text-muted-foreground" />
                     <div>
