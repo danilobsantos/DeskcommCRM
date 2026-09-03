@@ -24,7 +24,8 @@ let _admin: SupabaseClient | null = null;
 export function createAdminClient(): SupabaseClient {
   if (_admin) return _admin;
 
-  _admin = createSupabaseClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+  const supabaseUrl = env.SUPABASE_INTERNAL_URL || env.NEXT_PUBLIC_SUPABASE_URL;
+  _admin = createSupabaseClient(supabaseUrl, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
