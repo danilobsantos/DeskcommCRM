@@ -21,6 +21,7 @@ import {
 } from "@/lib/channels";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { toPublicStorageUrl } from "@/lib/supabase/storage-url";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +70,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
       .from("whatsapp-media")
       .createSignedUrl(msg.media_storage_path, SIGNED_URL_TTL_S);
     if (!signErr && signed?.signedUrl) {
-      const response = NextResponse.redirect(signed.signedUrl, 302);
+      const response = NextResponse.redirect(toPublicStorageUrl(signed.signedUrl), 302);
       response.headers.set("X-Request-Id", requestId);
       return response;
     }

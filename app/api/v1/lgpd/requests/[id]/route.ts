@@ -13,6 +13,7 @@ import type { NextRequest } from "next/server";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { toPublicStorageUrl } from "@/lib/supabase/storage-url";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,7 @@ export async function GET(
       if (signErr) {
         console.error("[lgpd-request-detail] signed URL error", signErr.message);
       } else {
-        signed_pdf_url = signedData?.signedUrl ?? null;
+        signed_pdf_url = signedData?.signedUrl ? toPublicStorageUrl(signedData.signedUrl) : null;
       }
     }
   }
