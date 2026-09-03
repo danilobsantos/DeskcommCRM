@@ -27,6 +27,7 @@ export interface AtRiskData {
 export function useAtRiskLeads() {
   return useQuery({
     queryKey: ["leads-at-risk"],
+    staleTime: 15_000,
     refetchInterval: 60_000,
     queryFn: () =>
       apiClient.get<{ data: AtRiskData }>(`/api/v1/leads/at-risk`).then((r) => r.data),
