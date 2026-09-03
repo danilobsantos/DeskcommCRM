@@ -113,3 +113,4 @@ evidence/.sonda-score-residuo.json
 .qa-vps/
 compose-file-supabase
 .agent
+internal-url.patch
