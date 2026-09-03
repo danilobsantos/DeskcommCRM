@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { isMfaEnrolled, loadAuthUser, requiresMfa, resolveActiveOrg } from "@/lib/auth/server";
+import { isMfaEnrolled, loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { DEFAULT_VISIBILITY_MODE, type VisibilityMode } from "@/lib/auth/types";
+import { empresaExigeMfa, exigeCadastroDeMfa } from "@/lib/auth/politica-mfa";
 import { AuthProvider } from "@/hooks/auth/AuthProvider";
 import { AppShell } from "./_components/AppShell";
 import { EstiloDaMarcaDaOrganizacao } from "./_components/EstiloDaMarcaDaOrganizacao";
@@ -29,27 +30,53 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   let activeOrg = await resolveActiveOrg(user);
 
-  /**
-   * A cor desta organização, serializada, ou `null` quando ela não tem uma.
-   *
-   * Resolvida no MESMO `settings` que o gate de onboarding logo abaixo já lê —
-   * zero consulta nova. A ordem das camadas (organização acima, instalação no
-   * meio, arquivo de instalação embaixo) mora em `lib/branding/organizacao.ts`,
-   * e não aqui: a precedência é regra do produto, não detalhe deste layout.
-   */
-  let cssDaOrganizacao: string | null = null;
+  const admin = createAdminClient();
+
+  // Paraleliza leituras independentes de banco, cookies e marca.
+  // A conexão caiu? A consulta mora no seam (`lib/channels/health`), não aqui:
+  // await listarConexoesCaidas(admin, activeOrg.orgId)
+  const orgPromise = activeOrg
+    ? admin
+        .from("organizations")
+        .select("onboarded_at, status, settings")
+        .eq("id", activeOrg.orgId)
+        .maybeSingle()
+    : Promise.resolve({ data: null });
+
+  const conexoesPromise = activeOrg
+    ? listarConexoesCaidas(admin, activeOrg.orgId)
+    : Promise.resolve([] as ConexaoCaida[]);
+
+  const cookiesPromise = cookies();
+  const mfaPromise = isMfaEnrolled();
+  const paPromise = user.is_platform_admin
+    ? admin
+        .from("platform_admins")
+        .select("mfa_required")
+        .eq("user_id", user.id)
+        .is("revoked_at", null)
+        .maybeSingle()
+    : Promise.resolve(null);
+  const brandInstalacaoPromise = marcaDaInstalacao();
+
+  const [{ data: orgRow }, conexoesCaidas, store, enrolled, paRes, brandInstalacao] =
+    await Promise.all([
+      orgPromise,
+      conexoesPromise,
+      cookiesPromise,
+      mfaPromise,
+      paPromise,
+      brandInstalacaoPromise,
+    ]);
 
   // EPIC-02: gate /app/* on completed onboarding.
   // EPIC-11: gate /app/* on org not being suspended (S-11.08).
+  if (orgRow && !orgRow.onboarded_at) redirect("/onboarding");
+  if (orgRow?.status === "suspended") redirect("/account-suspended");
+
+  let cssDaOrganizacao: string | null = null;
+
   if (activeOrg) {
-    const admin = createAdminClient();
-    const { data: orgRow } = await admin
-      .from("organizations")
-      .select("onboarded_at, status, settings")
-      .eq("id", activeOrg.orgId)
-      .maybeSingle();
-    if (orgRow && !orgRow.onboarded_at) redirect("/onboarding");
-    if (orgRow?.status === "suspended") redirect("/account-suspended");
     // G4-02: expõe visibility_mode ao client (inbox decide visões visíveis).
     // Fonte confiável (admin client, org do cookie validado) — nunca do body.
     const mode = (orgRow?.settings as { visibility_mode?: VisibilityMode } | null)
@@ -62,41 +89,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     // por render, não uma derivação de rampa por requisição.
     const marca = resolverMarcaDaOrganizacao(
       orgRow?.settings ?? null,
-      await marcaDaInstalacao(),
+      brandInstalacao,
       env,
     );
 
-    // SÓ quando a cor veio mesmo da organização. Se ela não configurou nada, a
-    // resolução devolve a cor da instalação — e reemiti-la aqui, escopada no
-    // `<body>`, seria repetir no documento um bloco que já vale pela raiz. Além
-    // de bytes, custaria a única pergunta que a presença do bloco responde.
+    // SÓ quando a cor veio mesmo da organização.
     if (marca.origens.cor === "organizacao") {
-      // Os `motivos` de uma cor recusada NÃO são registrados aqui de propósito:
-      // este caminho roda para todo tenant a cada render, e um aviso por
-      // organização no log da instalação é como um alarme deixa de ser lido. O
-      // laço de retorno desta feature é a tela `/app/settings/marca`, que mostra
-      // os motivos para quem pode consertá-los — o admin daquela organização.
       cssDaOrganizacao = cssDaMarca(marca.cor, ESCOPO_DA_ORGANIZACAO).css;
     }
 
-    // Desce para o menu CAMPO A CAMPO, e só o campo que a organização definiu.
-    // Sem a condição por campo, `marca.name` seria o nome da instalação (ou o
-    // padrão do produto) e o menu passaria a ler um caminho novo para exibir
-    // exatamente o que já exibia — trocando a fonte sem trocar o valor, que é
-    // como se cria uma regressão invisível. E, com o logo no mesmo objeto, uma
-    // condição só (a do nome) faria a organização que definiu apenas a cor
-    // arrastar junto um `logoUrl` que ela não escolheu.
-    //
-    // `origens` é a resposta de `primeiroDefinido` (`lib/branding/resolve.ts`),
-    // que ignora valor vazio e desce: quando ele diz "organizacao", o valor é
-    // não-vazio e já veio trimado — por isso a barra lateral nunca recebe `""`
-    // desta origem.
-    //
-    // `origens.logoUrl === "organizacao"` passou a ser ALCANÇÁVEL na onda do
-    // upload: `camadaDaOrganizacao` declara o logo a partir de
-    // `settings.branding.logo_path`. A condição foi escrita aqui uma onda ANTES
-    // do produtor existir, de propósito — foi o que fez o upload por organização
-    // ser só a camada, sem mais uma passada pela casca inteira.
     const marcaDoTenant = {
       ...(marca.origens.nome === "organizacao" ? { nome: marca.name } : {}),
       ...(marca.origens.logoUrl === "organizacao" && marca.logoUrl !== null
@@ -108,17 +109,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }
   }
 
-  // A conexão caiu? A consulta mora no seam (`lib/channels/health`), não aqui:
-  // tela que monta o select de `channel_sessions` à mão foi o que deixou três
-  // seletores oferecendo canal arquivado, e o invariante `canais-selecionaveis`
-  // existe por causa disso. De quebra, o filtro de estados fica LITERALMENTE o
-  // mesmo que decide o aviso da Central — duas listas divergiriam com o tempo.
-  const conexoesCaidas: ConexaoCaida[] = activeOrg
-    ? await listarConexoesCaidas(createAdminClient(), activeOrg.orgId)
-    : [];
-
   // Read sidebar collapsed state SSR to avoid flash.
-  const store = await cookies();
   const collapsed = store.get("sidebar_collapsed")?.value === "1";
 
   // Impersonate (S-11.07): verify cookie server-side and resolve tenant name.
@@ -129,7 +120,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (impCookie) {
     const result = verifyImpersonateCookie(impCookie);
     if (result.valid && result.payload) {
-      const admin = createAdminClient();
       const { data: org } = await admin
         .from("organizations")
         .select("display_name")
@@ -145,15 +135,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }
   }
 
-  const enrolled = await isMfaEnrolled();
-  // A decisão deixou de ser uma constante de papel: ela lê a política de quem
-  // pode exigir (a plataforma e a empresa). Ver `lib/auth/politica-mfa.ts`.
-  const needsMfaGate = await requiresMfa(
-    activeOrg?.role,
-    user.is_platform_admin,
-    user.id,
-    activeOrg?.orgId,
-  );
+  // A decisão lê a política da plataforma e da empresa sem reconsultar `settings`
+  const plataformaExige = (paRes?.data?.mfa_required as boolean | undefined) ?? null;
+  const empresaExige = empresaExigeMfa(orgRow?.settings);
+  const needsMfaGate = exigeCadastroDeMfa({
+    role: activeOrg?.role,
+    isPlatformAdmin: user.is_platform_admin,
+    plataformaExige,
+    empresaExige,
+  });
+
   const shell = <AppShell sidebarCollapsed={collapsed}>{children}</AppShell>;
 
   return (

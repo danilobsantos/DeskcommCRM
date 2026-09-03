@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
+import { ServerTiming } from "@/lib/api/server-timing";
 import { ApiError } from "@/lib/api/types";
 import { fail, ok } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
@@ -17,21 +18,19 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-  const supabase = await createClient();
+  const timing = new ServerTiming();
 
-  const {
-    data: { user },
-    error: authErr,
-  } = await supabase.auth.getUser();
-  if (authErr || !user) {
+  const authUser = await timing.measure("auth", () => loadAuthUser());
+  if (!authUser) {
     return fail("unauthenticated", "Auth required.", 401, { requestId });
   }
 
-  const authUser = await loadAuthUser();
-  const activeOrg = authUser ? await resolveActiveOrg(authUser) : null;
+  const activeOrg = await timing.measure("resolve_org", () => resolveActiveOrg(authUser));
   if (!activeOrg) {
     return fail("no_active_org", "No active organization.", 403, { requestId });
   }
+
+  const supabase = await createClient();
 
   const url = new URL(req.url);
   const qsParsed = listConversationsQuerySchema.safeParse({
@@ -66,22 +65,28 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const { conversations, cursor, has_more } = await listConversationsHandler(
-      supabase,
-      {
-        organization_id: activeOrg.orgId,
-        actor: { type: "user", id: user.id },
-        requestId,
-      },
-      qsParsed.data,
+    const { conversations, cursor, has_more } = await timing.measure("db_query", () =>
+      listConversationsHandler(
+        supabase,
+        {
+          organization_id: activeOrg.orgId,
+          actor: { type: "user", id: authUser.id },
+          requestId,
+        },
+        qsParsed.data,
+      ),
     );
     // O nome de quem atende entra AQUI, na borda HTTP, e não no handler: o
     // handler é compartilhado com as tools MCP, que já resolvem o nome por conta
     // própria (`lib/mcp/tools/conversations.ts`) — enriquecer lá faria a mesma
     // leitura duas vezes por chamada do agente.
-    return ok(await comNomeDoAtendente(conversations), {
+    const dataComNome = await timing.measure("enrich_attendant", () =>
+      comNomeDoAtendente(conversations),
+    );
+    return ok(dataComNome, {
       requestId,
       meta: { cursor, has_more },
+      headers: { "Server-Timing": timing.header() },
     });
   } catch (err) {
     if (err instanceof ApiError) {

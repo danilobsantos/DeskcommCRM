@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
+import { ServerTiming } from "@/lib/api/server-timing";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { carregaRadarDeRisco, RADAR_MIN_HOURS_PADRAO } from "@/lib/leads/radar-de-risco";
@@ -31,7 +32,11 @@ export type { AtRiskLead } from "@/lib/leads/radar-de-risco";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-  const authz = await requireRole("agent", { requestId, resource: "leads_at_risk" });
+  const timing = new ServerTiming();
+
+  const authz = await timing.measure("auth", () =>
+    requireRole("agent", { requestId, resource: "leads_at_risk" }),
+  );
   if (!authz.ok) return authz.response;
   const { org } = authz;
 
@@ -47,12 +52,17 @@ export async function GET(req: NextRequest): Promise<Response> {
   const { limit, min_hours } = parsed.data;
 
   try {
-    const radar = await carregaRadarDeRisco(createAdminClient(), {
-      organizationId: org.orgId,
-      limit,
-      minHours: min_hours,
+    const radar = await timing.measure("radar_db", () =>
+      carregaRadarDeRisco(createAdminClient(), {
+        organizationId: org.orgId,
+        limit,
+        minHours: min_hours,
+      }),
+    );
+    return ok(radar, {
+      requestId,
+      headers: { "Server-Timing": timing.header() },
     });
-    return ok(radar, { requestId });
   } catch {
     return fail("internal_error", "Falha ao carregar o radar.", 500, { requestId });
   }
