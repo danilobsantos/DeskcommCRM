@@ -154,7 +154,7 @@ describe("precedência entre os três andares", () => {
 
   it("sem organização e sem instalação, sobra o `.env` — a pilha inteira desce", () => {
     const marca = resolverMarcaDaOrganizacao(null, null, AMBIENTE);
-    expect(marca.origens).toEqual({ nome: "env", logoUrl: "padrao", cor: "env" });
+    expect(marca.origens).toEqual({ nome: "env", logoUrl: "padrao", logoUrlDark: "padrao", cor: "env" });
     expect(marca.cor?.semente).toBe("#123456");
   });
 
@@ -167,13 +167,13 @@ describe("precedência entre os três andares", () => {
       INSTALACAO,
       AMBIENTE,
     );
-    expect(tudo.origens).toEqual({ nome: "organizacao", logoUrl: "banco", cor: "organizacao" });
+    expect(tudo.origens).toEqual({ nome: "organizacao", logoUrl: "banco", logoUrlDark: "padrao", cor: "organizacao" });
     expect(tudo.name).toBe("Loja da Ana");
     expect(tudo.cor?.semente).toBe("#b3261e");
 
     // Tirando o andar de cima, quem assume é o do meio — e não o de baixo.
     const semOrg = resolverMarcaDaOrganizacao(null, INSTALACAO, AMBIENTE);
-    expect(semOrg.origens).toEqual({ nome: "banco", logoUrl: "banco", cor: "banco" });
+    expect(semOrg.origens).toEqual({ nome: "banco", logoUrl: "banco", logoUrlDark: "padrao", cor: "banco" });
     expect(semOrg.cor?.semente).toBe("#2563eb");
   });
 });
@@ -197,7 +197,7 @@ describe("ler `settings.branding` sem confiar em nada", () => {
       marcaDaOrganizacaoDeSettings({
         branding: { app_name: 7, accent_hex: { a: 1 }, logo_path: ["x"] },
       }),
-    ).toEqual({ app_name: null, accent_hex: null, logo_path: null });
+    ).toEqual({ app_name: null, accent_hex: null, logo_path: null, logo_path_dark: null });
   });
 
   it("lê os dois campos e ignora o que não conhece", () => {
@@ -222,6 +222,7 @@ describe("ler `settings.branding` sem confiar em nada", () => {
       app_name: "Loja da Ana",
       accent_hex: "#b3261e",
       logo_path: "11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.png",
+      logo_path_dark: null,
     });
   });
 });

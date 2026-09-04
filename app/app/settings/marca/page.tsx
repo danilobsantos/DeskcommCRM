@@ -78,29 +78,20 @@ export default async function MarcaDaOrganizacaoPage() {
         gravada={{
           app_name: gravada?.app_name ?? null,
           accent_hex: gravada?.accent_hex ?? null,
-          // O CAMINHO no bucket, não a URL: quem converte é `logoDaCamada`, do
-          // lado do navegador, com a base do Storage injetada em runtime. Mandar
-          // a URL pronta do servidor faria a tela ter uma segunda regra de
-          // montagem, e a que divergisse seria a que ninguém abre.
           logo_path: gravada?.logo_path ?? null,
+          logo_path_dark: gravada?.logo_path_dark ?? null,
         }}
-        // As DUAS camadas de baixo descem para o formulário, e não uma resolução
-        // já pronta: a prévia ao vivo remonta a pilha inteira a cada tecla, pelo
-        // mesmo caminho do servidor. Sem elas, a tela não saberia responder "e se
-        // eu apagar o nome, o que aparece?" — que é a pergunta que o placeholder
-        // e o bloco de origens existem para responder.
         instalacao={{
           app_name: linha?.app_name ?? null,
           logo_url: linha?.logo_url ?? null,
           logo_path: linha?.logo_path ?? null,
+          logo_path_dark: linha?.logo_path_dark ?? null,
           accent_hex: linha?.accent_hex ?? null,
         }}
-        // Só os três campos de marca do ambiente, nunca o objeto `env` inteiro:
-        // isto atravessa a fronteira para o navegador, e o que atravessa é o que
-        // já está visível na interface de qualquer forma.
         ambiente={{
           APP_NAME: env.APP_NAME,
           APP_LOGO_URL: env.APP_LOGO_URL,
+          APP_LOGO_URL_DARK: env.APP_LOGO_URL_DARK,
           APP_ACCENT_HEX: env.APP_ACCENT_HEX,
         }}
       />

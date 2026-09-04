@@ -76,6 +76,7 @@ describe("a marca padrão do produto", () => {
     expect(resolveBranding(undefined, undefined), COMO_PERSONALIZAR).toEqual({
       name: MARCA_DO_PRODUTO,
       logoUrl: null,
+      logoUrlDark: null,
       initial: "D",
     });
   });

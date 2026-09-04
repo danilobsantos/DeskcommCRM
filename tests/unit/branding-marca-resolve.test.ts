@@ -197,7 +197,7 @@ describe("precedência POR CAMPO", () => {
     const marca = resolverMarca([organizacao, ambiente], REGUA);
     expect(marca.logoUrl).toBe("https://cdn.exemplo.com/org.svg");
     expect(marca.name).toBe("Revenda XPTO");
-    expect(marca.origens).toEqual({ nome: "env", logoUrl: "organizacao", cor: "env" });
+    expect(marca.origens).toEqual({ nome: "env", logoUrl: "organizacao", logoUrlDark: "padrao", cor: "env" });
   });
 
   it("campo vazio não conta como definido", () => {
@@ -223,7 +223,7 @@ describe("precedência POR CAMPO", () => {
     const marca = resolverMarca([], REGUA);
     expect(marca.name).toBe("DeskcommCRM");
     expect(marca.cor).toBeNull();
-    expect(marca.origens).toEqual({ nome: "padrao", logoUrl: "padrao", cor: "padrao" });
+    expect(marca.origens).toEqual({ nome: "padrao", logoUrl: "padrao", logoUrlDark: "padrao", cor: "padrao" });
     expect(marca.motivos).toEqual([]);
   });
 });
