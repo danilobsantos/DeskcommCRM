@@ -12469,6 +12469,26 @@ grant select on public.ai_provider_credentials_safe to authenticated;
 notify pgrst, 'reload schema';
 
 
+-- ---- credenciais de IA voltam a ser LIDAS por quem não é admin (migration 0207) ----
+-- A 0150 (bloco acima) deixou `..._write` como ÚNICA policy da tabela. `FOR ALL`
+-- cobre o SELECT, então a leitura passou a exigir admin — e a view
+-- `ai_provider_credentials_safe` é `security_invoker=true`, então um `manager`
+-- passava na autorização da aplicação e era filtrado para ZERO LINHAS na base.
+-- A tela respondia 200 com `[]`, e a pessoa concluía que não havia credencial.
+--
+-- O par que o cabeçalho da 0150 promete: escrita de admin, leitura por tenancy.
+-- O segredo segue protegido pelo GRANT POR COLUNA logo acima — é ele, e não a
+-- RLS, que esconde `api_key_encrypted/iv/tag`. (issue #292)
+--
+-- Este bloco vem DEPOIS do da 0150 de propósito: lá em cima há um
+-- `drop policy if exists ..._select`, e inverter a ordem apagaria este conserto.
+drop policy if exists tenant_isolation_ai_provider_credentials_select on public.ai_provider_credentials;
+create policy tenant_isolation_ai_provider_credentials_select on public.ai_provider_credentials
+  for select using (organization_id in (select public.fn_user_org_ids()));
+
+notify pgrst, 'reload schema';
+
+
 
 -- ---- o quadro de clientes montado no onboarding (migration 0156) ----
 -- O gatilho `trg_seed_default_pipeline_for_org` semeia um funil de e-commerce em
@@ -12745,9 +12765,10 @@ notify pgrst, 'reload schema';
 -- Idempotente: `create or replace function`, revokes e grants declarativos.
 
 create or replace function public.fn_definir_logo_da_organizacao(
-  p_org   uuid,
-  p_actor uuid,
-  p_path  text
+  p_org       uuid,
+  p_actor     uuid,
+  p_path      text,
+  p_path_dark text default null
 ) returns integer
     language plpgsql
     volatile
@@ -12755,8 +12776,9 @@ create or replace function public.fn_definir_logo_da_organizacao(
     set search_path to 'public', 'pg_temp'
 as $$
 declare
-  v_linhas integer;
-  v_path   text;
+  v_linhas    integer;
+  v_path      text;
+  v_path_dark text;
 begin
   if p_org is null or p_actor is null then
     raise exception 'logo_da_organizacao_argumento_nulo'
@@ -12764,18 +12786,20 @@ begin
   end if;
 
   v_path := nullif(btrim(coalesce(p_path, '')), '');
+  v_path_dark := nullif(btrim(coalesce(p_path_dark, '')), '');
 
-  -- O PREFIXO ASSEVERADO DENTRO DO BANCO — o gate que sobrevive ao segundo
-  -- chamador. A rota monta o caminho a partir da organização resolvida do
-  -- cookie, mas "a rota monta certo" é promessa de UM chamador. Sem esta linha,
-  -- um caminho de outro escopo (o `platform/...` que qualquer pessoa lê no HTML
-  -- da tela de login) entraria como logo da organização — e o delete-on-replace
-  -- da rota, rodando como `service_role`, apagaria o logo da instalação inteira
-  -- na troca seguinte.
+  -- PREFIXO ASSEVERADO DENTRO DO BANCO — mesmo gate da versão anterior.
   if v_path is not null
      and v_path !~ ('^' || p_org::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$')
   then
     raise exception 'logo_da_organizacao_caminho_fora_do_escopo'
+      using errcode = '22023';
+  end if;
+
+  if v_path_dark is not null
+     and v_path_dark !~ ('^' || p_org::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$')
+  then
+    raise exception 'logo_da_organizacao_caminho_dark_fora_do_escopo'
       using errcode = '22023';
   end if;
 
@@ -12796,19 +12820,28 @@ begin
       using errcode = '42501';
   end if;
 
-  -- Merge no CAMPO. `jsonb_set` direto em '{branding,logo_path}' NÃO serviria:
-  -- com `branding` ausente, `create_missing` só cria a ÚLTIMA chave e o caminho
-  -- intermediário faltando devolve o jsonb original intocado — silenciosamente.
+  -- Merge no CAMPO — mantém `logo_path` preservado se `p_path` for null,
+  -- e faz o mesmo para `logo_path_dark`.
   update public.organizations o
      set settings = case
+           when v_path is null and v_path_dark is null
+             then jsonb_set(
+                    coalesce(o.settings, '{}'::jsonb), '{branding}',
+                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path' - 'logo_path_dark', true)
            when v_path is null
              then jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path', true)
+                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path'
+                      || jsonb_build_object('logo_path_dark', v_path_dark), true)
+           when v_path_dark is null
+             then jsonb_set(
+                    coalesce(o.settings, '{}'::jsonb), '{branding}',
+                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path_dark'
+                      || jsonb_build_object('logo_path', v_path), true)
            else jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
                     coalesce(o.settings -> 'branding', '{}'::jsonb)
-                      || jsonb_build_object('logo_path', v_path), true)
+                      || jsonb_build_object('logo_path', v_path, 'logo_path_dark', v_path_dark), true)
          end
    where o.id = p_org;
 
@@ -12817,8 +12850,8 @@ begin
 end;
 $$;
 
-comment on function public.fn_definir_logo_da_organizacao(uuid, uuid, text) is
-  'Grava (ou apaga) organizations.settings.branding.logo_path com merge no CAMPO — não toca em app_name, accent_hex nem nas demais chaves de settings. Assevera que o caminho começa pelo proprio organization_id: caminho de outro escopo levanta 22023. Papel insuficiente levanta 42501. Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/api/v1/marca/logo/route.ts.';
+comment on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text) is
+  'Grava (ou apaga) organizations.settings.branding.logo_path e logo_path_dark com merge no CAMPO. Assevera prefixo por organization_id. Papel insuficiente levanta 42501. Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/api/v1/marca/logo/route.ts.';
 
 -- ── O FORWARD-FIX DA 0157 ───────────────────────────────────────────────────
 --
@@ -12881,11 +12914,15 @@ begin
            -- "Limpar" com logo gravado NÃO apaga o logo: o campo tem controle
            -- próprio na tela, e limpar nome+cor responde a OUTRA pergunta.
            when v_limpar and coalesce(o.settings #>> '{branding,logo_path}', '') = ''
+                and coalesce(o.settings #>> '{branding,logo_path_dark}', '') = ''
              then coalesce(o.settings, '{}'::jsonb) - 'branding'
            when v_limpar
              then jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    jsonb_build_object('logo_path', o.settings #> '{branding,logo_path}'), true)
+                    jsonb_build_object(
+                      'logo_path', o.settings #> '{branding,logo_path}',
+                      'logo_path_dark', o.settings #> '{branding,logo_path_dark}'
+                    ), true)
            -- `p_marca || preservado`: o lado DIREITO vence em `||`, então o
            -- `logo_path` gravado sobrevive à substituição do objeto.
            -- `jsonb_strip_nulls` SÓ no fragmento preservado — nunca em `p_marca`,
@@ -12893,7 +12930,10 @@ begin
            else jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
                     p_marca || jsonb_strip_nulls(
-                      jsonb_build_object('logo_path', o.settings #> '{branding,logo_path}')), true)
+                      jsonb_build_object(
+                        'logo_path', o.settings #> '{branding,logo_path}',
+                        'logo_path_dark', o.settings #> '{branding,logo_path_dark}'
+                      )), true)
          end
    where o.id = p_org;
 
@@ -12903,7 +12943,7 @@ end;
 $$;
 
 comment on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb) is
-  'Grava organizations.settings.branding com merge ATÔMICO (jsonb_set), sem tocar nas demais chaves do jsonb (llm, routing, visibility_mode, atrito, ai_dispatch_mode, canonical_conversation_tags, lost_reasons_extra, plan) e PRESERVANDO branding.logo_path, que tem escritor próprio (fn_definir_logo_da_organizacao, migration 0158). Devolve linhas afetadas: 0 = a organização não existe. Papel insuficiente levanta 42501. Chamador: app/actions/settings/updateMarcaDaOrganizacao.ts.';
+  'Grava organizations.settings.branding com merge ATÔMICO, PRESERVANDO branding.logo_path e branding.logo_path_dark (escritores próprios). Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/actions/settings/updateMarcaDaOrganizacao.ts.';
 
 -- OS DOIS REVOKES EM CADA FUNÇÃO (CLAUDE.md, item 9) — origens DISTINTAS de
 -- EXECUTE, e tratar uma só deixa a função exposta com o gate verde:
@@ -12914,9 +12954,9 @@ comment on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb) is
 --       toda função criada DEPOIS dele — isto é, para todo apêndice.
 -- `from authenticated` pelo motivo de (B) e mais um: as duas são VOLÁTEIS.
 -- Definer volátil alcançável por qualquer usuário logado é escrita cross-tenant.
-revoke execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text)
+revoke execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text)
   from public, anon, authenticated;
-grant  execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text)
+grant  execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text)
   to service_role;
 
 revoke execute on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb)
@@ -14430,6 +14470,31 @@ alter table public.platform_branding
 -- `tests/invariants/vocabulario-banco-x-typescript.test.ts`, cujo extrator só
 -- reconhece `= ANY (ARRAY[...])` e estoura sobre regex. Mesma razão de
 -- `platform_branding_accent_hex`.
+
+
+-- ---- logo da marca: coluna DARK (migration 0208) ----
+--
+-- `logo_path_dark` é o logo para o tema escuro. NULL = usa `logo_path` nos dois
+-- temas (backward compat). O CHECK é idêntico ao de `logo_path`.
+
+alter table public.platform_branding
+  add column if not exists logo_path_dark text;
+
+comment on column public.platform_branding.logo_path_dark is
+  'Caminho do arquivo de logo para o tema ESCURO em storage/brand-logos, sempre platform/<uuid>.<png|jpg>. NULL = usa logo_path (light) nos dois temas. Escrito por app/api/v1/marca/logo/route.ts com variant=dark.';
+
+update public.platform_branding
+   set logo_path_dark = null
+ where logo_path_dark is not null
+   and logo_path_dark !~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$';
+
+alter table public.platform_branding
+  drop constraint if exists platform_branding_logo_path_dark;
+alter table public.platform_branding
+  add constraint platform_branding_logo_path_dark check (
+    logo_path_dark is null
+    or logo_path_dark ~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$'
+  );
 
 notify pgrst, 'reload schema';
 
@@ -17115,6 +17180,118 @@ grant  execute on function public.comando_da_conversa(public.conversations) to a
 -- packaging proíbe pedir a quem opera uma VPS.
 notify pgrst, 'reload schema';
 
+-- ---- o catálogo de produtos da loja (migration 0204) ----
+create table if not exists public.catalog_products (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+
+  -- O código do dono da loja (SKU, código interno). É por ele que a importação
+  -- de planilha reconhece "isto é o mesmo produto, atualize" em vez de duplicar.
+  codigo text not null,
+  nome text not null,
+  descricao text,
+
+  marca text,
+  categoria text,
+
+  -- `_cents` + `moeda`, a regra do CLAUDE.md. `nuvemshop_products` não tem
+  -- moeda e é a exceção errada, não o padrão: `orders` e `crm_leads` têm.
+  preco_cents bigint not null,
+  moeda text not null default 'BRL',
+  -- O que a loja pagou. Existe para a regra de desconto do agente ter piso: sem
+  -- custo, "pode dar 10%" é um número que ninguém sabe se cabe. Opcional porque
+  -- muita loja não quer essa informação no sistema.
+  custo_cents bigint,
+
+  -- ⚠️ `controla_estoque` NÃO é firula, é o conserto de uma armadilha medida na
+  -- tool antiga: ela filtra `available_qty > 0` por default, então uma loja que
+  -- não conta estoque (decant de perfume, item sob encomenda) teria o catálogo
+  -- INTEIRO invisível para o agente. Com este campo, quem não controla estoque
+  -- continua aparecendo.
+  controla_estoque boolean not null default true,
+  quantidade integer not null default 0,
+
+  ativo boolean not null default true,
+  -- 'manual' | 'planilha' | 'nuvemshop'. Vocabulário ABERTO de propósito (sem
+  -- CHECK): um clone com origem legada quebraria o `update.sh`, e a doutrina de
+  -- migrations proíbe. Quem escreve usa a constante de `lib/catalogo/tipos.ts`.
+  origem text not null default 'manual',
+
+  imagem_url text,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  constraint catalog_products_preco_nao_negativo check (preco_cents >= 0),
+  constraint catalog_products_custo_nao_negativo check (custo_cents is null or custo_cents >= 0),
+  constraint catalog_products_quantidade_nao_negativa check (quantidade >= 0),
+  constraint catalog_products_moeda_iso check (moeda ~ '^[A-Z]{3}$')
+);
+
+-- O código é a identidade dentro da organização: é ele que a planilha reusa.
+create unique index if not exists catalog_products_org_codigo_key
+  on public.catalog_products (organization_id, codigo);
+
+-- A lista da tela: ativos primeiro, depois por nome.
+create index if not exists catalog_products_org_ativos_idx
+  on public.catalog_products (organization_id, ativo, nome);
+
+-- ⚠️ O ÍNDICE QUE FAZ A BUSCA DO AGENTE FUNCIONAR.
+--
+-- O cliente escreve "ifone 15 pro 256", e o catálogo diz "iPhone 15 Pro 256GB".
+-- Medido em 20 mil títulos: `ilike '%ifone 15%'` devolve ZERO linhas, e a
+-- similaridade da frase inteira não separa 128GB de 256GB — que é exatamente
+-- onde o preço erra. A busca é por TOKEN (ver `lib/catalogo/busca.ts`), e o
+-- trigrama serve a parte difusa dela.
+create index if not exists catalog_products_nome_trgm
+  on public.catalog_products using gin (nome public.gin_trgm_ops);
+
+alter table public.catalog_products enable row level security;
+
+-- Leitura para a organização; ESCRITA só de `manager` para cima. É o molde da
+-- 0177 (`calendar_event_types`), e é o que a tabela da Nuvemshop não tem: preço
+-- de venda não se altera com papel de leitura.
+drop policy if exists catalog_products_select on public.catalog_products;
+create policy catalog_products_select on public.catalog_products
+  for select using (
+    (organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin()
+  );
+
+drop policy if exists catalog_products_write on public.catalog_products;
+create policy catalog_products_write on public.catalog_products
+  using (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+-- `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON TABLES TO anon` do baseline alcança
+-- TODA tabela criada depois dele — inclusive esta. Sem o revoke, o catálogo
+-- inteiro fica legível pela anon key, que vai para o browser.
+revoke all on public.catalog_products from anon;
+grant select, insert, update, delete on public.catalog_products to authenticated;
+grant all on public.catalog_products to service_role;
+
+drop trigger if exists trg_catalog_products_updated_at on public.catalog_products;
+create trigger trg_catalog_products_updated_at
+  before update on public.catalog_products
+  for each row execute function public.fn_set_updated_at();
+
+comment on table public.catalog_products is
+  'O catálogo que a LOJA possui — uma linha por item vendável, com o preço que o agente de IA responde. Distinto de nuvemshop_products, que é ESPELHO de uma loja remota: aqui a loja é a fonte da verdade.';
+comment on column public.catalog_products.codigo is
+  'Código interno do dono (SKU). É a identidade que a importação de planilha reusa para atualizar em vez de duplicar.';
+comment on column public.catalog_products.custo_cents is
+  'O que a loja pagou. Existe para a regra de desconto do agente ter piso — sem custo, um teto de desconto é um número que ninguém sabe se cabe.';
+comment on column public.catalog_products.controla_estoque is
+  'false = item que não se conta (decant, sob encomenda). A busca do agente não o esconde por quantidade zero.';
+
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
@@ -17188,3 +17365,36 @@ grant execute on function public.fn_decrypt_oauth(bytea) to service_role;
 grant execute on function public.fn_encrypt_oauth(text) to service_role;
 grant execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) to service_role;
 grant execute on function public.fn_update_budget_consumption() to service_role;
+
+-- ---- versão de acervo conta por MATERIAL, não por agente (migration 0205) ----
+--
+-- O índice `ai_kbv_version_unique` era `(agent_id, version_number)`, mas desde a
+-- 0181 o número é contado por `knowledge_source_id`. Toda fonte nova nasce com
+-- `version_number = 1`, então a SEGUNDA fonte do mesmo agente colidia com a
+-- primeira e nunca indexava — a tela dizia "pronto" e `chunks_count` ficava 0.
+-- Determinístico, não corrida. Medido em produção: 5 materiais, 1 indexou.
+--
+-- Dois índices parciais porque há dois regimes: versões anteriores à 0181 têm
+-- `knowledge_source_id` NULL e guardam o invariante antigo (por agente); sem o
+-- segundo índice elas ficariam sem restrição, já que NULL não colide com NULL.
+delete from public.ai_knowledge_versions v
+ where v.knowledge_source_id is not null
+   and exists (
+     select 1 from public.ai_knowledge_versions o
+      where o.knowledge_source_id = v.knowledge_source_id
+        and o.version_number = v.version_number
+        and o.id < v.id
+   );
+
+alter table public.ai_knowledge_versions
+  drop constraint if exists ai_kbv_version_unique;
+
+drop index if exists public.ai_kbv_version_unique;
+
+create unique index if not exists ai_kbv_version_por_fonte
+  on public.ai_knowledge_versions (knowledge_source_id, version_number)
+  where knowledge_source_id is not null;
+
+create unique index if not exists ai_kbv_version_por_agente_legado
+  on public.ai_knowledge_versions (agent_id, version_number)
+  where knowledge_source_id is null;

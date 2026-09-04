@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/auth/AuthProvider";
 import { ConnectionHealthDot } from "@/components/connections/ConnectionHealthDot";
 import { VersionFooter } from "@/components/shell/VersionFooter";
 import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
+import { useTheme } from "@/lib/theme";
 import { GRUPO_NO_RODAPE, NAV_GROUPS, sidebarGroups } from "@/lib/navigation/registry";
 
 interface SidebarContentProps {
@@ -63,16 +64,18 @@ export function SidebarContent({
    * rota de `activeOrg`, e os dois lados leem o mesmo objeto por construção.
    */
   const nome = activeOrg?.marca?.nome ?? brand.name;
-  /**
-   * O mesmo desenho para o LOGO — e é este par de linhas que fecha o caminho do
-   * `logo_url` gravado até a tela.
-   *
-   * `||` e não `??`: vazio é AUSÊNCIA de logo, não "logo em branco". É a regra
-   * que `resolveBranding` e `primeiroDefinido` já aplicam nas camadas de baixo, e
-   * com `??` um `""` vindo de cima apagaria o logo do revendedor em vez de
-   * descer para ele — que é o contrário do que a precedência por campo promete.
-   */
-  const logo = activeOrg?.marca?.logoUrl || brand.logoUrl;
+  const { resolvedTheme } = useTheme();
+  // Precedência do logo por TEMA, com o logo do TENANT à frente do da instalação:
+  // quem personalizou a conta usa o logo dele nos dois temas; o logo do /admin
+  // (instalação) só aparece para quem NÃO personalizou. Antes, no tema escuro, uma
+  // organização com só o logo claro caía no logo escuro da instalação — a logo
+  // "nem sempre" acompanhava o tema. `|| null` mantém a regra de que string vazia
+  // é AUSÊNCIA (mesma semântica de `resolveBranding` e `primeiroDefinido`).
+  const orgLight = activeOrg?.marca?.logoUrl || null;
+  const orgDark = activeOrg?.marca?.logoUrlDark || null;
+  const logoLight = orgLight ?? brand.logoUrl;
+  const logoDark = orgDark ?? orgLight ?? brand.logoUrlDark ?? brand.logoUrl;
+  const logo = resolvedTheme === "dark" ? (logoDark ?? logoLight) : logoLight;
 
   return (
     <>
@@ -104,7 +107,25 @@ export function SidebarContent({
           </span>
         )}
       </div>
-      <nav className="flex-1 space-y-3 overflow-y-auto p-2" aria-label={t("Navegação principal")}>
+      {/*
+        A DENSIDADE É MEDIDA, NÃO ESTÉTICA.
+
+        O e2e `navegacao.spec.ts` exige que o menu inteiro caiba em 1280×900 sem
+        rolar — porque um grupo abaixo da dobra é indistinguível de um grupo que
+        não existe. Com 18 links a margem era de ~4px: a tela nova de Produtos
+        estourou a dobra por uma linha, e reprovou no CI.
+
+        `py-1.5` → `py-1` (linha de 32px para 28px) e o intervalo entre grupos de
+        12px para 8px devolvem ~90px — folga para o próximo item, em vez de
+        deixar a próxima tela nova repetir esta corrida.
+
+        ⚠️ Isto é remendo de densidade, não conserto estrutural. O menu vai
+        estourar de novo: a saída existente é o HUB (o grupo IA já a usa — nove
+        das treze telas dele moram atrás do "Ver tudo em IA"), e o CRM ainda não
+        tem um. Quando o quinto destino de CRM aparecer, é hub que se cria, não
+        mais 4px que se raspa.
+      */}
+      <nav className="flex-1 space-y-2 overflow-y-auto p-2" aria-label={t("Navegação principal")}>
         {grupos.map(({ group, items }) => {
           const tituloId = `nav-grupo-${group.id}`;
           return (
@@ -116,7 +137,7 @@ export function SidebarContent({
               ) : (
                 <h2
                   id={tituloId}
-                  className="px-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60"
+                  className="px-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
                 >
                   {t(group.label)}
                 </h2>
@@ -134,7 +155,7 @@ export function SidebarContent({
                         aria-current={isActive ? "page" : undefined}
                         onClick={onNavigate}
                         className={cn(
-                          "relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
+                          "relative flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
                           isActive
                             ? "bg-accent text-accent-foreground"
                             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -161,7 +182,7 @@ export function SidebarContent({
                       aria-current={pathname === group.hub.href ? "page" : undefined}
                       onClick={onNavigate}
                       className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
+                        "flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
                         pathname === group.hub.href
                           ? "bg-accent text-accent-foreground"
                           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -187,7 +208,7 @@ export function SidebarContent({
             aria-current={pathname.startsWith(rodape.href) ? "page" : undefined}
             onClick={onNavigate}
             className={cn(
-              "mb-1 flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
+              "mb-1 flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
               pathname.startsWith(rodape.href)
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",

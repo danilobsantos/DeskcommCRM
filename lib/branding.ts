@@ -21,8 +21,10 @@ export const DEFAULT_APP_NAME = "DeskcommCRM";
 export type Branding = {
   /** Nome exibido na interface e nos títulos de página. */
   name: string;
-  /** URL do logo, ou `null` quando a marca deve aparecer como texto. */
+  /** URL do logo para o tema CLARO, ou `null` quando a marca deve aparecer como texto. */
   logoUrl: string | null;
+  /** URL do logo para o tema ESCURO, ou `null` (usa `logoUrl` nos dois temas). */
+  logoUrlDark: string | null;
   /** Primeira letra do nome — usada onde só cabe um caractere (sidebar recolhida). */
   initial: string;
 };
@@ -38,14 +40,15 @@ export type Branding = {
 export function resolveBranding(
   name: string | undefined | null,
   logoUrl: string | undefined | null,
+  logoUrlDark?: string | undefined | null,
 ): Branding {
   const resolvedName = (name ?? "").trim() || DEFAULT_APP_NAME;
   const resolvedLogo = (logoUrl ?? "").trim();
+  const resolvedLogoDark = (logoUrlDark ?? "").trim();
   return {
     name: resolvedName,
     logoUrl: resolvedLogo.length > 0 ? resolvedLogo : null,
-    // Spread em vez de [0]: nome começando com emoji ou acento composto quebraria
-    // no meio do code point e renderizaria caractere inválido.
+    logoUrlDark: resolvedLogoDark.length > 0 ? resolvedLogoDark : null,
     initial: ([...resolvedName][0] ?? DEFAULT_APP_NAME[0]!).toUpperCase(),
   };
 }
@@ -85,7 +88,7 @@ export function resolveBranding(
 export function branding(): Branding {
   if (typeof window !== "undefined") {
     const runtime = window.__PUBLIC_ENV__;
-    return resolveBranding(runtime?.APP_NAME, runtime?.APP_LOGO_URL);
+    return resolveBranding(runtime?.APP_NAME, runtime?.APP_LOGO_URL, runtime?.APP_LOGO_URL_DARK);
   }
-  return resolveBranding(process.env.APP_NAME, process.env.APP_LOGO_URL);
+  return resolveBranding(process.env.APP_NAME, process.env.APP_LOGO_URL, process.env.APP_LOGO_URL_DARK);
 }

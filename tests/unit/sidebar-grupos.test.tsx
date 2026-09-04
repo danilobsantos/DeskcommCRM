@@ -27,6 +27,9 @@ vi.mock("@/hooks/auth/AuthProvider", () => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => "/app/inbox",
 }));
+vi.mock("@/lib/theme", () => ({
+  useTheme: () => ({ theme: "light", resolvedTheme: "light", setTheme: vi.fn(), toggle: vi.fn() }),
+}));
 vi.mock("@/components/connections/ConnectionHealthDot", () => ({
   ConnectionHealthDot: () => null,
 }));

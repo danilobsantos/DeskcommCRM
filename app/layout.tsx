@@ -233,7 +233,7 @@ async function EstiloDaMarca() {
  */
 async function MarcaNoNavegador() {
   const { marca } = await marcaResolvida();
-  return <PublicEnvScript marca={{ name: marca.name, logoUrl: marca.logoUrl }} />;
+  return <PublicEnvScript marca={{ name: marca.name, logoUrl: marca.logoUrl, logoUrlDark: marca.logoUrlDark }} />;
 }
 
 /**
@@ -263,7 +263,7 @@ async function MarcaDosClientComponents({ children }: { children: React.ReactNod
   // mandá-los engordaria o payload do RSC de TODA página com dado que ninguém lê.
   return (
     <MarcaDaInstalacaoProvider
-      marca={{ name: marca.name, logoUrl: marca.logoUrl, initial: marca.initial }}
+      marca={{ name: marca.name, logoUrl: marca.logoUrl, logoUrlDark: marca.logoUrlDark, initial: marca.initial }}
     >
       {children}
     </MarcaDaInstalacaoProvider>
