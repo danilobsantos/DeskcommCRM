@@ -75,11 +75,10 @@ services:
       # dentro do container, localhost é o próprio worker — o WAHA está na rede
       # do compose (serviço waha, porta interna 3000). Sobrepõe o .env.local.
       WAHA_API_BASE_URL: http://waha:3000
-      SUPABASE_DB_URL: ${SUPABASE_DB_URL_DOCKER:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}
-      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
       # Postgres local (supabase start) escuta no host — 127.0.0.1 dentro do
       # container é o próprio worker. host.docker.internal resolve pro host.
-      SUPABASE_DB_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL_DOCKER:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
     ports:
       - "8787:8787"
     healthcheck:
