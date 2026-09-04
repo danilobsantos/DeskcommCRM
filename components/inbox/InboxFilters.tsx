@@ -199,7 +199,7 @@ export function InboxFilters({ value, onChange }: Props) {
         <Switch
           id="only-unread"
           checked={value.onlyUnread}
-          onCheckedChange={(v) => onChange({ ...value, onlyUnread: v })}
+          onCheckedChange={(v: boolean) => onChange({ ...value, onlyUnread: v })}
         />
       </div>
     </div>
