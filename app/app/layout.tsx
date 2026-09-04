@@ -103,6 +103,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ...(marca.origens.logoUrl === "organizacao" && marca.logoUrl !== null
         ? { logoUrl: marca.logoUrl }
         : {}),
+      // `logoUrlDark` tem o MESMO destino do logo claro: sem ele, o logo escuro
+      // do tenant era descartado aqui e a barra caía no logo escuro da
+      // INSTALAÇÃO em todo tema escuro — o tenant não via o logo próprio dele
+      // nunca, e "nem sempre" a logo acompanhava o tema (só sem personalização).
+      ...(marca.origens.logoUrlDark === "organizacao" && marca.logoUrlDark !== null
+        ? { logoUrlDark: marca.logoUrlDark }
+        : {}),
     };
     if (Object.keys(marcaDoTenant).length > 0) {
       activeOrg = { ...activeOrg, marca: marcaDoTenant };

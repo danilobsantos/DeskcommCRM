@@ -330,6 +330,7 @@ const schema = z.object({
   // O <PublicEnvScript/> injeta os valores em runtime.
   APP_NAME: z.string().optional().default(""),
   APP_LOGO_URL: z.string().optional().default(""),
+  APP_LOGO_URL_DARK: z.string().optional().default(""),
   /**
    * Cor da marca — um hex (`#506d48`), do qual `lib/branding/` deriva a rampa
    * inteira. Vazio = o produto se pinta com a cor dele.

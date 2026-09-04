@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/auth/AuthProvider";
 import { ConnectionHealthDot } from "@/components/connections/ConnectionHealthDot";
 import { VersionFooter } from "@/components/shell/VersionFooter";
 import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
+import { useTheme } from "@/lib/theme";
 import { GRUPO_NO_RODAPE, NAV_GROUPS, sidebarGroups } from "@/lib/navigation/registry";
 
 interface SidebarContentProps {
@@ -63,16 +64,18 @@ export function SidebarContent({
    * rota de `activeOrg`, e os dois lados leem o mesmo objeto por construção.
    */
   const nome = activeOrg?.marca?.nome ?? brand.name;
-  /**
-   * O mesmo desenho para o LOGO — e é este par de linhas que fecha o caminho do
-   * `logo_url` gravado até a tela.
-   *
-   * `||` e não `??`: vazio é AUSÊNCIA de logo, não "logo em branco". É a regra
-   * que `resolveBranding` e `primeiroDefinido` já aplicam nas camadas de baixo, e
-   * com `??` um `""` vindo de cima apagaria o logo do revendedor em vez de
-   * descer para ele — que é o contrário do que a precedência por campo promete.
-   */
-  const logo = activeOrg?.marca?.logoUrl || brand.logoUrl;
+  const { resolvedTheme } = useTheme();
+  // Precedência do logo por TEMA, com o logo do TENANT à frente do da instalação:
+  // quem personalizou a conta usa o logo dele nos dois temas; o logo do /admin
+  // (instalação) só aparece para quem NÃO personalizou. Antes, no tema escuro, uma
+  // organização com só o logo claro caía no logo escuro da instalação — a logo
+  // "nem sempre" acompanhava o tema. `|| null` mantém a regra de que string vazia
+  // é AUSÊNCIA (mesma semântica de `resolveBranding` e `primeiroDefinido`).
+  const orgLight = activeOrg?.marca?.logoUrl || null;
+  const orgDark = activeOrg?.marca?.logoUrlDark || null;
+  const logoLight = orgLight ?? brand.logoUrl;
+  const logoDark = orgDark ?? orgLight ?? brand.logoUrlDark ?? brand.logoUrl;
+  const logo = resolvedTheme === "dark" ? (logoDark ?? logoLight) : logoLight;
 
   return (
     <>

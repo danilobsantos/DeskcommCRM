@@ -80,6 +80,7 @@ export type CamadaDeMarca = {
   readonly origem: string;
   readonly nome?: string | null;
   readonly logoUrl?: string | null;
+  readonly logoUrlDark?: string | null;
   /**
    * O envelope CRU, como veio da fonte — `unknown` de propósito: validar é
    * trabalho do resolvedor, e uma camada que já entregasse validado esconderia
@@ -102,6 +103,7 @@ export type MarcaResolvida = Branding & {
   readonly origens: {
     readonly nome: string;
     readonly logoUrl: string;
+    readonly logoUrlDark: string;
     readonly cor: string;
   };
   readonly motivos: readonly MotivoDaMarca[];
@@ -319,7 +321,8 @@ export function resolverMarca(
 ): MarcaResolvida {
   const nome = primeiroDefinido(camadas, (c) => c.nome);
   const logo = primeiroDefinido(camadas, (c) => c.logoUrl);
-  const base = resolveBranding(nome?.valor, logo?.valor);
+  const logoDark = primeiroDefinido(camadas, (c) => c.logoUrlDark);
+  const base = resolveBranding(nome?.valor, logo?.valor, logoDark?.valor);
 
   const motivos: MotivoDaMarca[] = [];
   let cor: CorResolvida | null = null;
@@ -342,6 +345,7 @@ export function resolverMarca(
     origens: {
       nome: nome?.origem ?? PADRAO,
       logoUrl: logo?.origem ?? PADRAO,
+      logoUrlDark: logoDark?.origem ?? PADRAO,
       cor: origemDaCor,
     },
     motivos,
@@ -363,18 +367,8 @@ export function resolverMarca(
 export type LinhaDaInstalacao = {
   readonly app_name?: string | null;
   readonly logo_url?: string | null;
-  /**
-   * O ARQUIVO subido pela tela, dentro do bucket `brand-logos`. Caminho, nunca
-   * URL — a razão está no cabeçalho de `lib/branding/logo.ts` (DIRC-C: a URL é
-   * função determinística do caminho, e gravá-la amarraria a marca ao host do
-   * projeto Supabase de hoje).
-   *
-   * Convive com `logo_url` em vez de substituí-lo, e a ordem entre os dois é
-   * `logoDaCamada`: o arquivo vence a URL colada. `logo_url` continua existindo
-   * porque é a rede de rollback — o `agent.sh` reverte a IMAGEM, nunca o banco,
-   * então uma instalação pode voltar a rodar código que não conhece esta coluna.
-   */
   readonly logo_path?: string | null;
+  readonly logo_path_dark?: string | null;
   readonly accent_hex?: string | null;
 };
 
@@ -395,19 +389,16 @@ export type LinhaDaInstalacao = {
 export function camadaDaInstalacao(linha: LinhaDaInstalacao | null): CamadaDeMarca {
   if (!linha) return { origem: "banco" };
   const hex = (linha.accent_hex ?? "").trim();
-  // O arquivo subido vence a URL colada, DENTRO desta camada — ver `logoDaCamada`.
   const logoUrl = logoDaCamada(linha.logo_path, linha.logo_url);
-  // Mesma regra do `.env`: campo vazio é ausência de configuração, não cor com
-  // defeito. Sem isto, uma linha semeada de um `.env` sem cor emitiria
-  // `cor_ausente` em toda instalação de fábrica — e aviso no caso normal ensina
-  // o operador a ignorar avisos.
+  const logoUrlDark = logoDaCamada(linha.logo_path_dark, undefined);
   if (hex.length === 0) {
-    return { origem: "banco", nome: linha.app_name, logoUrl };
+    return { origem: "banco", nome: linha.app_name, logoUrl, logoUrlDark };
   }
   return {
     origem: "banco",
     nome: linha.app_name,
     logoUrl,
+    logoUrlDark,
     cor: envelopeDeSemente(hex),
   };
 }
@@ -425,18 +416,16 @@ export function camadaDaInstalacao(linha: LinhaDaInstalacao | null): CamadaDeMar
 export function camadaDoAmbiente(fonte: {
   APP_NAME?: string;
   APP_LOGO_URL?: string;
+  APP_LOGO_URL_DARK?: string;
   APP_ACCENT_HEX?: string;
 }): CamadaDeMarca {
   const hex = (fonte.APP_ACCENT_HEX ?? "").trim();
-  // Chave declarada e vazia (`APP_ACCENT_HEX=`) é o estado que o `install.sh`
-  // deixa quando o operador não responde — o mesmo caso que `resolveBranding`
-  // trata para o nome. Não é cor ausente com defeito, é instalação de fábrica:
-  // a camada simplesmente não fala sobre cor.
-  if (hex.length === 0) return { origem: "env", nome: fonte.APP_NAME, logoUrl: fonte.APP_LOGO_URL };
+  if (hex.length === 0) return { origem: "env", nome: fonte.APP_NAME, logoUrl: fonte.APP_LOGO_URL, logoUrlDark: fonte.APP_LOGO_URL_DARK };
   return {
     origem: "env",
     nome: fonte.APP_NAME,
     logoUrl: fonte.APP_LOGO_URL,
+    logoUrlDark: fonte.APP_LOGO_URL_DARK,
     cor: envelopeDeSemente(hex),
   };
 }
@@ -455,14 +444,8 @@ export function camadaDoAmbiente(fonte: {
 export type MarcaDaOrganizacao = {
   readonly app_name?: string | null;
   readonly accent_hex?: string | null;
-  /**
-   * O logo DESTA organização — caminho dentro de `brand-logos`, sob o prefixo do
-   * próprio `organization_id`. Sem `logo_url` par: aqui não há herança de `.env`
-   * a preservar (a chave `APP_LOGO_URL` é da instalação), então uma URL colada
-   * por organização seria contrato novo sem consumidor. Quem não subiu arquivo
-   * continua com o logo da instalação, pela precedência por campo.
-   */
   readonly logo_path?: string | null;
+  readonly logo_path_dark?: string | null;
 };
 
 /**
@@ -495,11 +478,13 @@ export function camadaDaOrganizacao(marca: MarcaDaOrganizacao | null): CamadaDeM
   if (!marca) return { origem: "organizacao" };
   const hex = (marca.accent_hex ?? "").trim();
   const logoUrl = logoDaCamada(marca.logo_path, null);
-  if (hex.length === 0) return { origem: "organizacao", nome: marca.app_name, logoUrl };
+  const logoUrlDark = logoDaCamada(marca.logo_path_dark, null);
+  if (hex.length === 0) return { origem: "organizacao", nome: marca.app_name, logoUrl, logoUrlDark };
   return {
     origem: "organizacao",
     nome: marca.app_name,
     logoUrl,
+    logoUrlDark,
     cor: envelopeDeSemente(hex),
   };
 }

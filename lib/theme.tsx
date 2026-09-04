@@ -45,9 +45,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // já setou data-theme no DOM antes do paint, então não há flash visual.
   // O useEffect abaixo sincroniza o state com o storage depois da hidratação.
   const [theme, setThemeState] = React.useState<Theme>("system");
-  const [systemTheme, setSystemTheme] = React.useState<ResolvedTheme>(() =>
-    getSystemTheme(),
-  );
+  // Valor CONSTANTE no estado inicial, e não getSystemTheme(): este
+  // inicializador roda no SSR E na hidratação, e getSystemTheme() lê
+  // window.matchMedia — "light" no servidor, o tema real no cliente. Um
+  // valor diferente nos dois lados quebra a hidratação (ex.: a Sidebar
+  // desenha o logo claro no SSR e o escuro no cliente). O useEffect abaixo
+  // sincroniza o valor real logo depois da hidratação.
+  const [systemTheme, setSystemTheme] = React.useState<ResolvedTheme>("light");
 
   // Sincroniza theme e systemTheme com o real estado do client depois da
   // hidratação. No server, getSystemTheme() retorna "light" e readStoredTheme()
