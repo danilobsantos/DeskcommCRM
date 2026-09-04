@@ -32,7 +32,7 @@ const INBOX_TABS: { value: InboxTab; label: string }[] = [
   // padrão — e ela mudou de significado junto (deixou de filtrar `ai_handling` e
   // passou a perguntar a régua do motor), então o rótulo velho descreveria outra
   // coisa.
-  { value: "ai", label: "Automático" },
+  { value: "ai", label: "Auto" },
 ];
 
 /**
@@ -168,19 +168,21 @@ export function InboxFilters({ value, onChange }: Props) {
       <Tabs
         value={value.tab}
         onValueChange={(v) => onChange({ ...value, tab: v as InboxTab })}
+        className="w-full"
       >
-        <TabsList
-          className="grid h-8 w-full"
-          style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
-        >
+        <TabsList className="flex h-8 w-full flex-nowrap items-center justify-between gap-0.5 rounded-lg bg-muted/60 p-0.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((tab) => {
             const meta = INBOX_TABS.find((t) => t.value === tab)!;
             const count = countFor[tab];
             return (
-              <TabsTrigger key={tab} value={tab} className="gap-1 text-[11px]">
-                {t(meta.label)}
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                className="group inline-flex flex-1 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-all hover:bg-muted/80 hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-xs"
+              >
+                <span>{t(meta.label)}</span>
                 {typeof count === "number" && count > 0 && (
-                  <span className="text-[10px] tabular-nums text-muted-foreground">
+                  <span className="text-[10px] font-semibold tabular-nums opacity-75">
                     {count}
                   </span>
                 )}
@@ -197,7 +199,7 @@ export function InboxFilters({ value, onChange }: Props) {
         <Switch
           id="only-unread"
           checked={value.onlyUnread}
-          onCheckedChange={(v) => onChange({ ...value, onlyUnread: v })}
+          onCheckedChange={(v: boolean) => onChange({ ...value, onlyUnread: v })}
         />
       </div>
     </div>
