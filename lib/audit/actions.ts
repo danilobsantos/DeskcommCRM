@@ -50,6 +50,10 @@ export const AUDIT_ACTIONS = [
   "lead.won",
   "lead.lost",
   "lead.bulk_action",
+  // A importação de planilha (extração do PR #418). O GESTO é auditado além dos
+  // N `lead.created`: "quem despejou 300 negócios neste funil, e quando" é a
+  // pergunta que se faz depois, e ela não se responde contando linhas soltas.
+  "lead.imported",
   "contact.created",
   "contact.updated",
   "contacts.imported",
@@ -392,6 +396,13 @@ export const AUDIT_ACTIONS = [
   // Relógio HTTP (Hobby / sem contêiner scheduler): uma batida que alguém
   // de fora chama. Só audita quando alguma tarefa mexeu em dado.
   "relogio.tick_run",
+
+  // O catálogo da loja (migration 0204). Preço de venda é dado que a equipe
+  // disputa — quem mudou e quando precisa ficar registrado.
+  "catalog_product.created",
+  "catalog_product.updated",
+  "catalog_product.deleted",
+  "catalog_product.imported",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
