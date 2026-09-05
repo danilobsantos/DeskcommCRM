@@ -99,6 +99,55 @@ const ERRO_EM_PORTUGUES: Record<string, string> = {
   rate_limited: "Muitas trocas seguidas. Tente de novo em alguns minutos.",
 };
 
+interface InputDeLogoProps {
+  readonly escopo: EscopoDoLogo;
+  readonly variante: VarianteDoLogo;
+  readonly label: string;
+  readonly entradaRef: React.RefObject<HTMLInputElement | null>;
+  readonly temLogo: boolean;
+  readonly enviando: boolean;
+  readonly onEnviar: (arquivo: File, variante: VarianteDoLogo) => void;
+  readonly onRemover: (variante: VarianteDoLogo) => void;
+  readonly t: (chave: string) => string;
+}
+
+function InputDeLogo({
+  escopo,
+  variante,
+  label,
+  entradaRef,
+  temLogo,
+  enviando,
+  onEnviar,
+  onRemover,
+  t,
+}: InputDeLogoProps) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={`logo-${escopo}-${variante}`}>{label}</Label>
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          ref={entradaRef}
+          id={`logo-${escopo}-${variante}`}
+          type="file"
+          accept="image/png,image/jpeg"
+          disabled={enviando}
+          onChange={(e) => {
+            const arquivo = e.target.files?.[0];
+            if (arquivo) void onEnviar(arquivo, variante);
+          }}
+          className="max-w-xs text-sm file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border file:bg-surface-elevated file:px-3 file:py-1.5 file:text-sm"
+        />
+        {temLogo ? (
+          <Button type="button" variant="outline" onClick={() => void onRemover(variante)} disabled={enviando}>
+            {t("Remover")}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function CampoDeLogo({
   escopo,
   logoDaCamada,
@@ -200,56 +249,29 @@ export function CampoDeLogo({
     }
   }
 
-  function InputDeLogo({
-    variante,
-    label,
-    entradaRef,
-    temLogo,
-  }: {
-    variante: VarianteDoLogo;
-    label: string;
-    entradaRef: React.RefObject<HTMLInputElement | null>;
-    temLogo: boolean;
-  }) {
-    return (
-      <div className="space-y-2">
-        <Label htmlFor={`logo-${escopo}-${variante}`}>{label}</Label>
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            ref={entradaRef}
-            id={`logo-${escopo}-${variante}`}
-            type="file"
-            accept="image/png,image/jpeg"
-            disabled={enviando}
-            onChange={(e) => {
-              const arquivo = e.target.files?.[0];
-              if (arquivo) void enviar(arquivo, variante);
-            }}
-            className="max-w-xs text-sm file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border file:bg-surface-elevated file:px-3 file:py-1.5 file:text-sm"
-          />
-          {temLogo ? (
-            <Button type="button" variant="outline" onClick={() => void remover(variante)} disabled={enviando}>
-              {t("Remover")}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4" data-campo-de-logo={escopo} data-hidratado={hidratado ? "" : undefined}>
       <InputDeLogo
+        escopo={escopo}
         variante="light"
         label={t("Logo para aparência clara")}
         entradaRef={entradaLight}
         temLogo={!!logoGravadoLight}
+        enviando={enviando}
+        onEnviar={enviar}
+        onRemover={remover}
+        t={t}
       />
       <InputDeLogo
+        escopo={escopo}
         variante="dark"
         label={t("Logo para aparência escura (opcional)")}
         entradaRef={entradaDark}
         temLogo={!!logoGravadoDark}
+        enviando={enviando}
+        onEnviar={enviar}
+        onRemover={remover}
+        t={t}
       />
       <p className="text-xs text-text-muted">
         {t("PNG ou JPG, até")} {Math.round(TAMANHO_MAXIMO_DO_LOGO / 1024)}{" "}
