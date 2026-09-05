@@ -9,6 +9,18 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  db-migrate:
+    image: postgres:17-alpine
+    restart: "no"
+    env_file: .env
+    volumes:
+      - ./supabase/baseline.sql:/baseline.sql:ro
+    command: >
+      sh -c 'psql "$${SUPABASE_DB_ADMIN_URL:-$$SUPABASE_DB_URL}" -f /baseline.sql'
+    networks:
+      - internal
+      - supabase
+
   app:
     mem_limit: 768m
     build:
@@ -17,6 +29,8 @@ services:
     restart: unless-stopped
     env_file: .env
     depends_on:
+      db-migrate:
+        condition: service_completed_successfully
       srh:
         condition: service_started
       waha:

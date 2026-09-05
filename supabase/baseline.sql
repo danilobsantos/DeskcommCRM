@@ -14472,7 +14472,7 @@ alter table public.platform_branding
 -- `platform_branding_accent_hex`.
 
 
--- ---- logo da marca: coluna DARK (migration 0208) ----
+-- ---- logo da marca: coluna DARK (migration 9001) ----
 --
 -- `logo_path_dark` é o logo para o tema escuro. NULL = usa `logo_path` nos dois
 -- temas (backward compat). O CHECK é idêntico ao de `logo_path`.
@@ -14499,16 +14499,16 @@ alter table public.platform_branding
 notify pgrst, 'reload schema';
 
 
--- ---- derruba o overload legado de fn_definir_logo_da_organizacao (migration 0209) ----
+-- ---- derruba o overload legado de fn_definir_logo_da_organizacao (migration 9002) ----
 --
--- A 0208 criou `fn_definir_logo_da_organizacao(p_org,p_actor,p_path,p_path_dark)`
+-- A 9001 criou `fn_definir_logo_da_organizacao(p_org,p_actor,p_path,p_path_dark)`
 -- com `create or replace` sobre a versão de 3 argumentos da 0158. Assinatura
 -- diferente NÃO substitui: cria um SEGUNDO overload. Quem chama com 3 parâmetros
--- (código pré-0208, o cenário de rollback) faz o PostgREST devolver 300 PGRST203
+-- (código pré-9001, o cenário de rollback) faz o PostgREST devolver 300 PGRST203
 -- "Could not choose the best candidate" — o logo da organização para de gravar.
 -- Este `drop` mantém só a versão de 4; quem chamar com 3 resolve por `default null`.
 -- No baseline só existe a de 4, então aqui é no-op para quem instala do zero; o
--- alvo real é o clone que atualiza de um baseline pré-0208, onde a de 3 existe.
+-- alvo real é o clone que atualiza de um baseline pré-9001, onde a de 3 existe.
 drop function if exists public.fn_definir_logo_da_organizacao(uuid, uuid, text);
 
 

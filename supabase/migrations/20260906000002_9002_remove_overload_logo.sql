@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0209 — DERRUBA O OVERLOAD LEGADO DE fn_definir_logo_da_organizacao.
+-- 9002 — DERRUBA O OVERLOAD LEGADO DE fn_definir_logo_da_organizacao.
 --
 -- O problema: a migration 0208 estendeu `fn_definir_logo_da_organizacao` de
 -- `(uuid, uuid, text)` para `(uuid, uuid, text, text default null)` usando
