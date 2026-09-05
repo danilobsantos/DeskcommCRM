@@ -126,3 +126,9 @@ evidence/.sonda-score-residuo.json
 compose-file-supabase
 internal-url.patch
 .agent
+
+# Backups do install/update: env-*.bak é uma CÓPIA INTEIRA do .env — service
+# role key, secrets de webhook e a chave de cifra dos tokens. O padrão `.env*`
+# acima não os alcança porque eles vivem num diretório, com outro prefixo.
+backups/
+
