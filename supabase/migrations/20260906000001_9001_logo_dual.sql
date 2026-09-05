@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0208 — LOGO DUAL: LIGHT E DARK.
+-- 9001 — LOGO DUAL: LIGHT E DARK.
 --
 -- O problema: um único `logo_path` por camada. Um logo escuro com fundo
 -- transparente some no tema claro, e vice-versa. Esta migration adiciona
