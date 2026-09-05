@@ -739,6 +739,87 @@ GitHub dispara no horário é do GitHub.
 
 ---
 
+## J20 — A IA só atende quem tem origem elegível (gate opt-in por canal) `[P0]`
+
+**Por que P0:** achado pelo dono do produto num número que é também o WhatsApp
+pessoal/comercial dele — a IA respondeu automaticamente para cliente atual, dono
+de incorporadora, contato pessoal, fornecedor e conversa antiga. O
+DeskcommCRM responde `allow by default` (publicou agente para a sessão → atende
+todo inbound); num número compartilhado com gente isso é a IA assumindo conversa
+que não era dela.
+
+**Contexto do código:** gate OPT-IN por canal —
+`channel_sessions.metadata.ai_gate = 'allowlist'` (ausente / `'open'` =
+comportamento de hoje). Com o gate, a IA só responde quando
+`contacts.ai_authorized_at` está setado (por uma origem elegível) e dentro da
+janela `AI_ALLOWLIST_TTL_DAYS`. A decisão é `lib/ai/elegibilidade/gate.ts`
+(pura), consultada pelo drain (`lib/agent-engine/edge/crm/drain.ts`, decide
+enfileirar) e pelo turno (`lib/agent-engine/agent/inbound-turn.ts`, decide
+rodar). Origens que autorizam: webhook do Respondi
+(`app/api/v1/webhooks/in/[token]`), match de campanha na ingestão
+(`lib/channels/pos-entrada.ts` × `organizations.settings.campanhas_whatsapp`),
+ação `send_ai_message`, retomada manual (`lib/escalacao/retomada.ts`).
+
+| # | Caso | Expectativa | Cobertura |
+|---|---|---|---|
+| J20.1 | Cliente atual manda "boa noite" (gate allowlist, contato não autorizado) | IA NÃO responde; conversa fica humana | **UNIT** — `gate.test.ts` "teste 1/3/4/9", `drain.test.ts` "gate allowlist + contato NÃO autorizado" |
+| J20.2 | Cliente atual com conversa aberta, não autorizado | IA NÃO responde (estado da conversa não pesa) | **UNIT** — `gate.test.ts` "teste 2" |
+| J20.3 | Contato pessoal manda mensagem | IA NÃO responde | **UNIT** — coberto por J20.1 (mesma regra) |
+| J20.4 | Fornecedor manda proposta comercial | IA NÃO responde automaticamente | **UNIT** — coberto por J20.1 |
+| J20.5 | Conversa antiga de 3 dias; publicar agente | publicar NÃO dispara nada (`ai_agent.published` não tem consumidor) + o drain pula evento superado por inbound mais recente | **UNIT** — `drain.test.ts` "evento superado por inbound mais recente"; **CÓDIGO** — grep: zero consumidor de `ai_agent.published` |
+| J20.6 | Nova submissão Respondi → o contato fica elegível | IA pode responder o retorno do lead | **UNIT** — webhook seta `ai_authorized_reason='respondi:<form>:<sub>'`; **E2E** — `tests/e2e/j20-elegibilidade-respondi.spec.ts` (submissão real na URL da fonte → `ai_authorized_at` carimbado → o retorno pelo WhatsApp gera `job_queue` `inbound_turn`; CONTROLE: número sem Respondi no mesmo canal → evento `done` sem job) |
+| J20.7 | Segundo turno do Respondi (dias depois, conversa viva) | IA continua atendendo (keep-alive renova o carimbo) | **UNIT** — `gate.test.ts` "teste 6/7"; keep-alive em `inbound-turn.ts` |
+| J20.8 | Nova mensagem de campanha com identificador autorizado | IA pode assumir | **UNIT** — `campanha.test.ts` "teste 8" |
+| J20.9 | Nova mensagem genérica "oi" | IA NÃO responde | **UNIT** — `campanha.test.ts` "teste 9" + `gate.test.ts` |
+| J20.10 | Conversa marcada human_only (`force_human`) | IA nunca responde até reativação explícita | **UNIT** — `gate.test.ts` "teste 10", `drain.test.ts` "force_human" |
+| J20.11 | Follow-up em lead Respondi elegível | funciona | **CÓDIGO** — silence-sweep só barra quem o gate barra |
+| J20.12 | Follow-up em cliente atual (não autorizado, gate allowlist) | NÃO enrola | **CÓDIGO** — `silence-sweep.ts` `loadSilentContactIds` pula `gateAllowlist && !autorizado`; **E2E** — `tests/e2e/j20-elegibilidade-followup.spec.ts` (fluxo de silêncio publicado pela API + cron real: silencioso autorizado → nasce `followup_enrollments`; silencioso NÃO autorizado, mesmo canal → nenhum enrollment) |
+| J20.13 | Reinício do worker com backlog de eventos pending | zero disparos: cada evento cujo inbound já foi superado vira `done` sem job | **UNIT** — `drain.test.ts` "evento superado por inbound mais recente" |
+| J20.14 | Submissão antiga (fora do TTL) | NÃO reativa a IA sozinha | **UNIT** — `gate.test.ts` "submissão antiga (fora da janela)", `drain.test.ts` "autorização EXPIRADA" |
+| J20.15 | Org SEM versão de agente publicada (caminho legado `ai-response-worker`), gate allowlist, contato não autorizado | IA NÃO responde por este caminho tampouco | **UNIT** — `ai-response-worker-elegibilidade.test.ts` (skip `nao_elegivel_para_ia` antes de ler mensagem/agente; fail-closed em erro de leitura) |
+| J20.16 | Follow-up de TEXTO FIXO drenado inline (`enviarTextoFixoPendente`, sem worker), contato não autorizado | NÃO envia; job vira `done` | **UNIT** — `enviar-texto-fixo.test.ts` "conversa NÃO elegível" (+ fail-closed volta pra `pending`) |
+| J20.17 | Cliente antigo irritado (gate allowlist, não autorizado) → worker de sentimento dispara `low_sentiment` | `triggerHandoff` NÃO dispara: sem "um humano vai te atender", sem mexer no estado da conversa | **UNIT** — `handoff-orchestrator-elegibilidade.test.ts` (`bloqueioPorAllowlist` e `conversa_silenciada` barram; fail-closed em erro) |
+| J20.18 | Eu respondo o cliente à mão pelo meu WhatsApp numa conversa autorizada | IA para naquela conversa por um PRAZO (`PRAZO_DO_SILENCIO_MS`, 60 min) renovado a cada nova fala humana, SEM apagar `ai_authorized_at`; volta sozinha quando o prazo vence, ou antes por "devolver ao automático" | **UNIT** — `atendimento-manual.test.ts` (as duas pontas do prazo medidas pelo motor real `decidirElegibilidade`, renovação, e o que NUNCA encurta: `'infinity'` do handoff formal e janela mais longa) + `waha-ingest-atendimento-manual.test.ts` (via `dispatchWahaEvent` real; eco do próprio envio NÃO pausa) + guarda de fonte no Zernio + fiação em `handoff-fernando-fiacao.test.ts`; **E2E** — `tests/e2e/j20-elegibilidade-atendimento-manual.spec.ts` (webhook `fromMe` genuíno → `bot_silenced_until` finito e futuro, nunca `'infinity'`, + rastro; `ai_authorized_at` intacto; 2ª mensagem RENOVA o prazo; tela mostra o selo; "devolver ao automático" solta a trava e a autorização continua) |
+| J20.19 | Worker parado acorda com backlog; dois inbound antigos com o MESMO `sent_at` | a "última inbound" é a mais RECENTE (por `created_at`), nunca a de maior uuid — o evento antigo é pulado | **INVARIANTE** — `tests/invariants/drain-recencia-inbound.test.ts` (Postgres real) + `drain.test.ts` guarda a cláusula `coalesce(sent_at, created_at)` |
+
+**Sabotagem que confirma:** removendo o veto `sem_autorizacao` de
+`decidirElegibilidade`, `gate.test.ts` e `drain.test.ts` reprovam; restaurado,
+verde. Para J20.19: `order by id desc` sozinho elege a mensagem ANTIGA — o
+próprio invariante prova isso na asserção de sanidade.
+
+**Cobertura de caminhos de envio (R1 — nenhum atalho):** o gate
+(`lib/ai/elegibilidade/gate.ts`, regra pura) é consultado por TODOS os produtores
+de resposta automática: drain + turno do agent-engine (`consulta-pg.ts`),
+`ai-response-worker` legado, `enviarTextoFixoPendente`, `runAgent` legado
+(`lib/ai/runtime/agent.ts`), `triggerHandoff` e o worker de sentimento
+(`consulta-supabase.ts`). `send_ai_message` é origem elegível (autoriza e então
+envia). Todos fail-closed: erro de leitura da elegibilidade → não responde.
+
+**E2E (ambiente fresco estilo VPS):** J20.6, J20.12 e J20.18 têm spec própria
+(`tests/e2e/j20-elegibilidade-*.spec.ts`), rodando no job `e2e` do CI. Seed
+compartilhado `scripts/seed-e2e-elegibilidade.ts` (canal com `ai_gate='allowlist'`
++ credencial validada + fonte de captação); helpers de SQL cru
+`scripts/e2e-elegibilidade-helpers.ts` (roda 1 tick do `drainTick` real — a suíte
+não sobe worker —, lê `job_queue`/`event_log`/`followup_enrollments`, semeia os
+dois estados de partida do gate). A submissão do Respondi e as mensagens do WAHA
+entram pelas rotas REAIS do app (`/api/v1/webhooks/in/:token`,
+`/api/v1/webhooks/waha/:token`). O agente publicado é SETUP via helper porque
+`POST /api/v1/ai/agents` exige role `admin`/MFA e o agente não é o que está sob
+teste.
+
+**A tela do knob `ai_gate` e do editor de `campanhas_whatsapp` ainda não existe**
+— hoje se liga por script/SQL (`scripts/ativar-gate-elegibilidade-ia.ts`), como o
+`roteamento_de_formulario`. É a dívida declarada desta entrega.
+
+**Dívida no `campanhas_whatsapp`:** o campo `agent_id` de uma campanha é aceito
+no schema mas **NÃO é roteado** — o match só torna o contato elegível
+(`ai_authorized_reason = campanha:<id>`); quem assume o turno é sempre o
+roteador / agente publicado da sessão. Encaminhar por campanha exige levar
+`agent_id` no payload de `ai_agent.dispatch_requested` e o `resolve-turn-agent`
+respeitá-lo. `label`/`segmento` são display-only (dependem da tela).
+
+---
+
 ## J7 — Exploração completa `[P2]`
 
 Andar por TODAS as rotas navegáveis logado como admin e como agent: settings, contacts,
@@ -1241,6 +1322,32 @@ isso não está escrito em lugar nenhum, e quem adota o helper sem subir o teto 
 dois testes alheios estourarem sem call log de locator. Se você for adotar o
 helper numa spec nova: `test.describe.configure({ timeout: 120_000 })`.
 
+## O menu inteiro cabe na dobra de um notebook? (2026-09-04)
+
+Origem: PR #546 pôs a tela de **Tarefas** no grupo CRM e o menu passou a rolar.
+Medido pela tela, 1280×900, logado como admin: `nav.scrollHeight` **776** contra
+**763** de altura útil — **13px** de excesso, 19 links, 5 grupos. Nenhum título
+de grupo caía fora da dobra; o que quebrava era o `rola`.
+
+A resposta NÃO foi raspar densidade: o comentário de `components/shell/Sidebar.tsx`
+já dizia, desde a vez em que Produtos estourou a dobra por uma linha, que "quando
+o quinto destino de CRM aparecer, é hub que se cria, não mais 4px que se raspa".
+Tarefas foi o quinto. Criou-se `/app/crm` — o mesmo mecanismo (`group.hub`) que o
+grupo IA já usava.
+
+| caso | prioridade | estado |
+|---|---|---|
+| Em 1280×900 o menu inteiro cabe sem rolar | `[P1]` | **PASS**, medido por ferramenta em `tests/e2e/navegacao.spec.ts`: `scrollHeight` **763** = altura **763**, excesso **0**, 18 links. A folga real — distância entre o fim do último grupo e o fim da caixa de conteúdo da `<nav>`, que o `scrollHeight` grampeado NÃO revela — é **19px** |
+| Etapas do funil continua alcançável pelo CRM, não por Configurações | `[P1]` | **PASS**, e o caminho é percorrido inteiro: sidebar → "Ver tudo em CRM" → `/app/crm` → card → `settings/tenant/pipelines`. Evidência em `.superpowers/evidence/nav-hub-crm.png` |
+| Produtos, que saiu do menu, continua tendo porta (DoD 14) | `[P1]` | **PASS**, caso próprio na mesma spec: o link não existe no sidebar (`toHaveCount(0)`) e existe no hub |
+| A folga de 19px é real | — | **PROVADO POR SABOTAGEM.** Um sexto destino de CRM com `sidebar: true` devolve o excesso a exatamente **+13px** e reprova o mesmo caso — previsto antes de rodar, e batido |
+| 19px é menos de uma linha (28px + 4px de intervalo = 32px) | — | **ACEITO, com a saída declarada.** O próximo item de sidebar volta a estourar. Só que CRM, IA e Organização têm hub: tela nova em qualquer um dos três não pressiona mais o menu. Quem ainda pressiona é grupo SEM hub — Atendimento (4), Canais (3), Análise (3) —, e para eles a resposta escrita é a mesma: cria-se o hub |
+
+**O que a medição do `scrollHeight` NÃO responde:** quando o conteúdo cabe, ele é
+grampeado no `clientHeight`, então "excesso 0" e "sobra 200px" dão o MESMO número.
+Quem quiser saber quanta folga restou tem de medir o `bottom` do último filho
+contra a caixa de conteúdo da `<nav>` — foi assim que os 19px saíram.
+
 ## O inbox em tempo real — o defeito que veio de fora (2026-08-24)
 
 **Sintoma relatado pelo dono:** *"Recebemos mensagem e só reflete no inbox (na
@@ -1613,3 +1720,68 @@ primeiro elemento com `class="border"` da tela de login é o `<input>`
 autofocado — ele casa `focus-visible:border-accent-500` e devolve a cor do
 foco. A sonda só mede elemento real, e pula elemento em foco e elemento que já
 traga classe de cor própria.
+
+---
+
+## O campo que oferecia hoje e o servidor recusava (2026-09-03)
+
+Achado de varredura adversarial contra o PR #496, no SHA `f700f3e1`. Mesma tela
+do #496 — **Conexões › Proteção de envio** —, campo ao lado do que ele acabara
+de consertar, e o mesmo desfecho para quem opera: a ficha inteira deixa de
+salvar.
+
+`<input type="date">` fala em dia LOCAL; `AntiBanSheet` encaixa o dia escolhido
+às 12h UTC (meia-noite viraria o dia anterior a oeste); e a guarda do schema
+comparava esse encaixe com `Date.now()` — um DIA contra um RELÓGIO.
+
+| régua | recusa começa | recusa para | quem sente |
+|---|---|---|---|
+| dia que a tela mostra (`America/Sao_Paulo`, UTC−3) | 03:00 UTC | 12:00 UTC | 00:00 às 09:00 no relógio de quem opera |
+| dia UTC (o que o `max` do campo oferecia, vindo de `toISOString()`) | 00:00 UTC | 12:00 UTC | as primeiras 12 horas UTC do dia |
+
+Medido varrendo as 48 meias-horas do dia com relógio falso, chamando o schema
+real com a carga exata que a tela monta — não pela tela: **NÃO MEDIDO** pelo
+browser num ambiente fresco estilo VPS. O que a varredura de horas prova é a
+fronteira; o que ela não prova é o que o operador vê quando ela dispara.
+
+**A lição, e ela não é sobre fusos.** O produto oferece o dia num campo e o
+recusa no servidor: a mesma classe do controle decorativo, ao contrário — não é
+o controle que não faz nada, é o limite do campo que promete o que a outra ponta
+nega. Toda validação de data merece a pergunta *"as duas pontas falam do mesmo
+dia, ou uma delas fala de instante?"*.
+
+**Onde mais essa pergunta cabe** (levantado, **não medido**, e fora do escopo do
+conserto): `lib/kanban/filters.ts` e `lib/automation/throttle.ts` derivam "hoje"
+de `toISOString().slice(0, 10)`, que é o dia UTC. Se algum deles compara com dia
+local, é a mesma classe.
+## J21 — Uma loja no México escolhe sua moeda `[P0]` (2026-09-04)
+
+Migration 0208 dá a `organizations` uma coluna `currency`; o resto do frente
+(seletor, herança no catálogo, formatação) não valia nada sem provar pela tela
+que a escolha sobrevive e que o preço sai do jeito certo — a mesma armadilha
+que o seletor de idioma do perfil já teve antes desta feature: campo que
+aceita clique e não muda nada.
+
+Banco: `supabase/baseline.sql` reaplicado no Supabase local (idempotente —
+`add column if not exists`, confirmado sem perda de dado na única organização
+que já existia). `pnpm e2e:build && pnpm test:e2e -- moeda-da-organizacao`,
+Chromium real, login com MFA real.
+
+| Caso | Prioridade | Resultado |
+|---|---|---|
+| Trocar para peso mexicano em Configurações › Organização e RECARREGAR a página | `[P0]` | **PASS.** `#currency` mostra `MXN` depois do `page.reload()` — não só depois de salvar. Evidência: `evidence/moeda-da-organizacao/moeda-01-antes.png`, `evidence/moeda-da-organizacao/moeda-02-mxn-salvo.png`, `evidence/moeda-da-organizacao/moeda-03-mxn-apos-reload.png` |
+| Produto cadastrado com a organização em MXN mostra o preço na convenção mexicana | `[P0]` | **PASS.** `$249.90` — ponto decimal, cifrão na frente. **Não** `MXN 249,90`, que era o que `comoMoeda()` (removida neste PR) mostrava: a asserção nega esse texto explicitamente, porque uma spec que só checasse "o preço apareceu" teria passado verde com o defeito antigo. Evidência: `evidence/moeda-da-organizacao/moeda-04-produto-mxn.png` |
+
+**Achado de infraestrutura, não desta feature:** `pnpm e2e:build` falhou na
+primeira tentativa com `Cannot find module '@tailwindcss/postcss'` — o merge de
+`upstream/main` trouxe a migração para Tailwind 4 (`package.json` já
+declarava a dependência), mas `pnpm install` não tinha rodado depois. `pnpm
+install` + `pnpm build` (exit 0) resolveram antes de tentar o e2e de novo.
+
+**Achado de doutrina, não desta feature:** o piso de Postgres mudou de pg17
+para pg15 no mesmo merge (PR #422, `tests/unit/baseline-no-piso-do-postgres.test.ts`
+novo). Conferido: a migration 0208 não usa nada exclusivo de pg17 (só `ADD
+COLUMN`, `UPDATE`, `ALTER COLUMN`, um bloco `DO` com `pg_constraint`), e
+`scripts/test-db.sh` já sobe `pgvector/pgvector:pg15` — os `pnpm test:db`
+anteriores desta sessão já corriam contra o piso certo, mesmo antes deste
+achado.
