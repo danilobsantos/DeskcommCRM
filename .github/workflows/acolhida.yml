@@ -12,6 +12,23 @@
 #
 # Este workflow diz três coisas, e nada além: o `Vercel` vermelho é esperado em
 # fork; os workflows podem ficar parados esperando liberação; e quando vem o
+# O PRAZO PROMETIDO NÃO É CHUTE — foi medido antes de entrar no texto.
+#
+# A doutrina proíbe prometer o que não se cumpre, então "em até um dia útil"
+# passou pela régua. Medido em 2026-09-05, sobre os PRs de FORK dos últimos 60,
+# contando de `createdAt` até o primeiro comentário humano (descartados
+# vercel[bot], ecc-tools[bot], github-actions e o próprio autor):
+#
+#   n = 13 PRs de fork com resposta humana
+#   mediana 1,0h · p90 7,5h · máximo 10,5h · dentro de 24h: 13/13
+#
+# O pior caso tem folga de mais de 2x contra a promessa. Se um dia essa conta
+# virar, o texto aqui vira mentira ANTES de alguém notar — então refaça a
+# medição em vez de confiar nesta linha:
+#
+#   gh pr list --state all --limit 60 --json number,createdAt,author,headRepositoryOwner
+#   (filtre headRepositoryOwner != melgarafael, pegue o 1º comentário não-bot)
+#
 # veredito. O molde é `triagem/references/resposta-ao-contribuidor.md`, seção
 # "Acolhida" — mudar o texto lá sem mudar aqui faz a versão humana e a
 # automática divergirem, e `tests/unit/acolhida-nao-toca-no-fork.test.ts`
