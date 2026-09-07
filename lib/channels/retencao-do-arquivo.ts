@@ -131,6 +131,7 @@ export async function podarArquivoDeWebhooks(
     .delete()
     .lt("received_at", limiteEm(opcoes.diasParaApagar))
     .select("id")
+    .order("received_at", { ascending: true })
     .limit(lote);
 
   if (erroDelete) {

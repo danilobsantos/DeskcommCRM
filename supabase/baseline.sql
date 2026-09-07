@@ -18491,3 +18491,9 @@ do $$ begin
     end if;
   end if;
 end $$;
+
+-- ---- attendant_availability.last_heartbeat_at (migration 0039) ----
+-- Bancos com tabela criada antes da 0039 não ganham a coluna com `create table if not exists`.
+alter table public.attendant_availability
+  add column if not exists last_heartbeat_at timestamptz;
+
