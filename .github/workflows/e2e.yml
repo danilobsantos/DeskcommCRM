@@ -273,6 +273,7 @@ jobs:
     # e devolvem ~9 min de relógio a cada uma.
     env:
       SPECS_PARTE_1: >-
+        pre-go-live-whatsapp.spec.ts
         smoke.spec.ts auth.spec.ts error-pages.spec.ts
         icone-da-marca.spec.ts
         password-recovery.spec.ts signup-journey.spec.ts
@@ -295,6 +296,7 @@ jobs:
         navegacao.spec.ts
         juntar-contatos-duplicados.spec.ts
         lote-no-quadro-do-funil.spec.ts
+        importar-leads-planilha.spec.ts
         relatorio-de-atividades.spec.ts
       # ⚠️ A ORDEM DESTA LISTA NÃO DECIDE A ORDEM DE EXECUÇÃO. O Playwright
       # ordena os arquivos por CAMINHO, não pela ordem em que são passados na

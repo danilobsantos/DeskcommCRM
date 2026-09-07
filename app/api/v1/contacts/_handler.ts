@@ -11,6 +11,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ApiError } from "@/lib/api/types";
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
+import { traduzir } from "@/lib/i18n/dicionario";
+import type { Idioma } from "@/lib/i18n/idiomas";
 import { roleAtLeast } from "@/lib/auth/types";
 import { canonicalPhoneBR, phoneLookupVariants } from "@/lib/channels/phone-variants";
 import { hashCpf, encryptCpfSql } from "@/lib/contacts/cpf";
@@ -164,7 +166,13 @@ export async function listContactsHandler(
   if (q.cursor) {
     const c = decodeCursor(q.cursor);
     if (!c) {
-      throw new ApiError(400, "invalid_cursor", undefined, ctx.requestId, "Cursor inválido.");
+      throw new ApiError(
+        400,
+        "invalid_cursor",
+        undefined,
+        ctx.requestId,
+        traduzir("Cursor inválido.", ctx.idioma ?? "pt-BR"),
+      );
     }
     const op = asc ? "gt" : "lt";
     if (c.sort) {
@@ -280,7 +288,13 @@ export async function getContactHandler(
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, error.message);
   }
   if (!data) {
-    throw new ApiError(404, "not_found", undefined, ctx.requestId, "Contato não encontrado.");
+    throw new ApiError(
+      404,
+      "not_found",
+      undefined,
+      ctx.requestId,
+      traduzir("Contato não encontrado.", ctx.idioma ?? "pt-BR"),
+    );
   }
   const contact = data as Contact;
 
@@ -459,7 +473,13 @@ export async function patchContactHandler(
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, selErr.message);
   }
   if (!existing) {
-    throw new ApiError(404, "not_found", undefined, ctx.requestId, "Contato não encontrado.");
+    throw new ApiError(
+      404,
+      "not_found",
+      undefined,
+      ctx.requestId,
+      traduzir("Contato não encontrado.", ctx.idioma ?? "pt-BR"),
+    );
   }
   if (existing.is_anonymized) {
     throw new ApiError(
@@ -467,7 +487,7 @@ export async function patchContactHandler(
       "lgpd_anonymization_irreversible",
       undefined,
       ctx.requestId,
-      "Contato anonimizado — edição bloqueada (LGPD).",
+      traduzir("Contato anonimizado — edição bloqueada (LGPD).", ctx.idioma ?? "pt-BR"),
     );
   }
 
@@ -523,7 +543,7 @@ export async function patchContactHandler(
       "invalid_request",
       undefined,
       ctx.requestId,
-      "Nenhum campo para atualizar.",
+      traduzir("Nenhum campo para atualizar.", ctx.idioma ?? "pt-BR"),
     );
   }
 
@@ -545,7 +565,7 @@ export async function patchContactHandler(
       "not_found",
       undefined,
       ctx.requestId,
-      "Contato não encontrado após update.",
+      traduzir("Contato não encontrado após update.", ctx.idioma ?? "pt-BR"),
     );
   }
 
@@ -630,6 +650,7 @@ export async function patchContactHandler(
 function throwOnDbError(
   err: { code?: string; message: string } | null,
   requestId: string,
+  idioma: Idioma = "pt-BR",
 ): void {
   if (!err) return;
   // conversations/messages apontam para contacts com ON DELETE RESTRICT.
@@ -639,7 +660,7 @@ function throwOnDbError(
       "state_conflict",
       undefined,
       requestId,
-      "Não foi possível excluir: o contato ainda tem registros vinculados.",
+      traduzir("Não foi possível excluir: o contato ainda tem registros vinculados.", idioma),
     );
   }
   throw new ApiError(500, "internal_error", undefined, requestId, err.message);
@@ -661,7 +682,13 @@ export async function deleteContactHandler(
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, selErr.message);
   }
   if (!existing) {
-    throw new ApiError(404, "not_found", undefined, ctx.requestId, "Contato não encontrado.");
+    throw new ApiError(
+      404,
+      "not_found",
+      undefined,
+      ctx.requestId,
+      traduzir("Contato não encontrado.", ctx.idioma ?? "pt-BR"),
+    );
   }
 
   // Mensagens e conversas RESTRICT no contato: apagar primeiro, senão o DELETE
@@ -671,14 +698,14 @@ export async function deleteContactHandler(
     .delete()
     .eq("contact_id", contactId)
     .eq("organization_id", ctx.organization_id);
-  throwOnDbError(msgErr, ctx.requestId);
+  throwOnDbError(msgErr, ctx.requestId, ctx.idioma);
 
   const { error: convErr } = await supabase
     .from("conversations")
     .delete()
     .eq("contact_id", contactId)
     .eq("organization_id", ctx.organization_id);
-  throwOnDbError(convErr, ctx.requestId);
+  throwOnDbError(convErr, ctx.requestId, ctx.idioma);
 
   const { data: deleted, error: delErr } = await supabase
     .from("contacts")
@@ -687,9 +714,15 @@ export async function deleteContactHandler(
     .eq("organization_id", ctx.organization_id)
     .select("id")
     .maybeSingle();
-  throwOnDbError(delErr, ctx.requestId);
+  throwOnDbError(delErr, ctx.requestId, ctx.idioma);
   if (!deleted) {
-    throw new ApiError(404, "not_found", undefined, ctx.requestId, "Contato não encontrado.");
+    throw new ApiError(
+      404,
+      "not_found",
+      undefined,
+      ctx.requestId,
+      traduzir("Contato não encontrado.", ctx.idioma ?? "pt-BR"),
+    );
   }
 
   const a = actorAuditPayload(ctx.actor);

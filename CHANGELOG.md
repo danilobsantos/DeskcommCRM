@@ -8,6 +8,120 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [1.16.1] — 2026-09-07
+
+### Corrigido
+
+- **A conferência de imagens do instalador passa a olhar o registro que a instalação usa** Antes de baixar as imagens, o instalador confere se as três existem e são
+  públicas. Essa conferência olhava sempre para o registro do projeto, mesmo em
+  instalações configuradas para usar outro — então ela dizia "está tudo publicado"
+  depois de conferir pacotes que não eram os que a instalação ia baixar, e o erro
+  só aparecia mais tarde, na hora de subir. Agora ela olha o mesmo registro que a
+  instalação usa.
+
+  Nada muda para quem não trocou o registro: continua conferindo os mesmos
+  pacotes, com o mesmo resultado.
+
+## [1.16.0] — 2026-09-07
+
+### Adicionado
+
+- **Teste a IA no WhatsApp antes de abrir o atendimento ao público** Em Conexões, administradores podem ativar o modo de teste e cadastrar números
+  de confiança por canal. Lista vazia bloqueia respostas automáticas; as mensagens
+  continuam chegando ao Inbox para atendimento humano. Após validar, a abertura
+  ao público exige confirmação e preserva a lista para uma futura rodada de testes.
+
+  Novos canais começam em teste, sem números autorizados. Canais existentes e
+  reconexões preservam a configuração atual. A atualização inclui a migration
+  0218 no baseline; não é preciso editar variáveis de ambiente.
+
+  Muda também para quem não vai usar o modo de teste: o follow-up automático por
+  silêncio passa a usar a mesma regra do atendimento de entrada, e num canal com
+  acesso da IA restrito ele deixa de inscrever contato cuja autorização já venceu
+  (o prazo é o de sempre, `AI_ALLOWLIST_TTL_DAYS`). Antes bastava ter sido
+  autorizado um dia; agora a autorização precisa estar valendo.
+
+### Corrigido
+
+- **A avaliação automática do atendimento volta a rodar em quem não usa Anthropic** A rodada que revisa os atendimentos e sugere melhorias pedia um modelo pelo nome
+  fixo `claude-haiku-4-5`. Esse nome só existe no vocabulário da Anthropic, então
+  em instalação apontada para outro provedor (OpenRouter, por exemplo) o provedor
+  recusava a chamada e a rodada morria a cada disparo, sem sugestão nenhuma
+  chegando à tela de Propostas. Agora os dois pontos do flywheel usam o modelo
+  escolhido no painel de provedores e, na falta dele, o padrão da organização — o
+  mesmo caminho de todos os outros pontos de IA.
+
+- **A chave de IA cadastrada pela organização passa a valer também na medição de clima e na resposta do bot** Dois pontos de IA — "Medir o clima da conversa" e a resposta do bot — só usavam
+  a credencial cadastrada em IA › Credenciais quando havia uma escolha explícita
+  no painel de provedores. Sem essa escolha, eles iam direto para a chave que veio
+  na instalação (`.env`), ignorando a chave que a organização cadastrou e validou
+  na tela. Numa instalação cuja chave de `.env` estava revogada, isso aparecia
+  como classificação de clima falhando com erro de autenticação enquanto o agente,
+  que já usava a credencial da organização, respondia normalmente no mesmo minuto.
+
+  Agora os dois seguem a mesma ordem do resto do produto: a escolha do painel,
+  depois a credencial ativa e validada do provedor da organização e, só então, a
+  chave da instalação. Nada a fazer — quem já tem credencial cadastrada passa a
+  usá-la na próxima chamada.
+
+- **O rodapé volta a mostrar a versão que está no ar, e não a de um rollback antigo** Quando uma atualização pela tela falha e o app volta sozinho para a versão
+  anterior, o sistema passa a mostrar essa versão anterior — o que está certo:
+  naquele momento o código baixado no servidor já é o novo, mas o app que subiu é
+  o velho, e quem sabe qual dos dois está no ar é o registro da tentativa.
+
+  O que faltava era o fim dessa validade. O app troca de versão por outros
+  caminhos que não passam por essa tela — um deploy automático, um comando no
+  terminal, a atualização feita à mão —, e nenhum deles registra uma tentativa
+  nova. Sem isso, a tentativa que falhou continuava sendo a última notícia, para
+  sempre: numa instalação real, o rodapé anunciou por oito dias uma versão de 28
+  de agosto, atravessando vários deploys, enquanto a versão no ar era outra.
+
+  Agora a tentativa antiga só nomeia a versão no ar enquanto for a notícia mais
+  recente. Se o servidor reportou a versão depois de a tentativa ter terminado, é
+  o servidor que vale. Isso conserta junto duas coisas que bebiam da mesma fonte:
+  o aviso de "atualização disponível", que comparava contra a versão errada, e as
+  notas de versão, que começavam a listar de um ponto errado do histórico.
+
+  Nada muda para quem opera: nenhuma configuração nova, nenhum passo de
+  atualização, nenhuma mudança no banco.
+
+- **O espanhol cobre mais telas e mais mensagens de erro** Várias telas e mensagens de erro apareciam em português mesmo com a
+  organização configurada para espanhol: o badge de status de um agente de
+  IA, o painel de Segurança (STOP, LGPD, ritmo de envio…), os avisos de
+  provedores de IA, os erros de verificação em duas etapas, os avisos de
+  número/conta do WhatsApp na Central, o resumo de impacto ao excluir um
+  número, e toda a mensagem de erro do módulo de Tarefas. Numa tela de
+  Agenda da organização, o nome que o próprio operador deu a um tipo de
+  atendimento chegou a ser traduzido por engano, trocando "Retorno" por
+  "Seguimiento". Todos os casos foram corrigidos.
+
+- **O botão de importar planilha volta a funcionar, e os leads entram na primeira etapa aberta do funil** O botão *Importar planilha*, no quadro do funil, estava morto. Quem escolhia o
+  funil e mandava a planilha recebia sempre o mesmo aviso de erro — *"Escolha o
+  funil e a etapa de destino"* — mesmo tendo escolhido o funil. Nenhum lead era
+  criado, e não havia nada que o operador pudesse fazer para contornar: a tela não
+  tem, nem deveria ter, um campo de etapa. A capacidade foi anunciada na 1.14.0 e
+  seguiu assim nas duas atualizações seguintes — quem instalou a 1.14.0, a 1.15.0
+  ou a 1.15.1 nunca conseguiu importar uma planilha.
+
+  A causa era essa incompatibilidade mesmo: a tela pergunta só o funil, porque
+  planilha traz gente nova e gente nova entra no começo do funil; o servidor, por
+  outro lado, exigia que a etapa viesse junto. Agora o servidor resolve a etapa
+  sozinho, que é o que a tela sempre prometeu.
+
+  E ele resolve a etapa **aberta** de menos avançada — pulando as etapas de ganho
+  e as de perda. Isso importa para quem reorganizou o próprio funil: numa
+  instalação onde uma etapa do tipo *Pago* ou *Cancelado* foi arrastada para a
+  primeira coluna, a importação teria feito a planilha inteira nascer como negócio
+  já ganho, ou teria recusado todas as linhas devolvendo *"0 leads criados"* sem
+  explicar por quê. Quem nunca mexeu na ordem das etapas não estava exposto a
+  isso, porque o funil que vem pronto já começa com uma etapa aberta.
+
+  Nada muda no dia a dia de quem opera a instalação: nenhuma configuração nova,
+  nenhum passo de atualização, e nenhum lead já importado é tocado.
+
+  O achado é de @JowaniOrantes, que encontrou o problema usando o sistema pela
+  tela enquanto conferia a tradução para o espanhol — não lendo código.
+
 ## [1.15.1] — 2026-09-05
 
 ### Corrigido
@@ -3021,7 +3135,9 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.15.1...HEAD
+[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.16.1...HEAD
+[1.16.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.16.0...v1.16.1
+[1.16.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.15.1...v1.16.0
 [1.15.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.13.0...v1.14.0

@@ -11,6 +11,7 @@ import { ApiError } from "@/lib/api/types";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { traduzir } from "@/lib/i18n/dicionario";
 import {
   contactCreateSchema,
   contactListQuerySchema,
@@ -33,6 +34,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (authErr || !user) {
     return fail("unauthenticated", "Auth required.", 401, { requestId });
   }
+  const authUser = await loadAuthUser();
+  const t = (texto: string) => traduzir(texto, authUser?.idioma ?? "pt-BR");
 
   const url = new URL(req.url);
   const qsParsed = contactListQuerySchema.safeParse({
@@ -45,13 +48,12 @@ export async function GET(req: NextRequest): Promise<Response> {
     order_dir: url.searchParams.get("order_dir") ?? undefined,
   });
   if (!qsParsed.success) {
-    return fail("validation_failed", "Query inválida.", 422, {
+    return fail("validation_failed", t("Query inválida."), 422, {
       details: qsParsed.error.flatten().fieldErrors as Record<string, unknown>,
       requestId,
     });
   }
 
-  const authUser = await loadAuthUser();
   const orgId = authUser ? (await resolveActiveOrg(authUser))?.orgId : undefined;
 
   try {
@@ -61,6 +63,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         organization_id: orgId ?? "",
         actor: { type: "user", id: user.id },
         requestId,
+        idioma: authUser?.idioma,
       },
       qsParsed.data,
     );
@@ -102,6 +105,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         organization_id: activeOrg.orgId,
         actor: { type: "user", id: user.id },
         requestId,
+        idioma: user.idioma,
       },
       input as ContactCreate,
     );

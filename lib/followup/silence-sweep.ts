@@ -38,6 +38,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { CONVERSATION_TERMINAL_STATUSES } from "@/lib/schemas";
+import {
+  decidirElegibilidade,
+  montarEstadoDeElegibilidade,
+  ttlDaAutorizacaoMs,
+} from "@/lib/ai/elegibilidade/gate";
 import { flowGraphSchema } from "./graph-schema";
 import { triggerConfigSchema } from "./api-schemas";
 import { resolveAgentForAutomaticTrigger, type FollowupGateDb } from "./agent-followup-gate";
@@ -144,7 +149,12 @@ export async function runSilenceSweep(deps: SilenceSweepDeps): Promise<SilenceSw
 }
 
 type ContactEmbed =
-  | { tags: string[] | null; is_blocked: boolean | null; ai_authorized_at: string | null }
+  | {
+      tags: string[] | null;
+      is_blocked: boolean | null;
+      ai_authorized_at: string | null;
+      phone_number: string | null;
+    }
   | null;
 
 /** Production adapter: `SilenceSweepDb` sobre o client service-role real. */
@@ -194,7 +204,7 @@ export function createSupabaseSilenceSweepDb(admin: SupabaseClient): SilenceSwee
       const { data, error } = await admin
         .from("conversations")
         .select(
-          "contact_id, last_inbound_at, contacts:contact_id(tags, is_blocked, ai_authorized_at), sessao:channel_session_id(metadata)",
+          "contact_id, last_inbound_at, contacts:contact_id(tags, is_blocked, ai_authorized_at, phone_number), sessao:channel_session_id(metadata)",
         )
         .eq("organization_id", orgId)
         .not("last_inbound_at", "is", null)
@@ -208,20 +218,36 @@ export function createSupabaseSilenceSweepDb(admin: SupabaseClient): SilenceSwee
         sessao: { metadata: Record<string, unknown> | null } | null;
       };
       const cutoff = new Date(cutoffIso).getTime();
+      const agora = new Date();
+      const ttlMs = ttlDaAutorizacaoMs(process.env);
       const latest = new Map<
         string,
-        { at: number; tags: string[]; blocked: boolean; gateAllowlist: boolean; autorizado: boolean }
+        { at: number; tags: string[]; blocked: boolean; permitidoPeloGate: boolean }
       >();
       for (const row of (data ?? []) as unknown as Row[]) {
         const at = new Date(row.last_inbound_at).getTime();
         const prev = latest.get(row.contact_id);
         if (!prev || at > prev.at) {
+          const metadata = row.sessao?.metadata ?? {};
+          const acesso = decidirElegibilidade(
+            montarEstadoDeElegibilidade({
+              aiGate: metadata.ai_gate,
+              aiGateMode: metadata.ai_gate_mode,
+              aiTestPhoneNumbers: metadata.ai_test_phone_numbers,
+              contactPhoneNumber: row.contacts?.phone_number ?? null,
+              forceHuman: false,
+              assigneeKind: null,
+              botSilencedUntil: null,
+              aiAuthorizedAt: row.contacts?.ai_authorized_at ?? null,
+              agora,
+              ttlMs,
+            }),
+          );
           latest.set(row.contact_id, {
             at,
             tags: row.contacts?.tags ?? [],
             blocked: row.contacts?.is_blocked ?? false,
-            gateAllowlist: row.sessao?.metadata?.ai_gate === "allowlist",
-            autorizado: row.contacts?.ai_authorized_at != null,
+            permitidoPeloGate: acesso.permite,
           });
         }
       }
@@ -229,9 +255,10 @@ export function createSupabaseSilenceSweepDb(admin: SupabaseClient): SilenceSwee
       const silentIds: string[] = [];
       for (const [contactId, v] of latest) {
         if (v.blocked) continue;
-        // Gate `allowlist`: o follow-up automático também respeita a
-        // elegibilidade — só entra contato que uma origem elegível autorizou.
-        if (v.gateAllowlist && !v.autorizado) continue;
+        // A mesma regra do atendimento de entrada vale antes de criar o
+        // enrollment: no pré-go-live só testadores avançam; no allowlist comum
+        // continua valendo a autorização temporária da origem.
+        if (!v.permitidoPeloGate) continue;
         if (v.at > cutoff) continue; // conversou depois do corte — não é silêncio
         if (segments.length > 0 && !segments.some((s) => v.tags.includes(s))) continue;
         silentIds.push(contactId);
