@@ -18478,3 +18478,16 @@ notify pgrst, 'reload schema';
 -- em produção (engolido, fire-and-forget), e o aviso ficava aberto pra sempre.
 alter table public.agent_inbox_items
   add column if not exists resolved_at timestamptz;
+
+-- ---- realtime conversation_notes (migration 0219) ----
+-- Adicionado à publicação para que a UI de inbox receba atualizações em tempo real
+do $$ begin
+  if exists (select 1 from pg_publication where pubname='supabase_realtime') then
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname='supabase_realtime' and schemaname='public' and tablename='conversation_notes'
+    ) then
+      alter publication supabase_realtime add table public.conversation_notes;
+    end if;
+  end if;
+end $$;
