@@ -126,5 +126,64 @@ export function createClient() {
     },
     realtime: { accessToken: tokenDoRealtime },
   });
+
+  /**
+   * CORREÇÃO DA CORRIDA NO SUBSCRIBE DO REALTIME:
+   *
+   * O @supabase/realtime-js dispara connect() com _authPromise assíncrona,
+   * mas channel.subscribe() é síncrono e monta o joinPush payload antes de a
+   * callback `accessToken` resolver — enviando `phx_join` sem access_token
+   * (anônimo). Como o canal é anônimo, a RLS do Supabase barra os eventos no
+   * banco e nada é entregue até o F5.
+   *
+   * Interceptamos `subscribe` nos canais para garantir que `_waitForAuthIfNeeded`
+   * complete antes do envio do join. Se auth falhar ou demorar mais de 2s,
+   * degrada graciosa e imediatamente para a assinatura original.
+   */
+  const realtime = (_client as unknown as { realtime?: Record<string, unknown> }).realtime;
+  if (realtime && typeof realtime.channel === "function") {
+    const origChannel = (realtime.channel as (...args: unknown[]) => unknown).bind(realtime);
+    realtime.channel = ((topic: string, params?: Record<string, unknown>) => {
+      const ch = origChannel(topic, params) as {
+        subscribe?: (cb?: (status: string, err?: Error) => void, timeout?: number) => unknown;
+        unsubscribe?: (timeout?: number) => unknown;
+      };
+      if (ch && typeof ch.subscribe === "function") {
+        const origSubscribe = ch.subscribe.bind(ch);
+        ch.subscribe = (callback?: (status: string, err?: Error) => void, timeout?: number) => {
+          let cancelado = false;
+          const origUnsub = typeof ch.unsubscribe === "function" ? ch.unsubscribe.bind(ch) : null;
+          if (origUnsub) {
+            ch.unsubscribe = (t?: number) => {
+              cancelado = true;
+              return origUnsub(t);
+            };
+          }
+          void (async () => {
+            try {
+              if (typeof realtime.isConnected === "function" && !realtime.isConnected()) {
+                if (typeof realtime.connect === "function") {
+                  (realtime.connect as () => void)();
+                }
+              }
+              if (typeof realtime._waitForAuthIfNeeded === "function") {
+                await Promise.race([
+                  (realtime._waitForAuthIfNeeded as () => Promise<void>)(),
+                  new Promise((r) => setTimeout(r, 2000)),
+                ]);
+              }
+            } catch {
+              // degradação graciosa: se auth falhar, segue anônimo
+            }
+            if (cancelado) return;
+            return origSubscribe(callback, timeout);
+          })();
+          return ch;
+        };
+      }
+      return ch;
+    }) as typeof realtime.channel;
+  }
+
   return _client;
 }
