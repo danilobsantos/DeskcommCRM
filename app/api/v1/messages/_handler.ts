@@ -9,8 +9,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ApiError } from "@/lib/api/types";
+import { decidirPreGoLiveDoCanalViaSupabase } from "@/lib/ai/elegibilidade/consulta-pre-go-live";
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
+import { traduzir } from "@/lib/i18n/dicionario";
 import {
   CHANNEL_SESSION_REF_COLUMNS,
   DEFAULT_CHANNEL_PROVIDER,
@@ -195,7 +197,13 @@ export async function listMessagesHandler(
   if (q.cursor) {
     const c = decodeMsgCursor(q.cursor);
     if (!c) {
-      throw new ApiError(400, "invalid_cursor", undefined, ctx.requestId, "Cursor inválido.");
+      throw new ApiError(
+        400,
+        "invalid_cursor",
+        undefined,
+        ctx.requestId,
+        traduzir("Cursor inválido.", ctx.idioma ?? "pt-BR"),
+      );
     }
     query = query.or(`sent_at.lt.${c.sent_at},and(sent_at.eq.${c.sent_at},id.lt.${c.id})`);
   }
@@ -279,7 +287,13 @@ export async function sendMessageHandler(
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, convErr.message);
   }
   if (!conv) {
-    throw new ApiError(404, "not_found", undefined, ctx.requestId, "Conversa não encontrada.");
+    throw new ApiError(
+      404,
+      "not_found",
+      undefined,
+      ctx.requestId,
+      traduzir("Conversa não encontrada.", ctx.idioma ?? "pt-BR"),
+    );
   }
 
   type Joined = {
@@ -308,7 +322,7 @@ export async function sendMessageHandler(
       "forbidden",
       undefined,
       ctx.requestId,
-      "Contato bloqueou o atendimento.",
+      traduzir("Contato bloqueou o atendimento.", ctx.idioma ?? "pt-BR"),
     );
   }
 
@@ -340,7 +354,13 @@ export async function sendMessageHandler(
         throw new ApiError(500, "internal_error", undefined, ctx.requestId, sharedErr.message);
       }
       if (!shared) {
-        throw new ApiError(404, "not_found", undefined, ctx.requestId, "Contato não encontrado.");
+        throw new ApiError(
+          404,
+          "not_found",
+          undefined,
+          ctx.requestId,
+          traduzir("Contato não encontrado.", ctx.idioma ?? "pt-BR"),
+        );
       }
       const row = shared as {
         id: string;
@@ -356,7 +376,7 @@ export async function sendMessageHandler(
           "contact_anonymized",
           undefined,
           ctx.requestId,
-          "Contato anonimizado não pode ser compartilhado.",
+          traduzir("Contato anonimizado não pode ser compartilhado.", ctx.idioma ?? "pt-BR"),
         );
       }
       if (!row.phone_number) {
@@ -365,7 +385,7 @@ export async function sendMessageHandler(
           "missing_phone_number",
           undefined,
           ctx.requestId,
-          "Contato sem telefone para envio como cartão.",
+          traduzir("Contato sem telefone para envio como cartão.", ctx.idioma ?? "pt-BR"),
         );
       }
       const displayName = row.display_name ?? row.name ?? row.phone_number;
@@ -388,7 +408,7 @@ export async function sendMessageHandler(
           "invalid_payload",
           undefined,
           ctx.requestId,
-          "Telefone inválido para envio como cartão.",
+          traduzir("Telefone inválido para envio como cartão.", ctx.idioma ?? "pt-BR"),
         );
       }
       const nameRaw = typeof o.name === "string" ? o.name.trim() : "";
@@ -404,7 +424,10 @@ export async function sendMessageHandler(
         "invalid_payload",
         undefined,
         ctx.requestId,
-        "Informe metadata.shared_contact_id ou metadata.shared_contact com telefone.",
+        traduzir(
+          "Informe metadata.shared_contact_id ou metadata.shared_contact com telefone.",
+          ctx.idioma ?? "pt-BR",
+        ),
       );
     }
   }
@@ -436,7 +459,7 @@ export async function sendMessageHandler(
         "validation_error",
         undefined,
         ctx.requestId,
-        "A mensagem citada não é desta conversa.",
+        traduzir("A mensagem citada não é desta conversa.", ctx.idioma ?? "pt-BR"),
       );
     }
     citada = alvo as { id: string; external_id: string | null };
@@ -497,7 +520,24 @@ export async function sendMessageHandler(
     waLid: c.contacts?.wa_lid,
   });
 
-  if (c.channel_sessions?.archived_at) {
+  // Releitura no sink: o operador pode ter fechado o canal enquanto o modelo
+  // gerava a resposta. Envio humano não passa por esta restrição da IA.
+  const acessoAtual = ctx.actor.type === "user" ? null : await decidirPreGoLiveDoCanalViaSupabase(supabase, {
+    organizationId: ctx.organization_id,
+    channelSessionId: c.channel_session_id,
+    contactPhoneNumber: c.contacts?.phone_number ?? "",
+  }).catch(() => ({ permite: false, motivo: "pre_go_live_indisponivel" }));
+  if (acessoAtual && !acessoAtual.permite) {
+    const { data: updated, error } = await supabase.from("messages").update({
+      status: "failed",
+      error_code: acessoAtual.motivo === "pre_go_live_indisponivel" ? "pre_go_live_indisponivel" : "pre_go_live",
+      error_message: acessoAtual.motivo === "pre_go_live_indisponivel"
+        ? "Não foi possível verificar o acesso da IA. Nenhuma mensagem foi enviada."
+        : "Envio automático bloqueado pelo modo de teste do canal.",
+    }).eq("organization_id", ctx.organization_id).eq("id", message.id).select(MSG_COLS).single();
+    if (error || !updated) throw new ApiError(500, "internal_error", undefined, ctx.requestId, "Não foi possível registrar o bloqueio do envio.");
+    message = updated as unknown as Message;
+  } else if (c.channel_sessions?.archived_at) {
     // Canal ARQUIVADO = canal excluído pelo usuário: a sessão já foi deslogada e
     // removida do transporte, e a credencial do canal oficial já foi revogada. É a
     // promessa da migration 0106 ("não é mais elegível para envio") virando

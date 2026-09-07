@@ -27,6 +27,7 @@ import { llmEdgeConfigFromEnv } from "@/lib/agent-engine/edge/llm/credentials";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { autorizarContatoParaIA } from "@/lib/ai/elegibilidade/autorizacao";
+import { decidirPreGoLiveDoCanalViaSupabase } from "@/lib/ai/elegibilidade/consulta-pre-go-live";
 
 const TIPO = "send_ai_message";
 
@@ -54,6 +55,29 @@ async function execute(ctx: ActionCtx, config: Record<string, unknown>): Promise
   const guarda = checarGuardasDeContato(ctx);
   if (!guarda.ok) return { type: TIPO, status: "skipped", detail: { reason: guarda.reason } };
   const contact = guarda.contact;
+
+  // Esta ação abre um primeiro contato e por isso ainda não tem conversa para
+  // passar pelo gate comum. No pré-go-live ela precisa parar AQUI, antes da
+  // chamada paga ao modelo e antes de criar qualquer mensagem.
+  try {
+    const acesso = await decidirPreGoLiveDoCanalViaSupabase(ctx.admin, {
+      organizationId: ctx.organizationId,
+      channelSessionId: sessionId,
+      contactPhoneNumber: contact.phone_number,
+    });
+    if (!acesso.permite) {
+      return { type: TIPO, status: "skipped", detail: { reason: acesso.motivo } };
+    }
+  } catch (err) {
+    return {
+      type: TIPO,
+      status: "skipped",
+      detail: {
+        reason: "elegibilidade_indeterminada",
+        error: err instanceof Error ? err.message.slice(0, 160) : "erro",
+      },
+    };
+  }
 
   // ─── O texto ───────────────────────────────────────────────────────────────
   //

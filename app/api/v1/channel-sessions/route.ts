@@ -15,8 +15,10 @@ import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { createChannelSchema } from "@/lib/schemas/channels";
+import { metadataInicialDoCanal } from "@/lib/ai/elegibilidade/pre-go-live";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
+import { traduzir } from "@/lib/i18n/dicionario";
 
 export const dynamic = "force-dynamic";
 
@@ -64,13 +66,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     allowPlatformAdmin: true,
   });
   if (!authz.ok) return authz.response;
+  const t = (texto: string) => traduzir(texto, authz.user.idioma);
   const { user, org: activeOrg } = authz;
 
   const waha = getWahaClient();
   if (!waha) {
     return fail(
       "waha_not_configured",
-      "O WhatsApp (WAHA) não está configurado neste ambiente: faltam WAHA_API_BASE_URL e/ou WAHA_API_KEY. Configure-as e tente de novo.",
+      t("O WhatsApp (WAHA) não está configurado neste ambiente: faltam WAHA_API_BASE_URL e/ou WAHA_API_KEY. Configure-as e tente de novo."),
       503,
       { requestId },
     );
@@ -84,7 +87,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   const parsed = createChannelSchema.safeParse(raw ?? {});
   if (!parsed.success) {
-    return fail("validation_failed", "Dados inválidos.", 422, {
+    return fail("validation_failed", t("Dados inválidos."), 422, {
       requestId,
       details: parsed.error.flatten().fieldErrors as Record<string, unknown>,
     });
@@ -107,7 +110,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       last_status_change_at: new Date().toISOString(),
       consecutive_health_fails: 0,
       daily_message_limit: 250,
-      metadata: {},
+      metadata: metadataInicialDoCanal(),
     })
     .select(CHANNEL_COLUMNS)
     .single();

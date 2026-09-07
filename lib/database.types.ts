@@ -7150,6 +7150,15 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      fn_configurar_pre_go_live_canal: {
+        Args: {
+          p_canal: string
+          p_modo: string
+          p_numeros: string[]
+          p_org: string
+        }
+        Returns: number
+      }
       fn_conversation_assign: {
         Args: {
           p_conversation_id: string

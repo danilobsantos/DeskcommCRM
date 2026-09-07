@@ -11,6 +11,7 @@ import {
 } from "@/lib/channels/reactivate";
 import { getWahaClient } from "@/lib/waha/client";
 import { createClient } from "@/lib/supabase/server";
+import { metadataInicialDoCanal } from "@/lib/ai/elegibilidade/pre-go-live";
 
 /**
  * Onboarding WhatsApp session orchestration.
@@ -104,7 +105,7 @@ async function ensureChannelSession(
       last_status_change_at: new Date().toISOString(),
       consecutive_health_fails: 0,
       daily_message_limit: 250,
-      metadata: {},
+      metadata: metadataInicialDoCanal(),
     })
     .select("id")
     .single();
