@@ -84,6 +84,32 @@ export const DICIONARIO: Traducoes = {
   // ─── Navegação (a barra lateral, presente em toda tela) ───
   Inbox: { es: "Inbox" },
   Agenda: { es: "Agenda" },
+  Profissionais: { es: "Profesionales" },
+  "Profissionais externos": { es: "Profesionales externos" },
+  "Profissionais externos (dentistas sem login)": {
+    es: "Profesionales externos (dentistas sin login)",
+  },
+  "Dentistas, corretores e consultores que têm agenda própria mas não têm conta no sistema. Quem gerencia as agendas deles é a secretária.": {
+    es: "Dentistas, corredores y consultores que tienen agenda propia pero no tienen cuenta en el sistema. Quien gestiona sus agendas es la secretaria.",
+  },
+  "Liga ou desliga a agenda de profissionais externos deste tenant — dentistas, corretores e consultores que têm agenda própria mas não têm conta de usuário no sistema. Desligado, a agenda do base funciona normalmente.": {
+    es: "Activa o desactiva la agenda de profesionales externos de este tenant — dentistas, corredores y consultores que tienen agenda propia pero no tienen cuenta de usuario en el sistema. Desactivado, la agenda base funciona con normalidad.",
+  },
+  "Nome (ex.: Dra. Ana)": { es: "Nombre (ej.: Dra. Ana)" },
+  "Especialidades, separadas por vírgula": {
+    es: "Especialidades, separadas por comas",
+  },
+  "Nenhum profissional cadastrado ainda.": {
+    es: "Aún no hay profesionales registrados.",
+  },
+  "Sem especialidade": { es: "Sin especialidad" },
+  "consulta futura": { es: "consulta futura" },
+  "consultas futuras": { es: "consultas futuras" },
+  "Profissional cadastrado": { es: "Profesional registrado" },
+  "Agenda de profissionais ligada": { es: "Agenda de profesionales activada" },
+  "Agenda de profissionais desligada": {
+    es: "Agenda de profesionales desactivada",
+  },
   Radar: { es: "Radar" },
   "Respostas rápidas": { es: "Respuestas rápidas" },
   Contatos: { es: "Contactos" },

@@ -181,6 +181,18 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     sidebar: true,
   },
   {
+    // Profissionais EXTERNOS (dentista sem login). A página redireciona para a
+    // Agenda quando a feature está desligada no tenant
+    // (`settings.scheduling.providers_enabled`, migration 9003) — este item é o
+    // atalho, o gate de verdade mora na página e nos handlers.
+    href: "/app/agenda/profissionais",
+    label: "Profissionais",
+    description: "Agendas dos profissionais externos, geridas pela secretária.",
+    icon: CalendarBlank,
+    group: "atendimento",
+    sidebar: true,
+  },
+  {
     // Renomeado de "Templates": estes são scripts do atendente, consumidos pelo
     // Composer do inbox. O nome "Templates" fica livre para os da Meta (HSM),
     // onde é o termo técnico correto.

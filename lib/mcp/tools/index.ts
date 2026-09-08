@@ -70,6 +70,7 @@ import {
   crmFindFreeSlots,
   crmListAppointments,
   crmListEventTypes,
+  crmListProviders,
   crmRescheduleAppointment,
   crmSetAppointmentOutcome,
 } from "./agendamento";
@@ -90,6 +91,7 @@ import {
 export const allTools: ReadonlyArray<McpToolDefinition> = [
   // read
   crmListEventTypes,
+  crmListProviders,
   crmFindFreeSlots,
   crmListAppointments,
   crmSearchContacts,
