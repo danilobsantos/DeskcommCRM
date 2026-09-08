@@ -16,6 +16,7 @@ import { HistoricoDaAgenda } from "@/components/agenda/HistoricoDaAgenda";
 import type { Agendamento, HorarioLivre, VisaoDaAgenda } from "@/components/agenda/tipos";
 import { EmptyAgenda } from "@/components/empty";
 import { rotuloDoLocal } from "@/lib/agenda/locais";
+import { trilhaPadraoDoMembro } from "@/lib/agenda/tipos";
 import { Button } from "@/components/ui/button";
 import { PainelDeMarcacao } from "@/components/agenda/PainelDeMarcacao";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -71,6 +72,7 @@ export function AgendaClient({
   linkDeConfiguracaoDoGoogle,
   tiposIniciais,
   agendamentosIniciais,
+  profissionaisIniciais,
 }: {
   fusoDeApresentacao: string | null;
   googleConfigurado: boolean;
@@ -90,9 +92,23 @@ export function AgendaClient({
   }>;
   /** A semana corrente, resolvida no servidor: `GET /agendamentos` não existe. */
   agendamentosIniciais: Agendamento[];
+  /** Profissionais externos ativos (migration 9003) — viram Pessoas na grade. */
+  profissionaisIniciais: Array<{ id: string; nome: string }>;
 }) {
   const localeDaData = useLocaleDeData();
   const t = useT();
+  const { data: pessoasDaEquipe = [] } = usePessoasDaAgenda();
+  // Os profissionais externos entram no mesmo roster, com trilha estável do id —
+  // a grade já resolve a cor de um bloco pelo `responsavelId` casando a Pessoa.
+  const pessoas = [
+    ...pessoasDaEquipe,
+    ...profissionaisIniciais.map((p) => ({
+      id: p.id,
+      nome: p.nome,
+      trilha: trilhaPadraoDoMembro(p.id),
+      tipo: "profissional" as const,
+    })),
+  ];
   const [marcando, setMarcando] = React.useState(false);
   // O horário que veio de um CLIQUE NA GRADE. Preenchido, o painel abre já em
   // "confirmando" naquele instante; vazio, ele abre pedindo o dia, como sempre.
@@ -132,12 +148,23 @@ export function AgendaClient({
   const [isolada, setIsolada] = React.useState<string | null>(null);
   const [ancora, setAncora] = React.useState(() => new Date());
 
+  // QUEM VAI "ATENDER" NA MARCAÇÃO. Se um PROFISSIONAL externo foi isolado no
+  // filtro, é ele o responsável (a grade marcou para o dentista); senão o dono
+  // do tipo (atendente-usuário); senão a primeira pessoa. Esta variável decide
+  // tanto a cor/descrição do painel quanto se o POST manda `provider_id` ou
+  // omite o dono (a rota resolve `tipo.default_owner_user_id`).
+  const responsavelDaMarcacao =
+    pessoas.find((p) => p.id === isolada && p.tipo === "profissional") ??
+    pessoas.find((p) => p.id === tipo?.donoId) ??
+    pessoas.find((p) => p.id === isolada) ??
+    pessoas[0] ??
+    { id: "", nome: "Você", trilha: 1, tipo: "usuario" as const };
+
   // AS PESSOAS SÃO REAIS: vêm de `/api/v1/team`, com a trilha de cor derivada do
   // `user_id`. Até esta linha o filtro por pessoa era invisível na tela do
   // produto — `FiltroDePessoas` devolve `null` com menos de duas pessoas, e a
   // lista estava vazia. Ele existia, estava provado na vitrine, e ninguém o via
   // aqui.
-  const { data: pessoas = [] } = usePessoasDaAgenda();
 
   // A JANELA DE BUSCA PRECISA SER ESTÁVEL, e não era.
   //
@@ -168,7 +195,18 @@ export function AgendaClient({
   // nenhum, que é exatamente o que uma instalação fresca produz (a rota devolve
   // 422 porque ninguém está em `attendant_availability`).
   const { data: horarios, isError: horariosFalharam } = useHorariosLivres(
-    marcando && tipo ? { event_type_id: tipo.id, de: janelaDeBusca.de, ate: janelaDeBusca.ate } : null,
+    marcando && tipo
+      ? {
+          event_type_id: tipo.id,
+          // Quando um profissional externo é o responsável da marcação, os
+          // horários oferecidos vêm da JORNADA DELE, não do atendente.
+          ...(responsavelDaMarcacao.tipo === "profissional"
+            ? { provider_id: responsavelDaMarcacao.id }
+            : {}),
+          de: janelaDeBusca.de,
+          ate: janelaDeBusca.ate,
+        }
+      : null,
   );
 
   const horariosPorDia = React.useMemo(() => {
@@ -554,13 +592,7 @@ export function AgendaClient({
                 className="lg:h-full"
                 ancora={new Date()}
                 agora={new Date()}
-                responsavel={
-                  // O DONO DO TIPO, não o primeiro da lista. A tela dizia "com
-                  // <primeira pessoa>" enquanto oferecia a jornada de outra —
-                  // e marcava na agenda da primeira, que não tinha jornada.
-                  pessoas.find((p) => p.id === tipo.donoId) ??
-                  pessoas[0] ?? { id: "", nome: "Você", trilha: 1 }
-                }
+                responsavel={responsavelDaMarcacao}
                 tipo={tipo.nome}
                 duracaoMin={tipo.duracaoMin}
                 // O LOCAL e o FUSO de verdade, que a tela tinha e não passava.
@@ -625,6 +657,12 @@ export function AgendaClient({
                       event_type_id: tipo.id,
                       starts_at: instante,
                       guest_email: convidado,
+                      // Profissional externo isolado na grade: marca NA AGENDA
+                      // DELE. Atendente-usuário: omite dono e a rota resolve o
+                      // default do tipo — mesma regra da oferta de horário.
+                      ...(responsavelDaMarcacao.tipo === "profissional"
+                        ? { provider_id: responsavelDaMarcacao.id }
+                        : {}),
                     })
                     .then((r) => {
                       setEmailConvidado("");

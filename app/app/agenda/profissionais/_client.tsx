@@ -1,18 +1,39 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus } from "@/lib/ui/icons";
+import { Clock, Plus, Trash } from "@/lib/ui/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "@/hooks/i18n/useT";
+import { FUSOS_OFERECIDOS } from "@/lib/tempo/fusos";
+import type { ScheduleWindow } from "@/lib/schemas/routing";
 import {
   alternarProfissionalAtivo,
   criarProfissional,
+  salvarJornadaProfissional,
 } from "@/app/actions/agenda/providers";
+
+const DOW_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 interface ProfissionalInicial {
   id: string;
@@ -20,6 +41,7 @@ interface ProfissionalInicial {
   especialidades: string[];
   ativo: boolean;
   proximas: number;
+  schedule: { timezone: string; windows: ScheduleWindow[] };
 }
 
 interface ProfissionaisClientProps {
@@ -32,6 +54,7 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
   const [profissionais, setProfissionais] = useState(iniciais);
   const [nome, setNome] = useState("");
   const [especialidades, setEspecialidades] = useState("");
+  const [editandoJornada, setEditandoJornada] = useState<ProfissionalInicial | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const criar = () => {
@@ -63,6 +86,20 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
       setProfissionais((lista) =>
         lista.map((p) => (p.id === id ? { ...p, ativo } : p)),
       );
+    });
+  };
+
+  const salvarJornada = (schedule: { timezone: string; windows: ScheduleWindow[] }) => {
+    if (!editandoJornada) return;
+    startTransition(async () => {
+      const r = await salvarJornadaProfissional(editandoJornada.id, schedule);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(t("Horário salvo"));
+      setEditandoJornada(null);
+      window.location.reload();
     });
   };
 
@@ -121,7 +158,7 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
                 />
               )}
             </div>
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               {p.ativo ? (
                 <Badge variant="success">{t("Ativo")}</Badge>
               ) : (
@@ -130,10 +167,158 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
               <span className="text-xs text-muted-foreground">
                 {p.proximas} {t(p.proximas === 1 ? "consulta futura" : "consultas futuras")}
               </span>
+              {canWrite && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => setEditandoJornada(p)}
+                >
+                  <Clock size={14} className="mr-1" aria-hidden />
+                  {t("Horário")}
+                </Button>
+              )}
             </div>
           </Card>
         ))}
       </div>
+
+      {editandoJornada && (
+        <EditorDeJornada
+          nome={editandoJornada.nome}
+          initial={editandoJornada.schedule}
+          isPending={isPending}
+          onCancel={() => setEditandoJornada(null)}
+          onSave={salvarJornada}
+        />
+      )}
     </div>
+  );
+}
+
+function EditorDeJornada({
+  nome,
+  initial,
+  isPending,
+  onCancel,
+  onSave,
+}: {
+  nome: string;
+  initial: { timezone: string; windows: ScheduleWindow[] };
+  isPending: boolean;
+  onCancel: () => void;
+  onSave: (schedule: { timezone: string; windows: ScheduleWindow[] }) => void;
+}) {
+  const t = useT();
+  const [timezone, setTimezone] = useState(initial.timezone || "America/Sao_Paulo");
+  const [windows, setWindows] = useState<ScheduleWindow[]>(initial.windows ?? []);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("Horário de")} {nome}</DialogTitle>
+          <DialogDescription>
+            {t("Defina as janelas de atendimento deste profissional. Sem janelas, ninguém consegue marcar com ele.")}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="tz">{t("Fuso horário")}</Label>
+            <select
+              id="tz"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            >
+              {FUSOS_OFERECIDOS.map((f) => (
+                <option key={f.codigo} value={f.codigo}>
+                  {f.rotulo} — {f.codigo}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            {windows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t("Nenhuma janela publicada — ninguém consegue marcar com esta pessoa.")}
+              </p>
+            ) : null}
+            {windows.map((w, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Select
+                  value={String(w.dow)}
+                  onValueChange={(v) =>
+                    setWindows((ws) =>
+                      ws.map((x, j) => (j === i ? { ...x, dow: Number(v) } : x)),
+                    )
+                  }
+                >
+                  <SelectTrigger className="w-[90px]" aria-label={t("Dia da semana")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DOW_LABELS.map((d, idx) => (
+                      <SelectItem key={idx} value={String(idx)}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="time"
+                  value={w.start}
+                  aria-label={t("Início")}
+                  onChange={(e) =>
+                    setWindows((ws) =>
+                      ws.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)),
+                    )
+                  }
+                />
+                <span className="text-muted-foreground">–</span>
+                <Input
+                  type="time"
+                  value={w.end}
+                  aria-label={t("Fim")}
+                  onChange={(e) =>
+                    setWindows((ws) =>
+                      ws.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)),
+                    )
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("Remover janela")}
+                  onClick={() => setWindows((ws) => ws.filter((_, j) => j !== i))}
+                >
+                  <Trash size={18} aria-hidden />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setWindows((ws) => [...ws, { dow: 1, start: "08:00", end: "18:00" }])
+              }
+            >
+              <Plus size={16} className="mr-1" aria-hidden /> {t("Adicionar janela")}
+            </Button>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel}>
+            {t("Cancelar")}
+          </Button>
+          <Button disabled={isPending} onClick={() => onSave({ timezone, windows })}>
+            {t("Salvar")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

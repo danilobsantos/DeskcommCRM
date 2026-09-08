@@ -110,6 +110,10 @@ export const DICIONARIO: Traducoes = {
   "Agenda de profissionais desligada": {
     es: "Agenda de profesionales desactivada",
   },
+  "Defina as janelas de atendimento deste profissional. Sem janelas, ninguém consegue marcar com ele.": {
+    es: "Define las franjas de atención de este profesional. Sin franjas, nadie puede agendar con él.",
+  },
+  "Horário salvo": { es: "Horario guardado" },
   Radar: { es: "Radar" },
   "Respostas rápidas": { es: "Respuestas rápidas" },
   Contatos: { es: "Contactos" },
@@ -2790,6 +2794,11 @@ export const DICIONARIO: Traducoes = {
   },
   "Aparência clara": { es: "Apariencia clara" },
   "Aparência escura": { es: "Apariencia oscura" },
+  "Logo para aparência clara": { es: "Logo para apariencia clara" },
+  "Logo para aparência escura (opcional)": { es: "Logo para apariencia oscura (opcional)" },
+  "Sem logo escuro, o sistema usa o logo claro nos dois temas.": {
+    es: "Sin logo oscuro, el sistema usa el logo claro en ambos temas.",
+  },
   // ─── Webhooks ───
   "Receba contatos de fora (landing pages, formulários) e crie automações que agem sozinhas.": {
     es: "Recibe contactos de afuera (landing pages, formularios) y crea automatizaciones que actúan solas.",

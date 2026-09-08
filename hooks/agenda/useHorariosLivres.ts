@@ -33,6 +33,8 @@ export interface HorariosLivresResposta {
 export interface HorariosLivresFiltro {
   event_type_id: string;
   owner_user_id?: string;
+  /** Profissional externo (migration 9003), mutuamente exclusivo com owner_user_id. */
+  provider_id?: string;
   /** ISO-8601. */
   de: string;
   ate: string;
@@ -54,6 +56,7 @@ export function useHorariosLivres(filtro: HorariosLivresFiltro | null) {
         ate: filtro!.ate,
       });
       if (filtro!.owner_user_id) qs.set("owner_user_id", filtro!.owner_user_id);
+      if (filtro!.provider_id) qs.set("provider_id", filtro!.provider_id);
       try {
         const r = await apiClient.get<{ data: HorariosLivresResposta }>(
           `/api/v1/agenda/horarios-livres?${qs.toString()}`,

@@ -523,7 +523,7 @@ export async function listaAgendamentos(
   let q = supabase
     .from("calendar_appointments")
     .select(
-      "id, title, starts_at, ends_at, time_zone, status, owner_user_id, contact_id, contacts(name, display_name)",
+      "id, title, starts_at, ends_at, time_zone, status, owner_user_id, provider_id, contact_id, contacts(name, display_name)",
     )
     .eq("organization_id", organizationId)
     .order("starts_at", { ascending: true })
@@ -580,7 +580,7 @@ export async function listaAgendamentos(
       terminaEm: String(l.ends_at),
       fuso: String(l.time_zone),
       situacao: String(l.status),
-      donoId: l.owner_user_id ? String(l.owner_user_id) : null,
+      donoId: l.owner_user_id ? String(l.owner_user_id) : l.provider_id ? String(l.provider_id) : null,
       contatoId: l.contact_id ? String(l.contact_id) : null,
       // O ID sozinho não serve a nenhum dos dois consumidores: a grade precisa do
       // nome para dizer "com quem", e o AGENTE recebia um uuid cru onde devia

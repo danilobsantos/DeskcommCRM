@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { providersHabilitados } from "@/lib/agenda/providers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
+import type { ScheduleWindow } from "@/lib/schemas/routing";
 import { createClient } from "@/lib/supabase/server";
 
 import { ProfissionaisClient } from "./_client";
@@ -52,13 +53,20 @@ export default async function ProfissionaisPage() {
   return (
     <ProfissionaisClient
       canWrite={user.is_platform_admin || activeOrg.role === "manager" || activeOrg.role === "admin"}
-      iniciais={(profissionais ?? []).map((p) => ({
-        id: p.id,
-        nome: p.name,
-        especialidades: Array.isArray(p.specialties) ? p.specialties.map(String) : [],
-        ativo: Boolean(p.active),
-        proximas: porProfissional.get(p.id) ?? 0,
-      }))}
+      iniciais={(profissionais ?? []).map((p) => {
+        const s = (p.schedule as { timezone?: string; windows?: unknown[] } | null) ?? {};
+        return {
+          id: p.id,
+          nome: p.name,
+          especialidades: Array.isArray(p.specialties) ? p.specialties.map(String) : [],
+          ativo: Boolean(p.active),
+          proximas: porProfissional.get(p.id) ?? 0,
+          schedule: {
+            timezone: s.timezone || "America/Sao_Paulo",
+            windows: Array.isArray(s.windows) ? (s.windows as ScheduleWindow[]) : [],
+          },
+        };
+      })}
     />
   );
 }

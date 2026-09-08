@@ -48,6 +48,7 @@ export function usePessoasDaAgenda() {
             // com ela todo dia.
             nome: m.full_name ?? m.email?.split("@")[0] ?? "Sem nome",
             trilha: trilhas.get(m.user_id) ?? 1,
+            tipo: "usuario" as const,
           }));
       } catch (err) {
         showApiError(err);
