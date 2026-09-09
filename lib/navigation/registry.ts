@@ -83,6 +83,8 @@ export interface NavDestination {
   /** Ausente = só no hub. `true` = uso diário, sobe para o sidebar. */
   sidebar?: boolean;
   healthDot?: boolean;
+  /** Só aparece se `settings.scheduling.providers_enabled` estiver ligado (migration 9003). */
+  providersRequired?: boolean;
 }
 
 /**
@@ -185,12 +187,13 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     // Agenda quando a feature está desligada no tenant
     // (`settings.scheduling.providers_enabled`, migration 9003) — este item é o
     // atalho, o gate de verdade mora na página e nos handlers.
-    href: "/app/agenda/profissionais",
+href: "/app/agenda/profissionais",
     label: "Profissionais",
     description: "Agendas dos profissionais externos, geridas pela secretária.",
     icon: CalendarBlank,
     group: "atendimento",
     sidebar: true,
+    providersRequired: true,
   },
   {
     // Renomeado de "Templates": estes são scripts do atendente, consumidos pelo
@@ -743,11 +746,16 @@ export function canSee(d: NavDestination, isPlatformAdmin: boolean, role: Role |
 export function sidebarGroups(
   isPlatformAdmin: boolean,
   role: Role | null,
+  providersEnabled = false,
 ): Array<{ group: NavGroup; items: NavDestination[] }> {
   return NAV_GROUPS.map((group) => ({
     group,
     items: NAV_DESTINATIONS.filter(
-      (d) => d.group === group.id && d.sidebar && canSee(d, isPlatformAdmin, role),
+      (d) =>
+        d.group === group.id &&
+        d.sidebar &&
+        canSee(d, isPlatformAdmin, role) &&
+        (!d.providersRequired || providersEnabled),
     ),
   })).filter((g) => g.items.length > 0);
 }

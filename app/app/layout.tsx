@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { isMfaEnrolled, loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { DEFAULT_VISIBILITY_MODE, type VisibilityMode } from "@/lib/auth/types";
 import { empresaExigeMfa, exigeCadastroDeMfa } from "@/lib/auth/politica-mfa";
+import { settingsDeAgendamento } from "@/lib/agenda/providers";
 import { AuthProvider } from "@/hooks/auth/AuthProvider";
 import { AppShell } from "./_components/AppShell";
 import { EstiloDaMarcaDaOrganizacao } from "./_components/EstiloDaMarcaDaOrganizacao";
@@ -82,6 +83,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     const mode = (orgRow?.settings as { visibility_mode?: VisibilityMode } | null)
       ?.visibility_mode;
     activeOrg = { ...activeOrg, visibility_mode: mode ?? DEFAULT_VISIBILITY_MODE };
+
+    // M480 (migration 9003): expõe a flag de profissionais externos ao client
+    // para o sidebar esconder/mostrar o item. Gate real é a página, que relê.
+    const { providers_enabled } = settingsDeAgendamento(orgRow?.settings ?? null);
+    activeOrg = { ...activeOrg, providers_enabled };
 
     // `marcaDaInstalacao()` é memoizada por TTL no PROCESSO (`lib/branding/
     // instalacao.ts`), e a derivação da cor é cacheada por régua+semente em

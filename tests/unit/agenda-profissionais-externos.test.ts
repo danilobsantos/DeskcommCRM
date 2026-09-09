@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { providersHabilitados } from "@/lib/agenda/providers";
 import { horariosLivresDaOrg } from "@/lib/agenda/consulta";
 import { partesNoFuso } from "@/lib/agenda/fuso";
+import { sidebarGroups } from "@/lib/navigation/registry";
 
 // ── flag ──────────────────────────────────────────────────────────────
 describe("providersHabilitados", () => {
@@ -143,5 +144,20 @@ describe("horariosLivresDaOrg com ownerProviderId", () => {
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.codigo).toBe("sem_responsavel");
+  });
+});
+// ── nav gated pela flag ──────────────────────────────────────────────
+describe("sidebarGroups + providersRequired", () => {
+  const grupo = (providersEnabled: boolean) =>
+    sidebarGroups(false, "manager", providersEnabled)
+      .flatMap((g) => g.items)
+      .map((i) => i.href);
+
+  it("esconde /app/agenda/profissionais com a feature OFF", () => {
+    expect(grupo(false)).not.toContain("/app/agenda/profissionais");
+  });
+
+  it("mostra /app/agenda/profissionais com a feature ON", () => {
+    expect(grupo(true)).toContain("/app/agenda/profissionais");
   });
 });

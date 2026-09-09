@@ -144,6 +144,13 @@ export interface ActiveOrg {
    */
   visibility_mode?: VisibilityMode;
   /**
+   * Se a feature de profissionais externos está ligada para esta org (migration
+   * 9003). Opcional: só o layout de `/app` preenche; decisão de plataforma em
+   * `/admin/tenants/:id/funcionalidades`. Usado só para esconder/mostrar o item
+   * de navegação — o gate de segurança é a página, que relê o settings.
+   */
+  providers_enabled?: boolean;
+  /**
    * O que ESTA organização definiu para si — CAMPO A CAMPO, e só o que ela
    * mesma definiu.
    *
