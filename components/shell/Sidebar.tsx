@@ -223,8 +223,17 @@ export function SidebarContent({
               )}
               {aberto && (
               <ul aria-labelledby={collapsed ? undefined : tituloId} aria-label={collapsed ? t(group.label) : undefined} className="space-y-1">
-                {items.map((item) => {
-                  const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                {(() => {
+                  // Correspondência por PREFIXO DE SEGMENTO, ativando só o item de
+                  // MAIOR href no grupo. Sem isto, `/app/agenda/profissionais` ativa
+                  // também "Agenda" (`/app/agenda`), porque um começa com o outro.
+                  const ativos = items.filter(
+                    (i) => pathname === i.href || pathname.startsWith(i.href + "/"),
+                  );
+                  const maisEspecifico = ativos.sort((a, b) => b.href.length - a.href.length)[0];
+                  const hrefAtivo = maisEspecifico?.href;
+                  return items.map((item) => {
+                  const isActive = item.href === hrefAtivo;
                   const Icon = item.icon;
                   return (
                     <li key={item.href}>
@@ -252,7 +261,8 @@ export function SidebarContent({
                       </Link>
                     </li>
                   );
-                })}
+                });
+                })()}
                 {group.hub && (
                   <li>
                     <Link
