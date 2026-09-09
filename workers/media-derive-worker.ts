@@ -45,6 +45,23 @@ interface MessageRow {
   media_derived_status: string | null;
 }
 
+export function isTransientNetworkError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  const transientPatterns = [
+    "EAI_AGAIN",
+    "ENOTFOUND",
+    "ECONNREFUSED",
+    "ETIMEDOUT",
+    "ECONNRESET",
+    "getaddrinfo",
+    "Connection terminated unexpectedly",
+    "connection timeout",
+    "fetch failed",
+  ];
+  return transientPatterns.some((pattern) => msg.includes(pattern));
+}
+
 export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> {
   const consumer_key = MEDIA_DERIVE_CONSUMER_KEY;
   const messageId = (row.payload.message_id as string | undefined) ?? row.entity_id;
@@ -161,6 +178,13 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     return { consumer_key, status: "ok" };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
+    if (isTransientNetworkError(err)) {
+      logger.warn("[media-derive] transient network/db failure, will retry", {
+        message_id: msg.id,
+        detail,
+      });
+      return { consumer_key, status: "retry", detail };
+    }
     if (row.attempts >= DRAIN_MAX_ATTEMPTS - 1) {
       logger.error("[media-derive] failed permanently", { message_id: msg.id, detail });
       await markFailed();

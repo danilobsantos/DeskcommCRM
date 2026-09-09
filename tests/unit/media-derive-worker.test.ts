@@ -125,4 +125,14 @@ describe("deriveMessageMedia", () => {
       expect.objectContaining({ media_derived_status: "failed" }),
     );
   });
+
+  it("erro transitório de rede/DNS (ex: EAI_AGAIN db) retorna status retry e não marca failed", async () => {
+    vi.mocked(deriveMediaText).mockRejectedValue(new Error("getaddrinfo EAI_AGAIN db"));
+    const r = await deriveMessageMedia(eventRow(4));
+    expect(r.status).toBe("retry");
+    expect(r.detail).toContain("EAI_AGAIN");
+    expect(updateEqMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ media_derived_status: "failed" }),
+    );
+  });
 });

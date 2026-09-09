@@ -45,6 +45,7 @@ services:
     networks:
       - internal
       - proxy
+      - supabase
     labels:
       traefik.enable: "true"
       traefik.docker.network: "${TRAEFIK_NETWORK:-dokploy-network}"
