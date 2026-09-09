@@ -128,6 +128,7 @@ async function irParaASemanaIntegra(page: Page) {
     "nenhum bloco livre na semana desenhada — a rota de horários respondeu vazio, " +
       "ou a grade não está consultando a disponibilidade",
   ).toBeAttached({ timeout: 25_000 });
+  await page.locator('[data-testid="grade-da-agenda"]').scrollIntoViewIfNeeded();
 }
 
 /** O `data-testid` diz o dia e a hora do bloco: `bloco-2026-08-28-09:30`. */
@@ -141,6 +142,7 @@ function horarioDoBloco(testid: string): { dia: string; hora: string } {
 // "timeout", que é indistinguível de defeito — foi o que aconteceu com a spec
 // irmã na primeira execução.
 test.describe.configure({ timeout: 150_000 });
+test.use({ viewport: { width: 1440, height: 1000 } });
 
 test("clicar num bloco livre abre a marcação NAQUELE horário", async ({ page }) => {
   const creds = lerCreds();
@@ -157,6 +159,7 @@ test("clicar num bloco livre abre a marcação NAQUELE horário", async ({ page 
   const oferecido = /Marcar às (\d{2}:\d{2})/.exec(rotulo)?.[1];
   expect(oferecido, `o bloco livre não anuncia o horário que vai marcar: "${rotulo}"`).toBeTruthy();
 
+  await bloco.scrollIntoViewIfNeeded();
   await bloco.click();
 
   const painel = page.getByTestId("painel-de-marcacao");
@@ -221,6 +224,7 @@ test("arrastar um card remarca — e o horário novo sobrevive ao reload", async
 
   const origem = blocoLivre(page);
   const testidOrigem = (await origem.getAttribute("data-testid"))!;
+  await origem.scrollIntoViewIfNeeded();
   await origem.click();
   await expect(page.getByTestId("painel-de-marcacao")).toBeVisible({ timeout: 15_000 });
   await page.getByTestId("confirmar-marcacao").click();
@@ -274,6 +278,8 @@ test("arrastar um card remarca — e o horário novo sobrevive ao reload", async
   ).not.toBe(testidOrigem);
 
   await alvo.scrollIntoViewIfNeeded();
+  await card.scrollIntoViewIfNeeded();
+  await card.hover();
   const caixaCard = (await card.boundingBox())!;
   const caixaAlvo = (await alvo.boundingBox())!;
   // Sem os dois na tela ao mesmo tempo não há gesto de ponteiro possível — e a
@@ -285,11 +291,10 @@ test("arrastar um card remarca — e o horário novo sobrevive ao reload", async
   ).toBe(true);
 
   // ── o arraste, com o ponteiro de verdade ───────────────────────────────
-  await page.mouse.move(caixaCard.x + caixaCard.width / 2, caixaCard.y + 4);
   await page.mouse.down();
   // Passos, e não um salto: o limiar de 4px só entra em arraste depois de um
   // `pointermove` de verdade, e um salto único não desenha o fantasma.
-  await page.mouse.move(caixaAlvo.x + caixaAlvo.width / 2, caixaAlvo.y + 4, { steps: 12 });
+  await page.mouse.move(caixaAlvo.x + caixaAlvo.width / 2, caixaAlvo.y + caixaAlvo.height / 2, { steps: 12 });
   await expect(
     page.getByTestId("fantasma-do-arraste"),
     "arrastar não desenhou onde o card cairia — o gesto não está sendo capturado",
@@ -383,6 +388,7 @@ test("arrastar para fora da disponibilidade é RECUSADO e o card volta", async (
 
   const origem = blocoLivre(page);
   const testidOrigem = (await origem.getAttribute("data-testid"))!;
+  await origem.scrollIntoViewIfNeeded();
   await origem.click();
   await expect(page.getByTestId("painel-de-marcacao")).toBeVisible({ timeout: 15_000 });
   await page.getByTestId("confirmar-marcacao").click();
@@ -416,13 +422,11 @@ test("arrastar para fora da disponibilidade é RECUSADO e o card volta", async (
   const bloqueado = blocoBloqueado(page);
   await bloqueado.scrollIntoViewIfNeeded();
   const caixaBloqueada = (await bloqueado.boundingBox())!;
-  // Depois de rolar, a caixa do card mudou de lugar na tela — o arraste tem de
-  // partir de onde ele ESTÁ agora, não de onde estava antes do scroll.
-  const caixaCard = (await card.boundingBox())!;
+  await card.scrollIntoViewIfNeeded();
+  await card.hover();
 
-  await page.mouse.move(caixaCard.x + caixaCard.width / 2, caixaCard.y + 4);
   await page.mouse.down();
-  await page.mouse.move(caixaBloqueada.x + caixaBloqueada.width / 2, caixaBloqueada.y + 4, {
+  await page.mouse.move(caixaBloqueada.x + caixaBloqueada.width / 2, caixaBloqueada.y + caixaBloqueada.height / 2, {
     steps: 12,
   });
   // O fantasma existe e está marcado como INVÁLIDO — o gesto continua legível,

@@ -122,13 +122,14 @@ function InputDeLogo({
   onRemover,
   t,
 }: InputDeLogoProps) {
+  const idInput = `logo-${escopo}-${variante}`;
   return (
     <div className="space-y-2">
-      <Label htmlFor={`logo-${escopo}-${variante}`}>{label}</Label>
+      <Label htmlFor={idInput}>{label}</Label>
       <div className="flex flex-wrap items-center gap-3">
         <input
           ref={entradaRef}
-          id={`logo-${escopo}-${variante}`}
+          id={idInput}
           type="file"
           accept="image/png,image/jpeg"
           disabled={enviando}
@@ -139,7 +140,13 @@ function InputDeLogo({
           className="max-w-xs text-sm file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border file:bg-surface-elevated file:px-3 file:py-1.5 file:text-sm"
         />
         {temLogo ? (
-          <Button type="button" variant="outline" onClick={() => void onRemover(variante)} disabled={enviando}>
+          <Button
+            type="button"
+            variant="outline"
+            data-testid={`remover-logo-${escopo}-${variante}`}
+            onClick={() => void onRemover(variante)}
+            disabled={enviando}
+          >
             {t("Remover")}
           </Button>
         ) : null}

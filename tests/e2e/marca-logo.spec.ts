@@ -240,7 +240,7 @@ async function subir(page: Page, escopo: Escopo, arquivo: {
     page.locator(`[data-campo-de-logo='${escopo}'][data-hidratado]`),
     `o campo de logo da camada "${escopo}" não hidratou — pôr o arquivo agora não dispara nada`,
   ).toBeVisible({ timeout: 15_000 });
-  await page.locator(`#logo-${escopo}`).setInputFiles({
+  await page.locator(`#logo-${escopo}-light, #logo-${escopo}`).first().setInputFiles({
     name: arquivo.nome,
     mimeType: arquivo.mime,
     buffer: arquivo.bytes,
@@ -261,9 +261,10 @@ async function removerLogoSeHouver(page: Page, tela: string, escopo: Escopo): Pr
   const remover = page
     .locator(`[data-campo-de-logo='${escopo}']`)
     .getByRole("button", { name: /^remover$/i });
-  if ((await remover.count()) === 0) return;
-  await remover.click();
-  await expect(page.getByText(/logo removido/i)).toBeVisible({ timeout: 15_000 });
+  while ((await remover.count()) > 0) {
+    await remover.first().click();
+    await expect(page.getByText(/logo removido/i)).toBeVisible({ timeout: 15_000 });
+  }
 }
 
 /** O que um `<img>` do produto mostra, medido por ferramenta. */
@@ -481,7 +482,7 @@ test.describe("o logo subido pela tela chega à tela", () => {
     await loginComTotp(page, creds.users.dono!.email, secret!);
 
     await page.goto("/admin/marca");
-    await expect(page.locator("#logo-instalacao")).toBeVisible();
+    await expect(page.locator("#logo-instalacao-light, #logo-instalacao").first()).toBeVisible();
     await subir(page, "instalacao", {
       nome: "logo-da-plataforma.png",
       mime: "image/png",
@@ -557,7 +558,7 @@ test.describe("o logo subido pela tela chega à tela", () => {
     await loginComTotp(page, creds.users.admin!.email, secret!);
 
     await page.goto("/app/settings/marca");
-    await expect(page.locator("#logo-organizacao")).toBeVisible();
+    await expect(page.locator("#logo-organizacao-light, #logo-organizacao").first()).toBeVisible();
     await subir(page, "organizacao", {
       nome: "logo-da-empresa.png",
       mime: "image/png",
@@ -653,7 +654,7 @@ test.describe("o logo subido pela tela chega à tela", () => {
     // esperou até o timeout.
     const remover = page.locator("[data-campo-de-logo='organizacao']").getByRole("button", {
       name: /^remover$/i,
-    });
+    }).first();
     await expect(remover, "precondição: a empresa precisa entrar neste caso COM logo próprio").toBeVisible();
     await remover.click();
     await expect(page.getByText(/logo removido/i)).toBeVisible({ timeout: 15_000 });
@@ -676,7 +677,7 @@ test.describe("o logo subido pela tela chega à tela", () => {
     await page.goto("/admin/marca");
     const remover = page.locator("[data-campo-de-logo='instalacao']").getByRole("button", {
       name: /^remover$/i,
-    });
+    }).first();
     await expect(
       remover,
       "precondição: a instalação precisa entrar neste caso COM logo próprio",
