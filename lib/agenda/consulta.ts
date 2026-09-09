@@ -1,3 +1,4 @@
+import { googleRpc } from "./google/sync-store";
 /**
  * OS HORÁRIOS LIVRES DE UMA ORGANIZAÇÃO — a coleta, num lugar só.
  *
@@ -104,6 +105,7 @@ export type ResultadoDaConsulta =
        * um agente que o oferece MARCA por cima da cirurgia e confirma ao cliente.
        */
       agendaExternaNuncaLida: boolean;
+      googleCoberturaParcial: boolean;
     }
   | {
       ok: false;
@@ -292,7 +294,7 @@ export async function horariosLivresDaOrg(
   const { data: externosRaw, error: erroExt } = donoProviderId
     ? { data: null, error: null }
     : await supabase
-        .from("calendar_external_events")
+        .from("calendar_selected_external_events")
         .select("starts_at, ends_at, transparency, status, calendar_connections!inner(user_id, status)")
         .eq("organization_id", organizationId)
         .eq("calendar_connections.user_id", donoUserId)
@@ -348,8 +350,24 @@ export async function horariosLivresDaOrg(
     agora: params.agora,
   });
 
+  let googleCoberturaParcial = true;
+  if (donoUserId) {
+    try {
+      googleCoberturaParcial = Boolean(
+        await googleRpc(supabase, "fn_google_coverage", {
+          p_org: organizationId,
+          p_owner: donoUserId,
+          p_start: params.de.toISOString(),
+          p_end: params.ate.toISOString(),
+        }),
+      );
+    } catch {
+      /* leitura incerta não afirma cobertura */
+    }
+  }
   return {
     ok: true,
+    googleCoberturaParcial,
     slots,
     fusoDaRegra: leitura.jornada.timezone,
     publicouHorarios: leitura.publicouHorarios,
@@ -375,6 +393,9 @@ export async function horariosLivresDaOrg(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AgendamentoListado {
+  meetingState?: string;
+  meetingUrl?: string | null;
+  revision?:number;
   id: string;
   titulo: string;
   iniciaEm: string;
@@ -523,7 +544,7 @@ export async function listaAgendamentos(
   let q = supabase
     .from("calendar_appointments")
     .select(
-      "id, title, starts_at, ends_at, time_zone, status, owner_user_id, provider_id, contact_id, contacts(name, display_name)",
+      "id, title, starts_at, ends_at, time_zone, status, revision, meeting_state, meeting_url, owner_user_id, provider_id, contact_id, contacts(name, display_name)",
     )
     .eq("organization_id", organizationId)
     .order("starts_at", { ascending: true })
@@ -576,6 +597,9 @@ export async function listaAgendamentos(
     agendamentos: (data ?? []).map((l) => ({
       id: String(l.id),
       titulo: String(l.title),
+      meetingState: l.meeting_state,
+      meetingUrl: l.meeting_state === "ready" ? l.meeting_url : null,
+      revision:Number(l.revision),
       iniciaEm: String(l.starts_at),
       terminaEm: String(l.ends_at),
       fuso: String(l.time_zone),

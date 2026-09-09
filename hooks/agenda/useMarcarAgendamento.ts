@@ -14,6 +14,7 @@ export interface NovoAgendamento {
   /** Profissional externo (migration 9003), mutuamente exclusivo com owner_user_id. */
   provider_id?: string;
   contact_id?: string;
+  conversation_id?: string;
   title?: string;
   notes?: string;
   /**

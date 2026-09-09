@@ -1,3 +1,4 @@
+import { requireSupportWrite } from "@/lib/impersonate/support";
 /**
  * O logo da marca — subir do computador, sem colar URL.
  *
@@ -356,6 +357,9 @@ async function registrarAuditoria(
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
 
   const form = await req.formData().catch(() => null);
@@ -454,6 +458,9 @@ export async function POST(req: NextRequest): Promise<Response> {
  * a tela apontaria para um objeto que não existe mais.
  */
 export async function DELETE(req: NextRequest): Promise<Response> {
+  const supportDenied = await requireSupportWrite();
+  if (supportDenied) return supportDenied;
+
   const requestId = randomUUID();
 
   const params = new URL(req.url).searchParams;

@@ -11,7 +11,7 @@ import { ConnectionHealthDot } from "@/components/connections/ConnectionHealthDo
 import { VersionFooter } from "@/components/shell/VersionFooter";
 import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
 import { useTheme } from "@/lib/theme";
-import { GRUPO_NO_RODAPE, NAV_GROUPS, sidebarGroups } from "@/lib/navigation/registry";
+import { GRUPO_NO_RODAPE, sidebarGroups } from "@/lib/navigation/registry";
 
 const CHAVE_GRUPOS_FECHADOS = "sidebar-grupos-fechados";
 
@@ -41,14 +41,15 @@ export function SidebarContent({
   const [isPending, startTransition] = useTransition();
   const { user, activeOrg } = useAuth();
   const todos = sidebarGroups(
-    user.is_platform_admin,
+    user.is_platform_admin && !user.support,
     activeOrg?.role ?? null,
+    activeOrg?.interface_settings,
     activeOrg?.providers_enabled ?? false,
   );
   // Configurações sai da área que rola e vai para o rodapé fixo: medido em
   // 1280x768, ele caía fora da dobra mesmo em telas de 1080px.
   const grupos = todos.filter((g) => g.group.id !== GRUPO_NO_RODAPE);
-  const rodape = NAV_GROUPS.find((g) => g.id === GRUPO_NO_RODAPE)?.hub;
+  const rodape = todos.find((g) => g.group.id === GRUPO_NO_RODAPE)?.group.hub;
 
   /**
    * Grupo fechado é preferência POR NAVEGADOR, não por conta: começa vazio (tudo
@@ -115,7 +116,12 @@ export function SidebarContent({
 
   return (
     <>
-      <div className={cn("flex items-center border-b px-4 h-14", collapsed ? "justify-center" : "justify-start")}>
+      <div
+        className={cn(
+          "flex h-14 items-center border-b px-4",
+          collapsed ? "justify-center" : "justify-start",
+        )}
+      >
         {logo && !collapsed ? (
           // <img> em vez de next/image de propósito: a URL vem de quem hospeda
           // (banco ou .env), e next/image exige allowlist de domínios fechada em
@@ -123,15 +129,9 @@ export function SidebarContent({
           // Altura fixa e largura livre porque a arte enviada tem proporção
           // desconhecida; forçar as duas distorceria o logo de quem configurou.
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={logo}
-            alt={nome}
-            className="h-7 w-auto max-w-[10rem] object-contain"
-          />
+          <img src={logo} alt={nome} className="h-7 w-auto max-w-[10rem] object-contain" />
         ) : (
-          <span className={cn("font-semibold tracking-tight", collapsed && "sr-only")}>
-            {nome}
-          </span>
+          <span className={cn("font-semibold tracking-tight", collapsed && "sr-only")}>{nome}</span>
         )}
         {collapsed && (
           <span aria-hidden className="text-lg font-bold text-primary">
@@ -222,69 +222,73 @@ export function SidebarContent({
                 </h2>
               )}
               {aberto && (
-              <ul aria-labelledby={collapsed ? undefined : tituloId} aria-label={collapsed ? t(group.label) : undefined} className="space-y-1">
-                {(() => {
-                  // Correspondência por PREFIXO DE SEGMENTO, ativando só o item de
-                  // MAIOR href no grupo. Sem isto, `/app/agenda/profissionais` ativa
-                  // também "Agenda" (`/app/agenda`), porque um começa com o outro.
-                  const ativos = items.filter(
-                    (i) => pathname === i.href || pathname.startsWith(i.href + "/"),
-                  );
-                  const maisEspecifico = ativos.sort((a, b) => b.href.length - a.href.length)[0];
-                  const hrefAtivo = maisEspecifico?.href;
-                  return items.map((item) => {
-                  const isActive = item.href === hrefAtivo;
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.href}>
+                <ul
+                  aria-labelledby={collapsed ? undefined : tituloId}
+                  aria-label={collapsed ? t(group.label) : undefined}
+                  className="space-y-1"
+                >
+                  {(() => {
+                    // Correspondência por PREFIXO DE SEGMENTO, ativando só o item de
+                    // MAIOR href no grupo. Sem isto, `/app/agenda/profissionais` ativa
+                    // também "Agenda" (`/app/agenda`), porque um começa com o outro.
+                    const ativos = items.filter(
+                      (i) => pathname === i.href || pathname.startsWith(i.href + "/"),
+                    );
+                    const maisEspecifico = ativos.sort((a, b) => b.href.length - a.href.length)[0];
+                    const hrefAtivo = maisEspecifico?.href;
+                    return items.map((item) => {
+                      const isActive = item.href === hrefAtivo;
+                      const Icon = item.icon;
+                      return (
+                        <li key={item.href}>
+                          <Link
+                            href={item.href}
+                            prefetch={false}
+                            title={collapsed ? t(item.label) : undefined}
+                            aria-current={isActive ? "page" : undefined}
+                            onClick={onNavigate}
+                            className={cn(
+                              "relative flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
+                              isActive
+                                ? "bg-accent text-accent-foreground"
+                                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                              collapsed && "justify-center px-2",
+                            )}
+                          >
+                            <Icon size={18} weight={isActive ? "fill" : "regular"} aria-hidden />
+                            {!collapsed && <span className="truncate">{t(item.label)}</span>}
+                            {item.healthDot && (
+                              <ConnectionHealthDot
+                                className={cn(collapsed ? "absolute top-1.5 right-1.5" : "ml-auto")}
+                              />
+                            )}
+                          </Link>
+                        </li>
+                      );
+                    });
+                  })()}
+                  {group.hub && (
+                    <li>
                       <Link
-                        href={item.href}
+                        href={group.hub.href}
                         prefetch={false}
-                        title={collapsed ? t(item.label) : undefined}
-                        aria-current={isActive ? "page" : undefined}
+                        title={collapsed ? t(group.hub.label) : undefined}
+                        aria-current={pathname === group.hub.href ? "page" : undefined}
                         onClick={onNavigate}
                         className={cn(
-                          "relative flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
-                          isActive
+                          "flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
+                          pathname === group.hub.href
                             ? "bg-accent text-accent-foreground"
                             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                           collapsed && "justify-center px-2",
                         )}
                       >
-                        <Icon size={18} weight={isActive ? "fill" : "regular"} aria-hidden />
-                        {!collapsed && <span className="truncate">{t(item.label)}</span>}
-                        {item.healthDot && (
-                          <ConnectionHealthDot
-                            className={cn(collapsed ? "absolute right-1.5 top-1.5" : "ml-auto")}
-                          />
-                        )}
+                        <ArrowRight size={18} aria-hidden />
+                        {!collapsed && <span className="truncate">{t(group.hub.label)}</span>}
                       </Link>
                     </li>
-                  );
-                });
-                })()}
-                {group.hub && (
-                  <li>
-                    <Link
-                      href={group.hub.href}
-                      prefetch={false}
-                      title={collapsed ? t(group.hub.label) : undefined}
-                      aria-current={pathname === group.hub.href ? "page" : undefined}
-                      onClick={onNavigate}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
-                        pathname === group.hub.href
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                        collapsed && "justify-center px-2",
-                      )}
-                    >
-                      <ArrowRight size={18} aria-hidden />
-                      {!collapsed && <span className="truncate">{t(group.hub.label)}</span>}
-                    </Link>
-                  </li>
-                )}
-              </ul>
+                  )}
+                </ul>
               )}
             </div>
           );
@@ -322,7 +326,11 @@ export function SidebarContent({
             )}
             aria-label={collapsed ? t("Expandir sidebar") : t("Recolher sidebar")}
           >
-            {collapsed ? <CaretDoubleRight size={14} aria-hidden /> : <CaretDoubleLeft size={14} aria-hidden />}
+            {collapsed ? (
+              <CaretDoubleRight size={14} aria-hidden />
+            ) : (
+              <CaretDoubleLeft size={14} aria-hidden />
+            )}
             {!collapsed && <span>{t("Recolher")}</span>}
           </button>
         )}
