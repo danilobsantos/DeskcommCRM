@@ -176,6 +176,16 @@ export const TOOLS_AGENDAMENTO = declararTools([
     pacotes: ["vender"],
   },
   {
+    name: "crm_list_providers",
+    category: "read",
+    rotulo: "Ver os profissionais de fora",
+    explicacao:
+      "Lista os profissionais externos (dentista, corretor, consultor) que têm agenda própria mas não são da equipe — para o atendente de IA saber com quem pode marcar além dos atendentes.",
+    oQueToca: "Agenda de profissionais",
+    risco: "seguro",
+    pacotes: ["vender"],
+  },
+  {
     name: "crm_find_free_slots",
     category: "read",
     rotulo: "Ver horários livres na agenda",

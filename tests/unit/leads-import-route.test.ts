@@ -190,11 +190,30 @@ function pedido(csv: string, campos: Record<string, string | null> = {}) {
   if (etapa !== null) corpo += parte("stage_id", etapa);
   corpo += `--${B}--\r\n`;
 
-  return new NextRequest("http://x/api/v1/leads/import", {
+  const req = new NextRequest("http://x/api/v1/leads/import", {
     method: "POST",
     headers: { "content-type": `multipart/form-data; boundary=${B}` },
     body: corpo,
   });
+
+  const buffer = Buffer.from(csv, "utf8");
+  const fileObj = {
+    name: "leads.csv",
+    size: buffer.length,
+    type: "text/csv",
+    arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+  };
+  const mapa = new Map<string, unknown>();
+  mapa.set("file", fileObj);
+  if (funil !== null) mapa.set("pipeline_id", funil);
+  if (etapa !== null) mapa.set("stage_id", etapa);
+
+  req.formData = async () =>
+    ({
+      get: (key: string) => (mapa.get(key) ?? null) as unknown as FormDataEntryValue | null,
+    }) as unknown as FormData;
+
+  return req;
 }
 
 beforeEach(() => {

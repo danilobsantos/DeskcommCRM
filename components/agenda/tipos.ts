@@ -29,6 +29,8 @@ export type Pessoa = {
   nome: string;
   /** Atribuída na entrada da pessoa na organização, não sorteada a cada render. */
   trilha: TrilhaDeCor;
+  /** `profissional` = dentista/corretor externo sem conta (migration 9003). Ausente = usuário. */
+  tipo?: "usuario" | "profissional";
 };
 
 /**

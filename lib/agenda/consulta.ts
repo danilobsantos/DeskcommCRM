@@ -36,7 +36,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { horariosLivres, type ExcecaoDeData, type Slot } from "./horarios-livres";
-import { lerJornadaDoBanco } from "./jornada";
+import { lerJornadaDoBanco, RECUSA_PARA_O_CLIENTE } from "./jornada";
 import {
   agendaExternaNuncaLida,
   ocupadosDoDono,
@@ -69,6 +69,13 @@ export interface ParametrosDaConsulta {
   eventTypeSlug?: string | null;
   /** Ausente = o responsável padrão do tipo. */
   ownerUserId?: string | null;
+  /**
+   * O PROFISSIONAL EXTERNO dono da consulta (migration 9003), quando não é um
+   * usuário. Mutuamente exclusivo com `ownerUserId`: se vier, é ele que decide
+   * jornada e ocupados, e as leituras de `attendant_availability` e do Google
+   * (que só existem para USUÁRIOS) são puladas.
+   */
+  ownerProviderId?: string | null;
   de: Date;
   ate: Date;
   /** INJETADO, como em `horariosLivres`. Relógio lido aqui dentro é o defeito que `janela-do-canal.ts` documenta. */
@@ -158,8 +165,11 @@ export async function horariosLivresDaOrg(
     };
   }
 
-  const donoId = params.ownerUserId ?? tipo.default_owner_user_id;
-  if (!donoId) {
+  const donoUserId = params.ownerProviderId
+    ? null
+    : (params.ownerUserId ?? tipo.default_owner_user_id);
+  const donoProviderId = params.ownerProviderId ?? null;
+  if (!donoUserId && !donoProviderId) {
     // Sem dono não há jornada, e sem jornada não há horário. Lista vazia aqui
     // faria a tela dizer "nenhum horário disponível" para uma configuração
     // incompleta — o erro nomeado é o que leva alguém a corrigir.
@@ -171,18 +181,46 @@ export async function horariosLivresDaOrg(
     };
   }
 
-  const { data: disponibilidade, error: erroDisp } = await supabase
-    .from("attendant_availability")
-    .select("schedule")
-    .eq("organization_id", organizationId)
-    .eq("user_id", donoId)
-    .maybeSingle();
+  // ─── a jornada: de um USUÁRIO (attendant_availability) ou de um PROFISSIONAL
+  // (providers.schedule) — o mesmo molde, endereços diferentes.
+  const { data: disponibilidade, error: erroDisp } = donoProviderId
+    ? await supabase
+        .from("providers")
+        .select("schedule, active")
+        .eq("organization_id", organizationId)
+        .eq("id", donoProviderId)
+        .maybeSingle()
+    : await supabase
+        .from("attendant_availability")
+        .select("schedule")
+        .eq("organization_id", organizationId)
+        .eq("user_id", donoUserId)
+        .maybeSingle();
   if (erroDisp) {
     return {
       ok: false,
       codigo: "erro_interno",
       motivoParaOperador: erroDisp.message,
       motivoParaCliente: `Não consegui consultar a agenda agora. ${NAO_OFERECA}`,
+    };
+  }
+  if (donoProviderId && !disponibilidade) {
+    return {
+      ok: false,
+      codigo: "sem_responsavel",
+      motivoParaOperador: "O profissional deste agendamento não existe mais.",
+      motivoParaCliente: `Ainda não há um responsável definido para "${tipo.name}". ${NAO_OFERECA}`,
+    };
+  }
+  if (
+    donoProviderId &&
+    (disponibilidade as { active?: boolean } | null)?.active === false
+  ) {
+    return {
+      ok: false,
+      codigo: "jornada_mal_configurada",
+      motivoParaOperador: "O profissional deste agendamento está inativo.",
+      motivoParaCliente: RECUSA_PARA_O_CLIENTE + " " + NAO_OFERECA,
     };
   }
 
@@ -205,20 +243,25 @@ export async function horariosLivresDaOrg(
     };
   }
 
+  // O dono endereça a agenDA por UMA das duas colunas; `donoUserId` e
+  // `donoProviderId` são mutuamente exclusivos (constraint do banco).
+  const colunaDono = donoProviderId ? "provider_id" : "owner_user_id";
+  const dono = donoProviderId ?? donoUserId;
+
   const [{ data: excecoesRaw, error: erroExc }, { data: agendaRaw, error: erroAg }] =
     await Promise.all([
       supabase
         .from("calendar_availability_exceptions")
         .select("exception_date, is_unavailable, start_minute, end_minute")
         .eq("organization_id", organizationId)
-        .eq("user_id", donoId)
+        .eq(donoProviderId ? "provider_id" : "user_id", dono)
         .gte("exception_date", diaISO(params.de))
         .lte("exception_date", diaISO(params.ate)),
       supabase
         .from("calendar_appointments")
         .select("starts_at, ends_at, status")
         .eq("organization_id", organizationId)
-        .eq("owner_user_id", donoId)
+        .eq(colunaDono, dono)
         .lt("starts_at", params.ate.toISOString())
         .gt("ends_at", params.de.toISOString()),
     ]);
@@ -236,22 +279,25 @@ export async function horariosLivresDaOrg(
   // `calendar_external_events` NÃO tem `user_id`: o dono vem por
   // `connection_id → calendar_connections.user_id`. O join traz de carona a
   // situação da conexão, que decide se o horário sai com aviso de defasagem.
-  // A situação das conexões do dono, para distinguir "não tem Google" de "tem
-  // Google que nunca foi lido". Sem `.select` de erro: conexão ilegível cai no
-  // mesmo lado de "não sei", que é o lado seguro.
-  const { data: conexoesRaw } = await supabase
-    .from("calendar_connections")
-    .select("status, last_sync_at")
-    .eq("organization_id", organizationId)
-    .eq("user_id", donoId);
+  // ⚠️ PROFISSIONAL NÃO TEM GOOGLE: conexões e eventos externos são só do
+  // atendente-usuário — para provider as duas listas ficam vazias por desenho.
+  const { data: conexoesRaw } = donoProviderId
+    ? { data: null }
+    : await supabase
+        .from("calendar_connections")
+        .select("status, last_sync_at")
+        .eq("organization_id", organizationId)
+        .eq("user_id", donoUserId);
 
-  const { data: externosRaw, error: erroExt } = await supabase
-    .from("calendar_external_events")
-    .select("starts_at, ends_at, transparency, status, calendar_connections!inner(user_id, status)")
-    .eq("organization_id", organizationId)
-    .eq("calendar_connections.user_id", donoId)
-    .lt("starts_at", params.ate.toISOString())
-    .gt("ends_at", params.de.toISOString());
+  const { data: externosRaw, error: erroExt } = donoProviderId
+    ? { data: null, error: null }
+    : await supabase
+        .from("calendar_external_events")
+        .select("starts_at, ends_at, transparency, status, calendar_connections!inner(user_id, status)")
+        .eq("organization_id", organizationId)
+        .eq("calendar_connections.user_id", donoUserId)
+        .lt("starts_at", params.ate.toISOString())
+        .gt("ends_at", params.de.toISOString());
   if (erroExt) {
     return {
       ok: false,
@@ -477,7 +523,7 @@ export async function listaAgendamentos(
   let q = supabase
     .from("calendar_appointments")
     .select(
-      "id, title, starts_at, ends_at, time_zone, status, owner_user_id, contact_id, contacts(name, display_name)",
+      "id, title, starts_at, ends_at, time_zone, status, owner_user_id, provider_id, contact_id, contacts(name, display_name)",
     )
     .eq("organization_id", organizationId)
     .order("starts_at", { ascending: true })
@@ -534,7 +580,7 @@ export async function listaAgendamentos(
       terminaEm: String(l.ends_at),
       fuso: String(l.time_zone),
       situacao: String(l.status),
-      donoId: l.owner_user_id ? String(l.owner_user_id) : null,
+      donoId: l.owner_user_id ? String(l.owner_user_id) : l.provider_id ? String(l.provider_id) : null,
       contatoId: l.contact_id ? String(l.contact_id) : null,
       // O ID sozinho não serve a nenhum dos dois consumidores: a grade precisa do
       // nome para dizer "com quem", e o AGENTE recebia um uuid cru onde devia
@@ -681,4 +727,37 @@ export async function listaTiposDeAtendimento(
       janelaDeAgendamentoDias: Number(t.booking_window_days),
     })),
   };
+}
+
+
+/**
+ * Os profissionais externos ativos da organização — o alvo da tool
+ * `crm_list_providers`, para a IA saber com quem tem agenda além dos
+ * atendentes-usuários.
+ */
+export interface ProfissionalListado {
+  id: string;
+  nome: string;
+  especialidades: string[];
+  ativo: boolean;
+}
+
+export async function listaProfissionais(
+  supabase: SupabaseClient,
+  organizationId: string,
+): Promise<ProfissionalListado[]> {
+  const { data, error } = await supabase
+    .from("providers")
+    .select("id, name, specialties, active")
+    .eq("organization_id", organizationId)
+    .order("name");
+
+  if (error) return [];
+
+  return (data ?? []).map((p) => ({
+    id: String(p.id),
+    nome: String(p.name),
+    especialidades: Array.isArray(p.specialties) ? p.specialties.map(String) : [],
+    ativo: Boolean(p.active),
+  }));
 }

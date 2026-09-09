@@ -58,7 +58,7 @@ const LOGO_ESTRANHO = "10c00158-1111-4000-8000-000000000003";
 /** Super-admin de plataforma, membro de organização nenhuma. */
 const LOGO_PLATFORM = "10c00158-1111-4000-8000-000000000004";
 
-const FN_LOGO = "public.fn_definir_logo_da_organizacao(uuid,uuid,text)";
+const FN_LOGO = "public.fn_definir_logo_da_organizacao(uuid,uuid,text,text)";
 const FN_MARCA = "public.fn_definir_marca_da_organizacao(uuid,uuid,jsonb)";
 
 /** Um nome de arquivo na forma que a rota gera. */

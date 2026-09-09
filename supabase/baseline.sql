@@ -18497,3 +18497,79 @@ end $$;
 alter table public.attendant_availability
   add column if not exists last_heartbeat_at timestamptz;
 
+-- ---- agenda: profissionais externos (migration 9003) ----
+-- O dono externo: o dentista sem login. `providers` existe como registro de
+-- domínio com jornada própria (`schedule`, molde de attendant_availability), e
+-- `calendar_appointments` passa a aceitar `provider_id` MUTUAMENTE exclusivo
+-- com `owner_user_id`. Aditiva e idempotente — nada a curar, colunas novas são
+-- NULLABLE e relaxar `user_id` em calendar_availability_exceptions só ABAIXA.
+create table if not exists public.providers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  specialties text[] not null default '{}',
+  active boolean not null default true,
+  schedule jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_providers_org on public.providers (organization_id);
+create index if not exists idx_providers_specialties on public.providers using gin (specialties);
+
+alter table public.providers enable row level security;
+
+drop policy if exists providers_select on public.providers;
+create policy providers_select on public.providers
+  for select using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids()))
+  );
+
+drop policy if exists providers_write on public.providers;
+create policy providers_write on public.providers
+  using (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+revoke all on public.providers from anon;
+
+alter table public.calendar_appointments
+  add column if not exists provider_id uuid references public.providers(id) on delete set null;
+
+alter table public.calendar_appointments
+  drop constraint if exists calendar_appointments_dono_unico;
+alter table public.calendar_appointments
+  add constraint calendar_appointments_dono_unico
+  check (owner_user_id is null or provider_id is null);
+
+alter table public.calendar_availability_exceptions
+  alter column user_id drop not null;
+
+alter table public.calendar_availability_exceptions
+  add column if not exists provider_id uuid references public.providers(id) on delete cascade;
+
+alter table public.calendar_availability_exceptions
+  drop constraint if exists calendar_exceptions_dono_unico;
+alter table public.calendar_availability_exceptions
+  add constraint calendar_exceptions_dono_unico
+  check (user_id is null or provider_id is null);
+
+create unique index if not exists calendar_exceptions_provider_dia_faixa_key
+  on public.calendar_availability_exceptions (organization_id, provider_id, exception_date, start_minute)
+  where provider_id is not null;
+
+drop trigger if exists trg_providers_updated_at on public.providers;
+create trigger trg_providers_updated_at
+  before update on public.providers
+  for each row execute function public.fn_set_updated_at();
+
+notify pgrst, 'reload schema';
+

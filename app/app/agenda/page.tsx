@@ -98,7 +98,7 @@ export default async function AgendaPage() {
     supabase
       .from("calendar_appointments")
       .select(
-        "id, title, starts_at, ends_at, status, owner_user_id, contact_id, event_type_id, location_kind, contacts(name, display_name)",
+        "id, title, starts_at, ends_at, status, owner_user_id, provider_id, contact_id, event_type_id, location_kind, contacts(name, display_name)",
       )
       .eq("organization_id", activeOrg.orgId)
       .gte("starts_at", inicio.toISOString())
@@ -177,12 +177,7 @@ export default async function AgendaPage() {
     .select("account_email, status")
     .eq("organization_id", activeOrg.orgId)
     .eq("user_id", user.id)
-    // ⚠️ A CONSTANTE, e não o literal. Isto era `.eq("provider", "google")` — um
-    // valor que o CHECK de `calendar_connections` PROÍBE existir, então a
-    // consulta casava zero linhas SEMPRE. O efeito na tela: `contaConectada`
-    // vinha `null`, o ramo "Agenda conectada" do cartão nunca entrava, e o botão
-    // "Conectar Google" continuava aparecendo depois de a pessoa já ter
-    // conectado. Ela reconectava, o ciclo repetia.
+    // ⚠️ A CONSTANTE, e não o literal — ver comentário do trecho.
     .eq("provider", PROVEDOR_GOOGLE)
     .neq("status", "disconnected")
     .maybeSingle();
@@ -194,6 +189,15 @@ export default async function AgendaPage() {
   const googleConfigurado = await googleEstaConfigurado();
   const faltaNoGoogle = googleConfigurado ? [] : await faltaParaConectarOGoogle();
 
+  // Profissionais externos (migration 9003) — entram na grade como Pessoas, com
+  // trilha estável derivada do id. Quem não tem a feature ligada vê lista vazia.
+  const { data: profissionais } = await supabase
+    .from("providers")
+    .select("id, name, active")
+    .eq("organization_id", activeOrg.orgId)
+    .eq("active", true)
+    .order("name");
+
   return (
     <AgendaClient
       fusoDeApresentacao={fusoDeApresentacao}
@@ -201,6 +205,10 @@ export default async function AgendaPage() {
       contaConectada={conexao?.account_email ?? null}
       enderecoDeRetorno={enderecoDeRetorno()}
       faltaNoGoogle={faltaNoGoogle}
+      profissionaisIniciais={(profissionais ?? []).map((p) => ({
+        id: p.id,
+        nome: p.name,
+      }))}
       // SÓ para quem administra a INSTALAÇÃO. A tela do app OAuth vive em
       // `/admin` e faz `notFound()` para o resto — oferecer o link a quem não
       // pode entrar seria trocar um beco por outro.
@@ -223,7 +231,7 @@ export default async function AgendaPage() {
       agendamentosIniciais={((linhas ?? []).map((a) => ({
         id: a.id,
         titulo: a.title ?? "Agendamento",
-        responsavelId: a.owner_user_id ?? "",
+        responsavelId: a.owner_user_id ?? a.provider_id ?? "",
         comeca: a.starts_at,
         termina: a.ends_at,
         origem: "ui" as const,

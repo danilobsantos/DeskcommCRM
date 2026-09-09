@@ -31,7 +31,7 @@ const INBOX_TABS: { value: InboxTab; label: string }[] = [
   // padrão — e ela mudou de significado junto (deixou de filtrar `ai_handling` e
   // passou a perguntar a régua do motor), então o rótulo velho descreveria outra
   // coisa.
-  { value: "ai", label: "Auto" },
+  { value: "ai", label: "Automático" },
 ];
 
 /**

@@ -55,6 +55,8 @@ export interface MarcarInput {
   event_type_id: string;
   starts_at: string;
   owner_user_id?: string;
+  /** Profissional externo (migration 9003). Mutuamente exclusivo com owner_user_id. */
+  provider_id?: string;
   contact_id?: string;
   title?: string;
   notes?: string;
@@ -105,8 +107,9 @@ export async function marcarAgendamentoHandler(
     throw new ApiError(422, "agenda_tipo_desativado", undefined, ctx.requestId, `"${tipo.name}" está desativado.`);
   }
 
-  const donoId = input.owner_user_id ?? tipo.default_owner_user_id;
-  if (!donoId) {
+  const donoUserId = input.provider_id ? null : input.owner_user_id ?? tipo.default_owner_user_id;
+  const donoProviderId = input.provider_id ?? null;
+  if (!donoUserId && !donoProviderId) {
     throw new ApiError(
       422,
       "agenda_sem_responsavel",
@@ -114,6 +117,27 @@ export async function marcarAgendamentoHandler(
       ctx.requestId,
       `"${tipo.name}" não tem responsável definido, e sem responsável não há agenda.`,
     );
+  }
+
+  // O profession AL externo também é INPUT e precisa ser resolvido contra a org,
+  // como o contact_id logo abaixo: um `provider_id` de outra organização não pode
+  // virar dono aqui.
+  if (donoProviderId) {
+    const { data: prof, error: erroProf } = await supabase
+      .from("providers")
+      .select("id, active")
+      .eq("id", donoProviderId)
+      .eq("organization_id", ctx.organization_id)
+      .maybeSingle();
+    if (erroProf) {
+      throw new ApiError(500, "internal_error", undefined, ctx.requestId, erroProf.message);
+    }
+    if (!prof) {
+      throw new ApiError(404, "not_found", undefined, ctx.requestId, "Profissional não encontrado.");
+    }
+    if (!prof.active) {
+      throw new ApiError(422, "agenda_tipo_desativado", undefined, ctx.requestId, "Este profissional está inativo.");
+    }
   }
 
   // O `contact_id` É INPUT EXTERNO E PRECISA SER RESOLVIDO, não repassado.
@@ -152,7 +176,8 @@ export async function marcarAgendamentoHandler(
   const fim = new Date(inicio.getTime() + tipo.duration_minutes * 60_000);
   const consulta = await exigeHorarioLivre(supabase, ctx, {
     eventTypeId: tipo.id,
-    donoId,
+    donoId: donoProviderId ?? donoUserId!,
+    providerId: donoProviderId,
     inicio,
     fim,
   });
@@ -169,7 +194,8 @@ export async function marcarAgendamentoHandler(
       // o horário foi decidido, e ele viaja até o lembrete (ACHADO 09).
       time_zone: consulta.fusoDaRegra,
       status: tipo.requires_confirmation ? "pending" : "confirmed",
-      owner_user_id: donoId,
+      owner_user_id: donoUserId,
+      provider_id: donoProviderId,
       contact_id: input.contact_id ?? null,
       location_kind: tipo.location_kind,
       location_details: tipo.location_details,
@@ -206,7 +232,12 @@ export async function marcarAgendamentoHandler(
     resourceType: "calendar_appointment",
     resourceId: criado.id,
     requestId: ctx.requestId,
-    metadata: { event_type_id: tipo.id, owner_user_id: donoId, time_zone: criado.time_zone },
+    metadata: {
+      event_type_id: tipo.id,
+      owner_user_id: donoUserId,
+      provider_id: donoProviderId,
+      time_zone: criado.time_zone,
+    },
   });
 
   return criado as Record<string, unknown>;
@@ -236,6 +267,7 @@ export async function alterarAgendamentoHandler(
     "id",
     "event_type_id",
     "owner_user_id",
+    "provider_id",
     "contact_id",
     "starts_at",
     "status",
@@ -280,9 +312,11 @@ export async function alterarAgendamentoHandler(
     // a si mesmo.
     const mesmoHorario = new Date(atual.starts_at as string).getTime() === novoInicio.getTime();
     if (!mesmoHorario) {
+      const providerId = (atual.provider_id as string | null) ?? null;
       const consulta = await exigeHorarioLivre(supabase, ctx, {
         eventTypeId: tipo.id,
-        donoId: atual.owner_user_id as string,
+        donoId: providerId ?? (atual.owner_user_id as string),
+        providerId,
         inicio: novoInicio,
         fim: novoFim,
       });
@@ -472,11 +506,18 @@ async function exigeAgendamento(
 async function exigeHorarioLivre(
   supabase: SB,
   ctx: HandlerCtx,
-  args: { eventTypeId: string; donoId: string; inicio: Date; fim: Date },
+  args: {
+    eventTypeId: string;
+    donoId: string;
+    providerId?: string | null;
+    inicio: Date;
+    fim: Date;
+  },
 ): Promise<{ fusoDaRegra: string }> {
   const consulta = await horariosLivresDaOrg(supabase, ctx.organization_id, {
     eventTypeId: args.eventTypeId,
-    ownerUserId: args.donoId,
+    ownerUserId: args.providerId ? null : args.donoId,
+    ownerProviderId: args.providerId ?? null,
     de: args.inicio,
     ate: args.fim,
     agora: new Date(),
