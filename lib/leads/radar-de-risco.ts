@@ -1,3 +1,5 @@
+import { protecaoAgendaSupabase, type ProtecaoAgenda } from "@/lib/agenda/protecao-followup";
+import type { Role } from "@/lib/auth/types";
 /**
  * O RADAR DE RISCO, montado — a lista de demandas abertas que esfriaram.
  *
@@ -51,6 +53,7 @@ export interface AtRiskLead {
   next_followup_at: string | null;
   conversation_id: string | null;
   pipeline_id: string;
+  agenda?: ProtecaoAgenda;
 }
 
 /**
@@ -88,6 +91,8 @@ export interface OpcoesDoRadar {
   limit?: number;
   minHours?: number;
   now?: Date;
+  /** Apenas a rota humana passa o papel efetivo; as consultas usam seu client RLS. */
+  humanRole?: Role;
 }
 
 export async function carregaRadarDeRisco(
@@ -101,7 +106,7 @@ export async function carregaRadarDeRisco(
   const nowIso = now.toISOString();
 
   // Fase 1: disparar em paralelo crm_leads e demandas (independentes entre si)
-  const [{ data: leads, error: leadsErr }, { data: semPasso }] = await Promise.all([
+  const [{ data: leads, error: leadsErr }, { data: semPasso, error: demandaErr }] = await Promise.all([
     admin
       .from("crm_leads")
       .select(
@@ -113,14 +118,15 @@ export async function carregaRadarDeRisco(
       .limit(SCAN_CAP),
     admin
       .from("demandas")
-      .select("id, contact_id, aberta_em, origem, contacts(display_name)")
+      .select("id, lead_id, contact_id, aberta_em, origem, contacts(display_name)")
       .eq("organization_id", organizationId)
       .is("fechada_em", null)
       .is("proximo_passo", null)
       .order("aberta_em", { ascending: true })
-      .limit(limit),
+      .limit(SCAN_CAP),
   ]);
   if (leadsErr) throw new Error(`radar_query_failed: ${leadsErr.message}`);
+  if (demandaErr) throw new Error(`radar_demandas_failed: ${demandaErr.message}`);
 
   const rows = leads ?? [];
 
@@ -215,6 +221,8 @@ export async function carregaRadarDeRisco(
     nameByContact.set(p.id, p.display_name ?? p.name ?? null);
   }
 
+  const agenda = await protecaoAgendaSupabase(admin, organizationId, contactIds, now);
+  if ([...agenda.values()].some(p => p.motivo === "leitura_indisponivel")) throw new Error("radar_agenda_indisponivel");
   const radar: AtRiskLead[] = [];
   const counts: Record<RiskBucket, number> = { critico: 0, em_risco: 0, em_voo: 0, em_dia: 0 };
 
@@ -226,9 +234,11 @@ export async function carregaRadarDeRisco(
       lastActivityAt: new Date(lastActivity),
       now,
       inFlight: nextFollowupAt !== null,
+      agenda: l.contact_id ? agenda.get(l.contact_id) : undefined,
       window: windowByStage.get(l.stage_id) ?? resolveStageWindow(null),
     });
-    if (!onRadar || hoursSinceActivity < minHours) continue;
+    const protection = l.contact_id ? agenda.get(l.contact_id) : undefined;
+    if (!onRadar || (hoursSinceActivity < minHours && (!protection || protection.motivo === "sem_compromisso"))) continue;
     const conv = l.contact_id ? (convByContact.get(l.contact_id) ?? null) : null;
     counts[bucket] += 1;
     radar.push({
@@ -248,6 +258,7 @@ export async function carregaRadarDeRisco(
       next_followup_at: nextFollowupAt,
       conversation_id: conv?.id ?? null,
       pipeline_id: l.pipeline_id,
+      agenda: protection,
     });
   }
 
@@ -258,10 +269,50 @@ export async function carregaRadarDeRisco(
     ),
   );
 
-  // PASSO 4 do cap. 5 — o Radar passa a conhecer `demandas`.
-  // `semPasso` foi consultado na Fase 1 em paralelo com `crm_leads`.
+  let demandasVisiveis = semPasso ?? [];
+  if (opts.humanRole === "agent" && demandasVisiveis.length) {
+    // Demandas são org-flat. A visibilidade dos candidatos vem das relações sob
+    // RLS, em lote separado do pool de leads frios (que não define autorização).
+    const leadIds = [...new Set(demandasVisiveis.flatMap((d) => (d.lead_id ? [d.lead_id] : [])))];
+    const leadlessIds = demandasVisiveis.filter((d) => !d.lead_id).map((d) => d.id);
+    const visibleLeads = new Set<string>();
+    const visibleLeadless = new Set<string>();
+    if (leadIds.length) {
+      const result = await admin
+        .from("crm_leads")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .in("id", leadIds);
+      if (result.error) throw new Error("radar_scope_leads_failed");
+      for (const lead of result.data ?? []) visibleLeads.add(lead.id);
+    }
+    if (leadlessIds.length) {
+      const links = await admin
+        .from("demanda_conversas")
+        .select("demanda_id,conversation_id")
+        .eq("organization_id", organizationId)
+        .in("demanda_id", leadlessIds);
+      if (links.error) throw new Error("radar_scope_links_failed");
+      const ids = [...new Set((links.data ?? []).map((link) => link.conversation_id))];
+      if (ids.length) {
+        const convs = await admin
+          .from("conversations")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .in("id", ids);
+        if (convs.error) throw new Error("radar_scope_conversations_failed");
+        const visible = new Set((convs.data ?? []).map((c) => c.id));
+        for (const link of links.data ?? []) {
+          if (visible.has(link.conversation_id)) visibleLeadless.add(link.demanda_id);
+        }
+      }
+    }
+    demandasVisiveis = demandasVisiveis.filter((d) =>
+      d.lead_id ? visibleLeads.has(d.lead_id) : visibleLeadless.has(d.id),
+    );
+  }
 
-  const semProximoPasso: DemandaSemProximoPasso[] = (semPasso ?? []).map((d) => {
+  const semProximoPasso: DemandaSemProximoPasso[] = demandasVisiveis.map((d) => {
     // O join do PostgREST vem como ARRAY mesmo em relação um-para-um.
     const rel = d.contacts as unknown as { display_name: string | null }[] | { display_name: string | null } | null;
     const contato = Array.isArray(rel) ? (rel[0] ?? null) : rel;
@@ -281,7 +332,7 @@ export async function carregaRadarDeRisco(
     items: radar.slice(0, limit),
     counts: { critico: counts.critico, em_risco: counts.em_risco, em_voo: counts.em_voo },
     total: radar.length,
-    sem_proximo_passo: semProximoPasso,
+    sem_proximo_passo: semProximoPasso.slice(0, limit),
     total_sem_proximo_passo: semProximoPasso.length,
   };
 }

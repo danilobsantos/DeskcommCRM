@@ -149,7 +149,7 @@ describe("horariosLivresDaOrg com ownerProviderId", () => {
 // ── nav gated pela flag ──────────────────────────────────────────────
 describe("sidebarGroups + providersRequired", () => {
   const grupo = (providersEnabled: boolean) =>
-    sidebarGroups(false, "manager", providersEnabled)
+    sidebarGroups(false, "manager", undefined, providersEnabled)
       .flatMap((g) => g.items)
       .map((i) => i.href);
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { EntradaDaAgenda } from "@/components/agenda/EntradaDaAgenda";
+import { VinculoDaMarcacao } from "@/components/agenda/VinculoDaMarcacao";
 import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
 import { useT } from "@/hooks/i18n/useT";
@@ -110,6 +112,9 @@ export function AgendaClient({
     })),
   ];
   const [marcando, setMarcando] = React.useState(false);
+  const [contactId,setContactId]=React.useState("");
+  const [conversationId,setConversationId]=React.useState("");
+  const onContext=React.useCallback((contact:string,conversation:string)=>{setContactId(contact);setConversationId(conversation);setMarcando(true);},[]);
   // O horário que veio de um CLIQUE NA GRADE. Preenchido, o painel abre já em
   // "confirmando" naquele instante; vazio, ele abre pedindo o dia, como sempre.
   const [horarioEscolhido, setHorarioEscolhido] = React.useState<HorarioLivre | null>(null);
@@ -325,6 +330,7 @@ export function AgendaClient({
       */}
       <React.Suspense fallback={null}>
         <AvisoDaConexaoGoogle />
+        <EntradaDaAgenda onContext={onContext}/>
       </React.Suspense>
 
       <CartaoDaConexaoGoogle
@@ -520,6 +526,7 @@ export function AgendaClient({
           <SheetHeader>
             <SheetTitle>{remarcandoId ? t("Remarcar agendamento") : t("Novo agendamento")}</SheetTitle>
           </SheetHeader>
+            {!remarcandoId?<VinculoDaMarcacao contactId={contactId} conversationId={conversationId} onChange={(contact,conversation)=>{setContactId(contact);setConversationId(conversation);}}/>:null}
           {tiposIniciais.length > 1 && (
             <div className="mt-4" data-testid="tipos-de-agendamento">
               <p className="mb-2 text-xs font-medium text-text-muted">{t("Tipo de agendamento")}</p>
@@ -614,6 +621,7 @@ export function AgendaClient({
                 erroAoCarregar={horariosFalharam}
                 fusoSuposto={horarios?.fuso_suposto ?? false}
                 fontesDefasadas={horarios?.fontes_defasadas}
+                googleCoberturaParcial={horarios?.google_cobertura_parcial}
                 horarioInicial={horarioEscolhido ?? undefined}
                 // ESTE é o fio que faltava. Sem ele o "Marcado ✓" era estado
                 // local do React e nenhuma linha nascia no banco.
@@ -644,7 +652,7 @@ export function AgendaClient({
                   const convidado = emailConvidadoLimpo || undefined;
                   if (remarcandoId) {
                     return remarcar
-                      .mutateAsync({ id: remarcandoId, starts_at: instante, guest_email: convidado })
+                      .mutateAsync({ id: remarcandoId,revision:agendamentos.find(a=>a.id===remarcandoId)?.revision, starts_at: instante, guest_email: convidado })
                       .then((r) => {
                         setRemarcandoId(null);
                         setMarcando(false);
@@ -655,6 +663,8 @@ export function AgendaClient({
                   return marcar
                     .mutateAsync({
                       event_type_id: tipo.id,
+                      contact_id:contactId||undefined,
+                      conversation_id:conversationId||undefined,
                       starts_at: instante,
                       guest_email: convidado,
                       // Profissional externo isolado na grade: marca NA AGENDA
@@ -742,7 +752,7 @@ export function AgendaClient({
                 onClick={() => {
                   const id = cancelandoId;
                   if (!id) return;
-                  void cancelar.mutateAsync({ id, reason: motivo.trim() }).then(
+                  void cancelar.mutateAsync({ id,revision:agendamentos.find(a=>a.id===id)?.revision, reason: motivo.trim() }).then(
                     () => setCancelandoId(null),
                     () => undefined,
                   );
@@ -810,8 +820,8 @@ export function AgendaClient({
         // Sem cerimônia de confirmação, ao contrário de cancelar: registrar
         // desfecho não avisa ninguém e se desfaz voltando o status. Cancelar
         // exige motivo porque é o que a equipe lê ao ver o horário vago.
-        onRealizado={(id) => desfecho.mutate({ id, status: "completed" })}
-        onFaltou={(id) => desfecho.mutate({ id, status: "no_show" })}
+        onRealizado={(id) => desfecho.mutate({ id,revision:agendamentos.find(a=>a.id===id)?.revision, status: "completed" })}
+        onFaltou={(id) => desfecho.mutate({ id,revision:agendamentos.find(a=>a.id===id)?.revision, status: "no_show" })}
       />
 
       {/* ⚠️ O VAZIO NÃO ESCONDE MAIS A GRADE, e o achado veio do CI.
