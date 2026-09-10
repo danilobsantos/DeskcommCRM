@@ -14,9 +14,9 @@ alter table public.calendar_appointments
 create index if not exists calendar_meet_pending_idx on public.calendar_appointments(meeting_next_attempt_at)
  where meeting_state='pending';
 alter table public.job_queue drop constraint if exists job_queue_kind_check;
-alter table public.job_queue add constraint job_queue_kind_check check(kind in ('inbound_turn','followup_turn','watchdog','flywheel','case_reply_turn','operator_turn','transactional_delivery'));
+alter table public.job_queue add constraint job_queue_kind_check check(kind in ('inbound_turn','followup_turn','watchdog','flywheel','case_reply_turn','operator_turn','transactional_delivery')) not valid;
 alter table public.job_queue drop constraint if exists job_queue_turn_needs_contact;
-alter table public.job_queue add constraint job_queue_turn_needs_contact check((kind in ('inbound_turn','followup_turn','case_reply_turn','operator_turn','transactional_delivery'))=(contact_id is not null));
+alter table public.job_queue add constraint job_queue_turn_needs_contact check((kind in ('inbound_turn','followup_turn','case_reply_turn','operator_turn','transactional_delivery'))=(contact_id is not null)) not valid;
 
 create or replace function public.fn_meet_boundary_current(b jsonb)
 returns boolean language sql stable security definer set search_path=public as $$

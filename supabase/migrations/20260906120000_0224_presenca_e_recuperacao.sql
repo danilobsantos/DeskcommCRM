@@ -43,7 +43,7 @@ alter table public.agent_inbox_items add constraint agent_inbox_items_kind_check
  'snooze_expired','next_action_ambiguous','risk_backlog_seeded','reactivation_expired','capabilities_missing',
  'message_send_stuck','channel_template_review','channel_number_alert','midia_nao_lida','promise_unfulfilled',
  'contact_proposal_expired','budget_warning','conhecimento_nao_indexado','other',
- 'appointment_outcome_required','appointment_recovery_review'));
+ 'appointment_outcome_required','appointment_recovery_review','routing_unassigned'));
 
 create or replace function public.fn_appointment_stamp()
 returns trigger language plpgsql security definer set search_path=public as $$
