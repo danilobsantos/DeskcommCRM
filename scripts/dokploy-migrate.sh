@@ -25,6 +25,20 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
     name text
 );
 ALTER TABLE supabase_migrations.schema_migrations ADD COLUMN IF NOT EXISTS applied_at timestamptz DEFAULT now();
+
+-- Tenta unificar o owner das tabelas públicas para o usuário da conexão atual caso tenha privilégio
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tableowner <> current_user LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE public.%I OWNER TO %I', r.tablename, current_user);
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+  END LOOP;
+END $$;
 EOSQL
 
 # 2. Se o banco já possui tabelas (ex: public.organizations existe), mas a tabela de migrations
