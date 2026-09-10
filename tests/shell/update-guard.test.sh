@@ -38,17 +38,20 @@ set -uo pipefail
 # `tests/unit/namespace-das-imagens.test.ts`, que assere o literal UMA vez e
 # confere que o compose, o `.env` de exemplo e o workflow de publicação dizem o
 # mesmo. Se você veio parar aqui procurando a guarda do namespace, é lá.
-NS="$(sed -n 's/^IMG_NS="\(.*\)"$/\1/p' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../hostgator-setup-kit" && pwd)/_common.sh" | head -1)"
+KIT_DIR_TESTE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../hostgator-setup-kit" && pwd)"
+NS="$(sed -n 's/^IMG_NS="\(.*\)"$/\1/p' "$KIT_DIR_TESTE/_common.sh" | head -1)"
 [ -n "$NS" ] || { echo "não consegui ler IMG_NS de _common.sh"; exit 1; }
+IMG_APP_NAME="$(sed -n 's/^IMG_APP=.*\/\(.*\)"$/\1/p' "$KIT_DIR_TESTE/_common.sh" | head -1)"
+IMG_WORKER_NAME="$(sed -n 's/^IMG_WORKER=.*\/\(.*\)"$/\1/p' "$KIT_DIR_TESTE/_common.sh" | head -1)"
+IMG_SCHEDULER_NAME="$(sed -n 's/^IMG_SCHEDULER=.*\/\(.*\)"$/\1/p' "$KIT_DIR_TESTE/_common.sh" | head -1)"
 # Exportado porque o dublê de `docker` (escrito mais abaixo num heredoc quoted)
 # resolve $NS em tempo de execução, já dentro de outro processo.
-export NS
+export NS IMG_APP_NAME IMG_WORKER_NAME IMG_SCHEDULER_NAME
 
 
 # Capturado ANTES de qualquer `cd`: o script muda de diretório várias vezes, e
 # `${BASH_SOURCE[0]}` é relativo ao cwd de quem invocou. Resolvê-lo lá embaixo
 # devolvia string vazia, e o `.` virava `/_common.sh`.
-KIT_DIR_TESTE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../hostgator-setup-kit" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
@@ -206,7 +209,7 @@ echo nova > nova.txt; git add -A; git commit --quiet -m "v1.1.0"; git tag v1.1.0
 git checkout --quiet v0.9.0
 run_update --to v1.1.0
 check "a atualização termina com sucesso" test "$RC" -eq 0
-check ".env aponta para a imagem da versão instalada" grep -q "^APP_IMAGE=${NS}/deskcommcrm:1.1.0$" .env
+check ".env aponta para a imagem da versão instalada" grep -q "^APP_IMAGE=${NS}/${IMG_APP_NAME}:1.1.0$" .env
 check "a chave APP_IMAGE não duplicou" test "$(grep -c '^APP_IMAGE=' .env)" -eq 1
 run_update --to v1.1.0 --force
 check "segunda execução também não duplica" test "$(grep -c '^APP_IMAGE=' .env)" -eq 1
@@ -236,9 +239,9 @@ echo "── 4b. As três imagens sobem juntas, na mesma versão"
 # runtime do agente de IA — ficava congelado no código do dia da instalação.
 # Se estas três linhas voltarem a divergir, o defeito voltou.
 check "o worker é pinado na MESMA versão do app" \
-  grep -q "^WORKER_IMAGE=${NS}/deskcomm-worker:1.1.0$" .env
+  grep -q "^WORKER_IMAGE=${NS}/${IMG_WORKER_NAME}:1.1.0$" .env
 check "o scheduler é pinado na MESMA versão do app" \
-  grep -q "^SCHEDULER_IMAGE=${NS}/deskcomm-scheduler:1.1.0$" .env
+  grep -q "^SCHEDULER_IMAGE=${NS}/${IMG_SCHEDULER_NAME}:1.1.0$" .env
 check "o worker herda a política da tag imutável" \
   grep -q '^WORKER_PULL_POLICY=missing$' .env
 check "o scheduler herda a política da tag imutável" \
@@ -389,26 +392,26 @@ pin_caso() {  # pin_caso <descrição> <conteúdo do .env> <esperado>
   check "$d" test "$r" = "$esperado"
 }
 pin_caso "app pinado + worker/scheduler AUSENTES → acusa os dois" \
-  "APP_IMAGE=${NS}/deskcommcrm:1.3.0" "worker scheduler"
+  "APP_IMAGE=${NS}/${IMG_APP_NAME}:1.3.0" "worker scheduler"
 pin_caso "app pinado + worker em canal móvel → acusa" \
-  "APP_IMAGE=${NS}/deskcommcrm:1.3.0
-WORKER_IMAGE=${NS}/deskcomm-worker:stable
-SCHEDULER_IMAGE=${NS}/deskcomm-scheduler:1.3.0" "worker"
+  "APP_IMAGE=${NS}/${IMG_APP_NAME}:1.3.0
+WORKER_IMAGE=${NS}/${IMG_WORKER_NAME}:stable
+SCHEDULER_IMAGE=${NS}/${IMG_SCHEDULER_NAME}:1.3.0" "worker"
 pin_caso "as três na mesma versão → silêncio" \
-  "APP_IMAGE=${NS}/deskcommcrm:1.3.0
-WORKER_IMAGE=${NS}/deskcomm-worker:1.3.0
-SCHEDULER_IMAGE=${NS}/deskcomm-scheduler:1.3.0" ""
+  "APP_IMAGE=${NS}/${IMG_APP_NAME}:1.3.0
+WORKER_IMAGE=${NS}/${IMG_WORKER_NAME}:1.3.0
+SCHEDULER_IMAGE=${NS}/${IMG_SCHEDULER_NAME}:1.3.0" ""
 pin_caso "app num canal deliberado (:latest) → não é 'metade', silêncio" \
-  "APP_IMAGE=${NS}/deskcommcrm:latest" ""
+  "APP_IMAGE=${NS}/${IMG_APP_NAME}:latest" ""
 # As aspas SIMPLES são o objeto deste caso — o `install.sh` grava assim. Elas
 # ficam literais porque estão DENTRO da string de aspas duplas; trocá-las por
 # duplas FECHA a string, e o conteúdo sai sem aspa nenhuma. Medido: nessa forma
 # o caso vira byte-a-byte igual ao "as três na mesma versão" logo acima, e o
 # rótulo passa a mentir sobre o que está sendo exercitado.
 pin_caso "valores entre aspas, como o install grava → silêncio" \
-  "APP_IMAGE='${NS}/deskcommcrm:1.3.0'
-WORKER_IMAGE='${NS}/deskcomm-worker:1.3.0'
-SCHEDULER_IMAGE='${NS}/deskcomm-scheduler:1.3.0'" ""
+  "APP_IMAGE='${NS}/${IMG_APP_NAME}:1.3.0'
+WORKER_IMAGE='${NS}/${IMG_WORKER_NAME}:1.3.0'
+SCHEDULER_IMAGE='${NS}/${IMG_SCHEDULER_NAME}:1.3.0'" ""
 rm -f "$PROJ/.env.pin"
 
 
@@ -433,25 +436,23 @@ case "$*" in
   # resolução o dublê devolvia a string `${NS}/deskcomm-worker:stable` — uma
   # fixture que não representa instalação nenhuma. O `:?` faz o dublê morrer alto
   # se a variável não vier, em vez de devolver um nome começando em "/".
-  *"Config.Image"*)  printf '%s/deskcomm-worker:stable\n' "${NS:?dublê de docker sem NS no ambiente}" ;;
-  *"image.version"*) printf '%s
-' "${DUBLE_VERSION:-1.3.0}" ;;
+  *"Config.Image"*)  printf '%s/%s:stable\n' "${NS:?dublê de docker sem NS no ambiente}" "${IMG_WORKER_NAME:?dublê de docker sem IMG_WORKER_NAME}" ;;
+  *"image.version"*) printf '%s\n' "${DUBLE_VERSION:-1.3.0}" ;;
   *) exit 1 ;;
 esac
 STUBDOCKER
 chmod +x "$PIN_DIR/bin/docker"
 
 autopin() {  # autopin <conteúdo do .env> → ecoa o que a função corrigiu
-  printf '%s
-' "$1" > "$PIN_DIR/.env"
+  printf '%s\n' "$1" > "$PIN_DIR/.env"
   ( cd "$PIN_DIR" && PATH="$PIN_DIR/bin:$PATH" bash -c \
       ". '$KIT_DIR_TESTE/_common.sh'; completar_pin_ausente .env" 2>/dev/null ) || true
 }
 
-R="$(autopin "APP_IMAGE=${NS}/deskcommcrm:1.3.0")"
+R="$(autopin "APP_IMAGE=${NS}/${IMG_APP_NAME}:1.3.0")"
 check "chave AUSENTE → preenche os dois" test "$R" = "worker scheduler"
 check "  e grava a versão da imagem em execução, não um canal" \
-  grep -q "^WORKER_IMAGE=${NS}/deskcomm-worker:1.3.0$" "$PIN_DIR/.env"
+  grep -q "^WORKER_IMAGE=${NS}/${IMG_WORKER_NAME}:1.3.0$" "$PIN_DIR/.env"
 check "  com pull_policy de tag imutável" \
   grep -q "^WORKER_PULL_POLICY=missing$" "$PIN_DIR/.env"
 
@@ -463,21 +464,21 @@ check "  e não altera um byte do .env" test "$ANTES_MD5" = "$(md5sum "$PIN_DIR/
 
 # A REGRA QUE PROTEGE O OPERADOR. Se esta cair, o cron passa a sobrescrever
 # escolha explícita — e a decisão de implementar a autocorreção deixa de valer.
-R="$(autopin "APP_IMAGE=${NS}/deskcommcrm:1.3.0
-WORKER_IMAGE=${NS}/deskcomm-worker:stable
-SCHEDULER_IMAGE=${NS}/deskcomm-scheduler:stable")"
+R="$(autopin "APP_IMAGE=${NS}/${IMG_APP_NAME}:1.3.0
+WORKER_IMAGE=${NS}/${IMG_WORKER_NAME}:stable
+SCHEDULER_IMAGE=${NS}/${IMG_SCHEDULER_NAME}:stable")"
 check "canal móvel EXPLÍCITO → não toca (é decisão de quem opera)" test -z "$R"
 check "  o :stable escolhido continua lá, intacto" \
-  grep -q "^WORKER_IMAGE=${NS}/deskcomm-worker:stable$" "$PIN_DIR/.env"
+  grep -q "^WORKER_IMAGE=${NS}/${IMG_WORKER_NAME}:stable$" "$PIN_DIR/.env"
 
-R="$(autopin "APP_IMAGE=${NS}/deskcommcrm:1.3.0
-WORKER_IMAGE=${NS}/deskcomm-worker:1.3.0
-SCHEDULER_IMAGE=${NS}/deskcomm-scheduler:1.3.0")"
+R="$(autopin "APP_IMAGE=${NS}/${IMG_APP_NAME}:1.3.0
+WORKER_IMAGE=${NS}/${IMG_WORKER_NAME}:1.3.0
+SCHEDULER_IMAGE=${NS}/${IMG_SCHEDULER_NAME}:1.3.0")"
 check "já pinada → silêncio" test -z "$R"
 
 # Imagem sem o label (build local): não há versão para gravar, e inventar uma
 # seria pior que não fazer nada.
-R="$( printf "APP_IMAGE=${NS}/deskcommcrm:1.3.0\n" > "$PIN_DIR/.env"
+R="$( printf "APP_IMAGE=${NS}/${IMG_APP_NAME}:1.3.0\n" > "$PIN_DIR/.env"
       cd "$PIN_DIR" && PATH="$PIN_DIR/bin:$PATH" DUBLE_VERSION="<no value>" bash -c \
         ". '$KIT_DIR_TESTE/_common.sh'; completar_pin_ausente .env" 2>/dev/null || true )"
 check "imagem sem label de versão → não inventa pin" test -z "$R"
