@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { audit } from "@/lib/audit";
 import { providerCreateSchema } from "@/lib/agenda/providers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
+import { supportWriteError } from "@/lib/impersonate/support";
 import { availabilityScheduleSchema } from "@/lib/schemas/routing";
 import { createClient } from "@/lib/supabase/server";
 
@@ -22,6 +23,9 @@ export async function criarProfissional(input: {
   specialties?: string[];
 }): Promise<ProviderActionResult> {
   const user = await requireAuth();
+  if (supportWriteError(user.support)) {
+    return { ok: false, error: "Acompanhamento somente leitura ou encerrado." };
+  }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
   if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
@@ -66,6 +70,9 @@ export async function alternarProfissionalAtivo(
   active: boolean,
 ): Promise<ProviderActionResult> {
   const user = await requireAuth();
+  if (supportWriteError(user.support)) {
+    return { ok: false, error: "Acompanhamento somente leitura ou encerrado." };
+  }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
   if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
@@ -103,6 +110,9 @@ export async function salvarJornadaProfissional(
   schedule: z.infer<typeof jornadaSchema>,
 ): Promise<ProviderActionResult> {
   const user = await requireAuth();
+  if (supportWriteError(user.support)) {
+    return { ok: false, error: "Acompanhamento somente leitura ou encerrado." };
+  }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
   if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
