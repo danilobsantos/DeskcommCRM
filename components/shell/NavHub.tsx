@@ -83,7 +83,7 @@ export function NavHub({
             {items.map((item) => {
               const Icon = item.icon;
               return (
-                <Link key={item.href} href={item.href} prefetch={false} className="block">
+                <Link key={item.href} href={item.href} className="block">
                   <Card className="flex h-full gap-3 p-4 transition-colors hover:border-border-strong">
                     <Icon
                       size={20}

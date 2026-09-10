@@ -19,7 +19,6 @@ import type { NextRequest } from "next/server";
 import { fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { toPublicStorageUrl } from "@/lib/supabase/storage-url";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +87,7 @@ export async function GET(
   return new Response(null, {
     status: 307,
     headers: {
-      Location: toPublicStorageUrl(signed.signedUrl),
+      Location: signed.signedUrl,
       "Cache-Control": `private, max-age=${BROWSER_CACHE_SECONDS}`,
     },
   });

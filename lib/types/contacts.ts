@@ -26,7 +26,6 @@ export interface Contact {
   created_at: string;
   updated_at: string;
   last_activity_at: string | null;
-  avatar_storage_path?: string | null;
   /**
    * Derivado (não é coluna): a conversa mais recente deste contato — atalho para o inbox.
    * Ausente é normal: contato criado à mão pode nunca ter conversado.

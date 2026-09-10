@@ -10,7 +10,6 @@ import { useAuth } from "@/hooks/auth/AuthProvider";
 import { ConnectionHealthDot } from "@/components/connections/ConnectionHealthDot";
 import { VersionFooter } from "@/components/shell/VersionFooter";
 import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
-import { useTheme } from "@/lib/theme";
 import { GRUPO_NO_RODAPE, sidebarGroups } from "@/lib/navigation/registry";
 
 const CHAVE_GRUPOS_FECHADOS = "sidebar-grupos-fechados";
@@ -44,7 +43,6 @@ export function SidebarContent({
     user.is_platform_admin && !user.support,
     activeOrg?.role ?? null,
     activeOrg?.interface_settings,
-    activeOrg?.providers_enabled ?? false,
   );
   // Configurações sai da área que rola e vai para o rodapé fixo: medido em
   // 1280x768, ele caía fora da dobra mesmo em telas de 1080px.
@@ -101,18 +99,16 @@ export function SidebarContent({
    * rota de `activeOrg`, e os dois lados leem o mesmo objeto por construção.
    */
   const nome = activeOrg?.marca?.nome ?? brand.name;
-  const { resolvedTheme } = useTheme();
-  // Precedência do logo por TEMA, com o logo do TENANT à frente do da instalação:
-  // quem personalizou a conta usa o logo dele nos dois temas; o logo do /admin
-  // (instalação) só aparece para quem NÃO personalizou. Antes, no tema escuro, uma
-  // organização com só o logo claro caía no logo escuro da instalação — a logo
-  // "nem sempre" acompanhava o tema. `|| null` mantém a regra de que string vazia
-  // é AUSÊNCIA (mesma semântica de `resolveBranding` e `primeiroDefinido`).
-  const orgLight = activeOrg?.marca?.logoUrl || null;
-  const orgDark = activeOrg?.marca?.logoUrlDark || null;
-  const logoLight = orgLight ?? brand.logoUrl;
-  const logoDark = orgDark ?? orgLight ?? brand.logoUrlDark ?? brand.logoUrl;
-  const logo = resolvedTheme === "dark" ? (logoDark ?? logoLight) : logoLight;
+  /**
+   * O mesmo desenho para o LOGO — e é este par de linhas que fecha o caminho do
+   * `logo_url` gravado até a tela.
+   *
+   * `||` e não `??`: vazio é AUSÊNCIA de logo, não "logo em branco". É a regra
+   * que `resolveBranding` e `primeiroDefinido` já aplicam nas camadas de baixo, e
+   * com `??` um `""` vindo de cima apagaria o logo do revendedor em vez de
+   * descer para ele — que é o contrário do que a precedência por campo promete.
+   */
+  const logo = activeOrg?.marca?.logoUrl || brand.logoUrl;
 
   return (
     <>
@@ -227,51 +223,39 @@ export function SidebarContent({
                   aria-label={collapsed ? t(group.label) : undefined}
                   className="space-y-1"
                 >
-                  {(() => {
-                    // Correspondência por PREFIXO DE SEGMENTO, ativando só o item de
-                    // MAIOR href no grupo. Sem isto, `/app/agenda/profissionais` ativa
-                    // também "Agenda" (`/app/agenda`), porque um começa com o outro.
-                    const ativos = items.filter(
-                      (i) => pathname === i.href || pathname.startsWith(i.href + "/"),
+                  {items.map((item) => {
+                    const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                    const Icon = item.icon;
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          title={collapsed ? t(item.label) : undefined}
+                          aria-current={isActive ? "page" : undefined}
+                          onClick={onNavigate}
+                          className={cn(
+                            "relative flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
+                            isActive
+                              ? "bg-accent text-accent-foreground"
+                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                            collapsed && "justify-center px-2",
+                          )}
+                        >
+                          <Icon size={18} weight={isActive ? "fill" : "regular"} aria-hidden />
+                          {!collapsed && <span className="truncate">{t(item.label)}</span>}
+                          {item.healthDot && (
+                            <ConnectionHealthDot
+                              className={cn(collapsed ? "absolute top-1.5 right-1.5" : "ml-auto")}
+                            />
+                          )}
+                        </Link>
+                      </li>
                     );
-                    const maisEspecifico = ativos.sort((a, b) => b.href.length - a.href.length)[0];
-                    const hrefAtivo = maisEspecifico?.href;
-                    return items.map((item) => {
-                      const isActive = item.href === hrefAtivo;
-                      const Icon = item.icon;
-                      return (
-                        <li key={item.href}>
-                          <Link
-                            href={item.href}
-                            prefetch={false}
-                            title={collapsed ? t(item.label) : undefined}
-                            aria-current={isActive ? "page" : undefined}
-                            onClick={onNavigate}
-                            className={cn(
-                              "relative flex items-center gap-3 rounded-md px-3 py-1 text-sm transition-colors",
-                              isActive
-                                ? "bg-accent text-accent-foreground"
-                                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                              collapsed && "justify-center px-2",
-                            )}
-                          >
-                            <Icon size={18} weight={isActive ? "fill" : "regular"} aria-hidden />
-                            {!collapsed && <span className="truncate">{t(item.label)}</span>}
-                            {item.healthDot && (
-                              <ConnectionHealthDot
-                                className={cn(collapsed ? "absolute top-1.5 right-1.5" : "ml-auto")}
-                              />
-                            )}
-                          </Link>
-                        </li>
-                      );
-                    });
-                  })()}
+                  })}
                   {group.hub && (
                     <li>
                       <Link
                         href={group.hub.href}
-                        prefetch={false}
                         title={collapsed ? t(group.hub.label) : undefined}
                         aria-current={pathname === group.hub.href ? "page" : undefined}
                         onClick={onNavigate}
@@ -298,7 +282,6 @@ export function SidebarContent({
         {rodape && (
           <Link
             href={rodape.href}
-            prefetch={false}
             title={collapsed ? t(rodape.label) : undefined}
             aria-current={pathname.startsWith(rodape.href) ? "page" : undefined}
             onClick={onNavigate}

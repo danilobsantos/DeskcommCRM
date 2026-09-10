@@ -353,47 +353,6 @@ export type Database = {
           },
         ]
       }
-      ad_insights_connections: {
-        Row: {
-          access_token_encrypted: string
-          created_at: string
-          default_account_id: string | null
-          id: string
-          organization_id: string
-          platform: string
-          updated_at: string
-          updated_by: string | null
-        }
-        Insert: {
-          access_token_encrypted: string
-          created_at?: string
-          default_account_id?: string | null
-          id?: string
-          organization_id: string
-          platform: string
-          updated_at?: string
-          updated_by?: string | null
-        }
-        Update: {
-          access_token_encrypted?: string
-          created_at?: string
-          default_account_id?: string | null
-          id?: string
-          organization_id?: string
-          platform?: string
-          updated_at?: string
-          updated_by?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ad_insights_connections_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       ad_platform_connections: {
         Row: {
           access_token_encrypted: string | null
@@ -2241,7 +2200,6 @@ export type Database = {
           notes: string | null
           organization_id: string
           owner_user_id: string | null
-          provider_id: string | null
           reminder_sent_at: string | null
           rescheduled_from_id: string | null
           source: string
@@ -2307,7 +2265,6 @@ export type Database = {
           notes?: string | null
           organization_id: string
           owner_user_id?: string | null
-          provider_id?: string | null
           reminder_sent_at?: string | null
           rescheduled_from_id?: string | null
           source?: string
@@ -2373,7 +2330,6 @@ export type Database = {
           notes?: string | null
           organization_id?: string
           owner_user_id?: string | null
-          provider_id?: string | null
           reminder_sent_at?: string | null
           rescheduled_from_id?: string | null
           source?: string
@@ -2429,13 +2385,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "calendar_appointments_provider_id_fkey"
-            columns: ["provider_id"]
-            isOneToOne: false
-            referencedRelation: "providers"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "calendar_appointments_rescheduled_from_id_fkey"
             columns: ["rescheduled_from_id"]
             isOneToOne: false
@@ -2452,11 +2401,10 @@ export type Database = {
           id: string
           is_unavailable: boolean
           organization_id: string
-          provider_id: string | null
           reason: string | null
           start_minute: number
           updated_at: string
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           created_at?: string
@@ -2465,11 +2413,10 @@ export type Database = {
           id?: string
           is_unavailable?: boolean
           organization_id: string
-          provider_id?: string | null
           reason?: string | null
           start_minute?: number
           updated_at?: string
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           created_at?: string
@@ -2478,11 +2425,10 @@ export type Database = {
           id?: string
           is_unavailable?: boolean
           organization_id?: string
-          provider_id?: string | null
           reason?: string | null
           start_minute?: number
           updated_at?: string
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: [
           {
@@ -2490,13 +2436,6 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "calendar_availability_exceptions_provider_id_fkey"
-            columns: ["provider_id"]
-            isOneToOne: false
-            referencedRelation: "providers"
             referencedColumns: ["id"]
           },
         ]
@@ -2851,74 +2790,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "calendar_oauth_nonces_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      catalog_products: {
-        Row: {
-          ativo: boolean
-          categoria: string | null
-          codigo: string
-          controla_estoque: boolean
-          created_at: string
-          custo_cents: number | null
-          descricao: string | null
-          id: string
-          imagem_url: string | null
-          marca: string | null
-          moeda: string
-          nome: string
-          organization_id: string
-          origem: string
-          preco_cents: number
-          quantidade: number
-          updated_at: string
-        }
-        Insert: {
-          ativo?: boolean
-          categoria?: string | null
-          codigo: string
-          controla_estoque?: boolean
-          created_at?: string
-          custo_cents?: number | null
-          descricao?: string | null
-          id?: string
-          imagem_url?: string | null
-          marca?: string | null
-          moeda?: string
-          nome: string
-          organization_id: string
-          origem?: string
-          preco_cents: number
-          quantidade?: number
-          updated_at?: string
-        }
-        Update: {
-          ativo?: boolean
-          categoria?: string | null
-          codigo?: string
-          controla_estoque?: boolean
-          created_at?: string
-          custo_cents?: number | null
-          descricao?: string | null
-          id?: string
-          imagem_url?: string | null
-          marca?: string | null
-          moeda?: string
-          nome?: string
-          organization_id?: string
-          origem?: string
-          preco_cents?: number
-          quantidade?: number
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "catalog_products_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -3303,10 +3174,10 @@ export type Database = {
           blocked_reason: string | null
           consent: Json
           cpf_encrypted: string | null
+          custom_fields: Json
           cpf_hash: string | null
           created_at: string
           created_by_user_id: string | null
-          custom_fields: Json
           display_name: string | null
           email: string | null
           email_normalized: string | null
@@ -3340,10 +3211,10 @@ export type Database = {
           blocked_reason?: string | null
           consent?: Json
           cpf_encrypted?: string | null
+          custom_fields?: Json
           cpf_hash?: string | null
           created_at?: string
           created_by_user_id?: string | null
-          custom_fields?: Json
           display_name?: string | null
           email?: string | null
           email_normalized?: string | null
@@ -3377,10 +3248,10 @@ export type Database = {
           blocked_reason?: string | null
           consent?: Json
           cpf_encrypted?: string | null
+          custom_fields?: Json
           cpf_hash?: string | null
           created_at?: string
           created_by_user_id?: string | null
-          custom_fields?: Json
           display_name?: string | null
           email?: string | null
           email_normalized?: string | null
@@ -4224,76 +4095,6 @@ export type Database = {
             columns: ["pipeline_id"]
             isOneToOne: false
             referencedRelation: "crm_pipelines"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      crm_tasks: {
-        Row: {
-          assigned_to: string | null
-          contact_id: string | null
-          created_at: string
-          created_by: string | null
-          description: string | null
-          due_date: string | null
-          id: string
-          lead_id: string | null
-          organization_id: string
-          priority: string
-          status: string
-          title: string
-          updated_at: string
-        }
-        Insert: {
-          assigned_to?: string | null
-          contact_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          description?: string | null
-          due_date?: string | null
-          id?: string
-          lead_id?: string | null
-          organization_id: string
-          priority?: string
-          status?: string
-          title: string
-          updated_at?: string
-        }
-        Update: {
-          assigned_to?: string | null
-          contact_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          description?: string | null
-          due_date?: string | null
-          id?: string
-          lead_id?: string | null
-          organization_id?: string
-          priority?: string
-          status?: string
-          title?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "crm_tasks_contact_id_fkey"
-            columns: ["contact_id"]
-            isOneToOne: false
-            referencedRelation: "contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "crm_tasks_lead_id_fkey"
-            columns: ["lead_id"]
-            isOneToOne: false
-            referencedRelation: "crm_leads"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "crm_tasks_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -6578,7 +6379,6 @@ export type Database = {
           fallback_reason: string | null
           id: number
           logo_path: string | null
-          logo_path_dark: string | null
           logo_url: string | null
           seeded_from_env: boolean
           show_powered_by: boolean
@@ -6592,7 +6392,6 @@ export type Database = {
           fallback_reason?: string | null
           id?: number
           logo_path?: string | null
-          logo_path_dark?: string | null
           logo_url?: string | null
           seeded_from_env?: boolean
           show_powered_by?: boolean
@@ -6606,7 +6405,6 @@ export type Database = {
           fallback_reason?: string | null
           id?: number
           logo_path?: string | null
-          logo_path_dark?: string | null
           logo_url?: string | null
           seeded_from_env?: boolean
           show_powered_by?: boolean
@@ -6762,47 +6560,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "promise_table_versions_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      providers: {
-        Row: {
-          active: boolean
-          created_at: string
-          id: string
-          name: string
-          organization_id: string
-          schedule: Json
-          specialties: string[]
-          updated_at: string
-        }
-        Insert: {
-          active?: boolean
-          created_at?: string
-          id?: string
-          name: string
-          organization_id: string
-          schedule?: Json
-          specialties?: string[]
-          updated_at?: string
-        }
-        Update: {
-          active?: boolean
-          created_at?: string
-          id?: string
-          name?: string
-          organization_id?: string
-          schedule?: Json
-          specialties?: string[]
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "providers_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -8009,10 +7766,6 @@ export type Database = {
         Args: { p_agent_id: string; p_version_id: string }
         Returns: undefined
       }
-      comando_da_conversa: {
-        Args: { c: Database["public"]["Tables"]["conversations"]["Row"] }
-        Returns: string
-      }
       emit_event: {
         Args: {
           p_entity_id: string
@@ -8023,16 +7776,6 @@ export type Database = {
           p_payload?: Json
         }
         Returns: string
-      }
-      fn_activity_report: {
-        Args: {
-          p_from: string
-          p_limit?: number
-          p_org: string
-          p_to: string
-          p_tz?: string
-        }
-        Returns: Json
       }
       fn_agent_tool_usage: {
         Args: { p_agent_id: string; p_organization_id: string; p_since: string }
@@ -8129,17 +7872,6 @@ export type Database = {
           isSetofReturn: true
         }
       }
-      fn_comando_da_conversa: {
-        Args: {
-          p_agora: string
-          p_assigned_to_user_id: string
-          p_bot_silenced_until: string
-          p_force_human: boolean
-          p_is_blocked: boolean
-          p_status: string
-        }
-        Returns: string
-      }
       fn_configurar_pre_go_live_canal: {
         Args: {
           p_canal: string
@@ -8205,12 +7937,7 @@ export type Database = {
       }
       fn_decrypt_oauth: { Args: { ciphertext: string }; Returns: string }
       fn_definir_logo_da_organizacao: {
-        Args: {
-          p_actor: string
-          p_org: string
-          p_path: string
-          p_path_dark?: string
-        }
+        Args: { p_actor: string; p_org: string; p_path: string }
         Returns: number
       }
       fn_definir_marca_da_organizacao: {
@@ -8278,11 +8005,7 @@ export type Database = {
         Returns: Json
       }
       fn_mover_leads_em_lote: {
-        Args: {
-          p_lead_ids: string[]
-          p_organization_id: string
-          p_stage_id: string
-        }
+        Args: { p_lead_ids: string[]; p_organization_id: string; p_stage_id: string }
         Returns: {
           from_stage_id: string
           lead_id: string
@@ -8492,101 +8215,6 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
-      }
-      iceberg_namespaces: {
-        Row: {
-          bucket_name: string
-          catalog_id: string
-          created_at: string
-          id: string
-          metadata: Json
-          name: string
-          updated_at: string
-        }
-        Insert: {
-          bucket_name: string
-          catalog_id: string
-          created_at?: string
-          id?: string
-          metadata?: Json
-          name: string
-          updated_at?: string
-        }
-        Update: {
-          bucket_name?: string
-          catalog_id?: string
-          created_at?: string
-          id?: string
-          metadata?: Json
-          name?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "iceberg_namespaces_catalog_id_fkey"
-            columns: ["catalog_id"]
-            isOneToOne: false
-            referencedRelation: "buckets_analytics"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      iceberg_tables: {
-        Row: {
-          bucket_name: string
-          catalog_id: string
-          created_at: string
-          id: string
-          location: string
-          name: string
-          namespace_id: string
-          remote_table_id: string | null
-          shard_id: string | null
-          shard_key: string | null
-          updated_at: string
-        }
-        Insert: {
-          bucket_name: string
-          catalog_id: string
-          created_at?: string
-          id?: string
-          location: string
-          name: string
-          namespace_id: string
-          remote_table_id?: string | null
-          shard_id?: string | null
-          shard_key?: string | null
-          updated_at?: string
-        }
-        Update: {
-          bucket_name?: string
-          catalog_id?: string
-          created_at?: string
-          id?: string
-          location?: string
-          name?: string
-          namespace_id?: string
-          remote_table_id?: string | null
-          shard_id?: string | null
-          shard_key?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "iceberg_tables_catalog_id_fkey"
-            columns: ["catalog_id"]
-            isOneToOne: false
-            referencedRelation: "buckets_analytics"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "iceberg_tables_namespace_id_fkey"
-            columns: ["namespace_id"]
-            isOneToOne: false
-            referencedRelation: "iceberg_namespaces"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       migrations: {
         Row: {

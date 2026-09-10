@@ -50,7 +50,6 @@ import { traduzir } from "@/lib/i18n/dicionario";
 const querySchema = z.object({
   event_type_id: z.string().uuid(),
   owner_user_id: z.string().uuid().optional(),
-  provider_id: z.string().uuid().optional(),
   de: z.string().datetime({ offset: true }),
   ate: z.string().datetime({ offset: true }),
 });
@@ -67,7 +66,6 @@ export async function GET(req: NextRequest): Promise<Response> {
   const parsed = querySchema.safeParse({
     event_type_id: url.searchParams.get("event_type_id") ?? undefined,
     owner_user_id: url.searchParams.get("owner_user_id") ?? undefined,
-    provider_id: url.searchParams.get("provider_id") ?? undefined,
     de: url.searchParams.get("de") ?? undefined,
     ate: url.searchParams.get("ate") ?? undefined,
   });
@@ -99,8 +97,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   const consulta = await horariosLivresDaOrg(supabase, activeOrg.orgId, {
     eventTypeId: parsed.data.event_type_id,
     eventTypeSlug: null,
-    ownerUserId: parsed.data.provider_id ? null : parsed.data.owner_user_id ?? null,
-    ownerProviderId: parsed.data.provider_id ?? null,
+    ownerUserId: parsed.data.owner_user_id ?? null,
     de,
     ate,
     agora: new Date(),

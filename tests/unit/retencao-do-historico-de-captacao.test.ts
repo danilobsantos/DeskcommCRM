@@ -59,9 +59,6 @@ function fakeAdmin(resposta: { data?: { id: string }[]; error?: { message: strin
         select() {
           return q;
         },
-        order() {
-          return q;
-        },
         limit(n: number) {
           p.loteRecebido = n;
           pedidos.push(p);

@@ -28,37 +28,22 @@ export function VinculoDaMarcacao({
       ).data,
   });
   return (
-    <div className="mt-4 space-y-3 rounded-lg border border-border bg-surface-elevated/30 p-3">
-      <div>
-        <label
-          htmlFor="busca-cliente"
-          className="block text-xs font-medium text-text-muted"
-        >
-          {t("Buscar cliente")}
-        </label>
+    <div className="space-y-3 rounded-lg border p-3">
+      <label className="block">
+        {t("Buscar cliente")}
         <input
-          id="busca-cliente"
-          type="text"
-          className="mt-1.5 h-9 w-full rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-subtle transition-colors duration-fast hover:border-border-strong focus:border-border-strong focus:outline-hidden"
-          placeholder={t("Buscar cliente")}
+          className="mt-1 w-full rounded-md border bg-surface p-2"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
             onChange("", "");
           }}
         />
-      </div>
-      <div>
-        <label
-          htmlFor="quem-sera-atendido"
-          className="block text-xs font-medium text-text-muted"
-        >
-          {t("Quem será atendido")}
-        </label>
+      </label>
+      <label className="block">
+        {t("Quem será atendido")}
         <select
-          id="quem-sera-atendido"
-          aria-label={t("Quem será atendido")}
-          className="mt-1.5 h-9 w-full rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text transition-colors duration-fast hover:border-border-strong focus:border-border-strong focus:outline-hidden"
+          className="mt-1 w-full rounded-md border bg-surface p-2"
           value={contactId}
           onChange={(e) => onChange(e.target.value, "")}
         >
@@ -69,19 +54,12 @@ export function VinculoDaMarcacao({
             </option>
           ))}
         </select>
-      </div>
+      </label>
       {contactId ? (
-        <div>
-          <label
-            htmlFor="conversa-vinculada"
-            className="block text-xs font-medium text-text-muted"
-          >
-            {t("Conversa vinculada (opcional)")}
-          </label>
+        <label className="block">
+          {t("Conversa vinculada (opcional)")}
           <select
-            id="conversa-vinculada"
-            aria-label={t("Conversa vinculada (opcional)")}
-            className="mt-1.5 h-9 w-full rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text transition-colors duration-fast hover:border-border-strong focus:border-border-strong focus:outline-hidden"
+            className="mt-1 w-full rounded-md border bg-surface p-2"
             value={conversationId}
             onChange={(e) => onChange(contactId, e.target.value)}
           >
@@ -92,12 +70,10 @@ export function VinculoDaMarcacao({
               </option>
             ))}
           </select>
-        </div>
+        </label>
       ) : null}
       {query.isError ? (
-        <p role="alert" className="text-xs text-error">
-          {t("Não foi possível carregar os vínculos. Tente novamente.")}
-        </p>
+        <p role="alert">{t("Não foi possível carregar os vínculos. Tente novamente.")}</p>
       ) : null}
     </div>
   );

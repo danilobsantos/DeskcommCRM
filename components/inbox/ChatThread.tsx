@@ -3,7 +3,7 @@
 import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
 import type { Locale } from "date-fns";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useT } from "@/hooks/i18n/useT";
 import { format, isToday, isYesterday } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,6 @@ export function ChatThread({ conversationId, onResponder }: Props) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const paginasVistas = useRef(0);
-  const estavaNoFimRef = useRef(true);
   const activeOrg = useActiveOrg();
   const currentUser = useUser();
   const deleteNote = useDeleteNote(conversationId ?? "");
@@ -84,78 +83,40 @@ export function ChatThread({ conversationId, onResponder }: Props) {
 
   const paginas = q.data?.pages.length ?? 0;
 
-  const handleScroll = useCallback(() => {
-    const sc = scrollerRef.current;
-    if (!sc) return;
-    const dist = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
-    // Considera que o usuário está no rodapé acompanhando a conversa se estiver a até 150px do fim
-    estavaNoFimRef.current = dist <= 150;
-  }, []);
-
-  const rolarAoFim = useCallback((suave: boolean) => {
-    const sc = scrollerRef.current;
-    if (!sc) return;
-    requestAnimationFrame(() => {
-      try {
-        if (typeof sc.scrollTo === "function") {
-          sc.scrollTo({
-            top: sc.scrollHeight,
-            behavior: suave ? "smooth" : "auto",
-          });
-          return;
-        }
-      } catch {
-        // Fallback em ambientes onde options de scrollTo falham
-      }
-      try {
-        bottomRef.current?.scrollIntoView({
-          behavior: suave ? "smooth" : "auto",
-          block: "end",
-        });
-      } catch {
-        sc.scrollTop = sc.scrollHeight;
-      }
-    });
-  }, []);
-
-  // Conversa nova: a contagem de páginas recomeça e a âncora de scroll volta ao rodapé.
+  // Conversa nova: a contagem de páginas recomeça, senão a primeira carga da
+  // próxima conversa seria confundida com um "carregar mais antigas".
   useEffect(() => {
     paginasVistas.current = 0;
-    estavaNoFimRef.current = true;
   }, [conversationId]);
-
-  const ultimoItem = items[items.length - 1];
-  const ultimoItemId = ultimoItem ? `${ultimoItem.kind}-${ultimoItem.data.id}` : null;
 
   // Rola ao fim na primeira carga e quando chega mensagem/nota nova — mas NÃO
   // quando o crescimento veio do "Carregar mais antigas".
   //
   // A thread pagina para o PASSADO: cada `fetchNextPage` traz mensagens mais
   // antigas, que entram ACIMA das que já estão na tela. Rolar ao fim aqui
-  // devolveria o usuário ao rodapé no instante em que ele pediu para subir.
+  // devolveria o usuário ao rodapé no instante em que ele pediu para subir —
+  // o clique parece não ter efeito, embora tenha carregado (medido: thread vai
+  // de msg#15..#64 para msg#1..#64 e a viewport volta a 7px do fim).
   //
-  // A guarda `estavaNoFimRef` cobre o caso em que o usuário rolou para ler o
-  // histórico: uma mensagem nova não deve arrancá-lo de onde estava. Mas se ele
-  // já estava acompanhando o rodapé (ou se a mensagem foi enviada por ele mesmo),
-  // a tela rola suavemente para exibir a nova mensagem recebida.
+  // A segunda guarda cobre o outro caso: se o usuário rolou para ler o
+  // histórico, mensagem nova não deve arrancá-lo de onde estava.
   useEffect(() => {
     const primeiraCarga = paginasVistas.current === 0;
     const carregouAntigas = !primeiraCarga && paginas > paginasVistas.current;
     paginasVistas.current = paginas;
     if (carregouAntigas) return;
 
-    const ehOutbound =
-      ultimoItem?.kind === "message" &&
-      (ultimoItem.data.direction === "outbound" ||
-        ultimoItem.data.sent_by_user_id === currentUser?.id);
-
-    const deveRolar = primeiraCarga || estavaNoFimRef.current || ehOutbound;
-
-    if (deveRolar) {
-      rolarAoFim(!primeiraCarga);
-      estavaNoFimRef.current = true;
+    // A guarda de distância NÃO vale na primeira carga: ali o scroller ainda
+    // está no topo por definição, e tratá-lo como "usuário lendo o histórico"
+    // abriria a conversa na mensagem mais antiga da página em vez da mais nova
+    // (medido: a thread abria em msg#15 em vez de msg#64).
+    if (!primeiraCarga) {
+      const sc = scrollerRef.current;
+      if (sc && sc.scrollHeight - sc.scrollTop - sc.clientHeight > 120) return;
     }
-  }, [items.length, conversationId, paginas, ultimoItemId, currentUser?.id, rolarAoFim, ultimoItem]);
+
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [items.length, conversationId, paginas]);
 
   /**
    * O ESTADO DO CANAL DESTE THREAD, PUBLICADO SEMPRE — inclusive quando não há
@@ -241,11 +202,7 @@ export function ChatThread({ conversationId, onResponder }: Props) {
 
   return (
     <div {...sinalDoCanal} className="flex h-full flex-col">
-      <div
-        ref={scrollerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto py-2"
-      >
+      <div ref={scrollerRef} className="flex-1 overflow-y-auto py-2">
         {q.hasNextPage && (
           <div className="flex justify-center py-2">
             <Button

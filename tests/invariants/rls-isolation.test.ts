@@ -243,11 +243,6 @@ beforeAll(() => {
               'auth-rls'
             );
         end if;
-
-        if not exists (select 1 from public.providers where organization_id = v_org) then
-          insert into public.providers (organization_id, name)
-            values (v_org, 'RLS invariant provider');
-        end if;
       end loop;
     end
     $seed$;
@@ -297,8 +292,6 @@ export const TABLES = [
   // controle positivo passaria por acerto. Quem mede a escrita é a rota, em
   // `tests/unit/tarefas-rota-nao-tem-porta-dos-fundos.test.ts`.
   "crm_tasks",
-  // migration 9003 — profissionais externos da agenda (dentista/corretor sem login).
-  "providers",
   // 0227 — texto de sugestões: org + visibilidade da conversa por authenticated.
   "ai_reply_drafts",
   // ⚠️ `webhook_lead_captures` (migration 0174) NÃO entra nesta lista, e a

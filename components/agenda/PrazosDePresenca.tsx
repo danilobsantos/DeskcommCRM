@@ -25,85 +25,63 @@ export function PrazosDePresenca({ podeEditar }: { podeEditar: boolean }) {
   });
   const value = draft ?? query.data;
   return (
-    <section className="space-y-4 rounded-lg border border-border bg-surface p-4">
-      <div>
-        <h2 className="text-sm font-semibold text-text">{t("Confirmação de presença")}</h2>
-        <p className="mt-1 text-xs text-text-muted">
-          {t(
-            "Depois do compromisso, peça confirmação à equipe. Sem confirmação, o sistema mantém a presença desconhecida e nunca presume falta.",
-          )}
-        </p>
-      </div>
+    <section className="space-y-3 rounded-xl border p-4">
+      <h2 className="font-semibold">{t("Confirmação de presença")}</h2>
+      <p className="text-sm text-text-muted">
+        {t(
+          "Depois do compromisso, peça confirmação à equipe. Sem confirmação, o sistema mantém a presença desconhecida e nunca presume falta.",
+        )}
+      </p>
       {query.isError ? (
-        <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
+        <Button variant="outline" onClick={() => void query.refetch()}>
           {t("Tentar novamente")}
         </Button>
       ) : value ? (
         <>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label
-                htmlFor="confirmation-delay"
-                className="block text-xs font-medium text-text-muted"
-              >
-                {t("Pedir confirmação após o fim (minutos)")}
-              </label>
-              <input
-                id="confirmation-delay"
-                aria-label={t("Pedir confirmação após o fim (minutos)")}
-                className="mt-1.5 h-9 w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong disabled:cursor-not-allowed disabled:opacity-55"
-                type="number"
-                min={1}
-                max={10080}
-                disabled={!podeEditar}
-                value={value.confirmation_delay_minutes}
-                onChange={(e) =>
-                  setDraft({ ...value, confirmation_delay_minutes: Number(e.target.value) })
-                }
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="unknown-protection"
-                className="block text-xs font-medium text-text-muted"
-              >
-                {t("Proteger de cobranças por silêncio após o fim (minutos)")}
-              </label>
-              <input
-                id="unknown-protection"
-                aria-label={t("Proteger de cobranças por silêncio após o fim (minutos)")}
-                className="mt-1.5 h-9 w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong disabled:cursor-not-allowed disabled:opacity-55"
-                type="number"
-                min={1}
-                max={10080}
-                disabled={!podeEditar}
-                value={value.unknown_protection_minutes}
-                onChange={(e) =>
-                  setDraft({ ...value, unknown_protection_minutes: Number(e.target.value) })
-                }
-              />
-            </div>
-          </div>
-          <p className="text-xs text-text-muted">
+          <label className="block">
+            {t("Pedir confirmação após o fim (minutos)")}
+            <input
+              aria-label={t("Pedir confirmação após o fim (minutos)")}
+              className="ml-2 w-24 rounded-md border p-2"
+              type="number"
+              min={1}
+              max={10080}
+              disabled={!podeEditar}
+              value={value.confirmation_delay_minutes}
+              onChange={(e) =>
+                setDraft({ ...value, confirmation_delay_minutes: Number(e.target.value) })
+              }
+            />
+          </label>
+          <label className="block">
+            {t("Proteger de cobranças por silêncio após o fim (minutos)")}
+            <input
+              aria-label={t("Proteger de cobranças por silêncio após o fim (minutos)")}
+              className="ml-2 w-24 rounded-md border p-2"
+              type="number"
+              min={1}
+              max={10080}
+              disabled={!podeEditar}
+              value={value.unknown_protection_minutes}
+              onChange={(e) =>
+                setDraft({ ...value, unknown_protection_minutes: Number(e.target.value) })
+              }
+            />
+          </label>
+          <p className="text-sm">
             {t(
               "Quando esse prazo acabar, a pendência continua visível. Outro compromisso vivo ainda protege o contato.",
             )}
           </p>
           {podeEditar ? (
-            <div>
-              <Button size="sm" disabled={!draft || mutation.isPending} onClick={() => mutation.mutate(value)}>
-                {t("Salvar prazos")}
-              </Button>
-            </div>
+            <Button disabled={!draft || mutation.isPending} onClick={() => mutation.mutate(value)}>
+              {t("Salvar prazos")}
+            </Button>
           ) : null}
-          {mutation.isSuccess && !draft ? (
-            <p role="status" className="text-xs font-medium text-success">
-              {t("Prazos salvos.")}
-            </p>
-          ) : null}
+          {mutation.isSuccess && !draft ? <p role="status">{t("Prazos salvos.")}</p> : null}
         </>
       ) : (
-        <p className="text-xs text-text-muted">{t("Carregando…")}</p>
+        <p>{t("Carregando…")}</p>
       )}
     </section>
   );

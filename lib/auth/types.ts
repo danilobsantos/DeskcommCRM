@@ -148,13 +148,6 @@ export interface ActiveOrg {
    */
   visibility_mode?: VisibilityMode;
   /**
-   * Se a feature de profissionais externos está ligada para esta org (migration
-   * 9003). Opcional: só o layout de `/app` preenche; decisão de plataforma em
-   * `/admin/tenants/:id/funcionalidades`. Usado só para esconder/mostrar o item
-   * de navegação — o gate de segurança é a página, que relê o settings.
-   */
-  providers_enabled?: boolean;
-  /**
    * O que ESTA organização definiu para si — CAMPO A CAMPO, e só o que ela
    * mesma definiu.
    *
@@ -179,5 +172,5 @@ export interface ActiveOrg {
    * banco: `app/layout.tsx` resolve a pilha e o `<PublicEnvScript/>` a injeta em
    * `window.__PUBLIC_ENV__`, de onde `branding()` a lê.
    */
-  marca?: { readonly nome?: string; readonly logoUrl?: string | null; readonly logoUrlDark?: string | null };
+  marca?: { readonly nome?: string; readonly logoUrl?: string | null };
 }

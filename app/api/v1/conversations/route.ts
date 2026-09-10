@@ -4,7 +4,6 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
-import { ServerTiming } from "@/lib/api/server-timing";
 import { ApiError } from "@/lib/api/types";
 import { fail, ok } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
@@ -19,20 +18,22 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-  const timing = new ServerTiming();
+  const supabase = await createClient();
 
-  const authUser = await timing.measure("auth", () => loadAuthUser());
-  if (!authUser) {
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabase.auth.getUser();
+  if (authErr || !user) {
     return fail("unauthenticated", "Auth required.", 401, { requestId });
   }
 
+  const authUser = await loadAuthUser();
   const t = (texto: string) => traduzir(texto, authUser?.idioma ?? "pt-BR");
-  const activeOrg = await timing.measure("resolve_org", () => resolveActiveOrg(authUser));
+  const activeOrg = authUser ? await resolveActiveOrg(authUser) : null;
   if (!activeOrg) {
     return fail("no_active_org", t("No active organization."), 403, { requestId });
   }
-
-  const supabase = await createClient();
 
   const url = new URL(req.url);
   const qsParsed = listConversationsQuerySchema.safeParse({
@@ -67,29 +68,23 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const { conversations, cursor, has_more } = await timing.measure("db_query", () =>
-      listConversationsHandler(
-        supabase,
-        {
-          organization_id: activeOrg.orgId,
-          actor: { type: "user", id: authUser.id },
-          requestId,
-          idioma: authUser?.idioma,
-        },
-        qsParsed.data,
-      )
+    const { conversations, cursor, has_more } = await listConversationsHandler(
+      supabase,
+      {
+        organization_id: activeOrg.orgId,
+        actor: { type: "user", id: user.id },
+        requestId,
+        idioma: authUser?.idioma,
+      },
+      qsParsed.data,
     );
     // O nome de quem atende entra AQUI, na borda HTTP, e não no handler: o
     // handler é compartilhado com as tools MCP, que já resolvem o nome por conta
     // própria (`lib/mcp/tools/conversations.ts`) — enriquecer lá faria a mesma
     // leitura duas vezes por chamada do agente.
-    const dataComNome = await timing.measure("enrich_attendant", () =>
-      comNomeDoAtendente(conversations),
-    );
-    return ok(dataComNome, {
+    return ok(await comNomeDoAtendente(conversations), {
       requestId,
       meta: { cursor, has_more },
-      headers: { "Server-Timing": timing.header() },
     });
   } catch (err) {
     if (err instanceof ApiError) {

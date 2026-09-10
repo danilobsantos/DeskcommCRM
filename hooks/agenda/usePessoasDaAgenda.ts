@@ -15,11 +15,6 @@ interface MembroDto {
   revoked_at?: string | null;
 }
 
-interface AtendenteDisponibilidadeDto {
-  user_id: string;
-  is_available: boolean;
-}
-
 /**
  * As pessoas da equipe, com a trilha de cor de cada uma.
  *
@@ -28,40 +23,17 @@ interface AtendenteDisponibilidadeDto {
  * e outro, nem quando alguém novo entra na equipe — e é o motivo de este hook
  * não precisar de nenhuma coluna de cor no banco.
  *
- * Quem foi revogado ou está com status de atendimento desabilitado
- * (`is_available = false`) sai da lista: o filtro por pessoa é para quem
- * atende hoje, e uma agenda com atendente offline ou ex-funcionário confunde
- * sem informar.
+ * Quem foi revogado sai da lista: o filtro por pessoa é para quem atende hoje, e
+ * uma agenda com ex-funcionário na barra confunde sem informar.
  */
 export function usePessoasDaAgenda() {
   return useQuery({
     queryKey: ["agenda", "pessoas"],
     queryFn: async (): Promise<Pessoa[]> => {
       try {
-        const [rTeam, rAvail] = await Promise.all([
-          apiClient.get<{ data: MembroDto[] }>("/api/v1/team").catch(() => null),
-          apiClient
-            .get<{ data: AtendenteDisponibilidadeDto[] }>("/api/v1/attendants/availability")
-            .catch(() => null),
-        ]);
-        const lista =
-          (rTeam as unknown as { data?: MembroDto[] })?.data ?? (rTeam as unknown as MembroDto[]);
-        const availLista =
-          (rAvail as unknown as { data?: AtendenteDisponibilidadeDto[] })?.data ??
-          (rAvail as unknown as AtendenteDisponibilidadeDto[]);
-
-        const indisponiveis = new Set<string>();
-        if (Array.isArray(availLista)) {
-          for (const a of availLista) {
-            if (a.is_available === false) {
-              indisponiveis.add(a.user_id);
-            }
-          }
-        }
-
-        const ativos = (lista ?? []).filter(
-          (m) => !m.revoked_at && !indisponiveis.has(m.user_id),
-        );
+        const r = await apiClient.get<{ data: MembroDto[] }>("/api/v1/team");
+        const lista = (r as unknown as { data?: MembroDto[] }).data ?? (r as unknown as MembroDto[]);
+        const ativos = (lista ?? []).filter((m) => !m.revoked_at);
         // As trilhas saem da EQUIPE inteira de uma vez, não pessoa a pessoa: é a
         // única forma de garantir que duas pessoas não caiam na mesma cor. O
         // hash sozinho dá estabilidade e não dá distinção — medido, duas caíram
@@ -76,7 +48,6 @@ export function usePessoasDaAgenda() {
             // com ela todo dia.
             nome: m.full_name ?? m.email?.split("@")[0] ?? "Sem nome",
             trilha: trilhas.get(m.user_id) ?? 1,
-            tipo: "usuario" as const,
           }));
       } catch (err) {
         showApiError(err);

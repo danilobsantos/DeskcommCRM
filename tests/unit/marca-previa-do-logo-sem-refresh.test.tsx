@@ -74,9 +74,7 @@ function pintar(props: Partial<Parameters<typeof CampoDeLogo>[0]> = {}) {
     <CampoDeLogo
       escopo="instalacao"
       logoDaCamada={{ url: null }}
-      logoDaCamadaDark={{ url: null }}
       logoHerdado={null}
-      logoHerdadoDark={null}
       origemDoHerdado="do arquivo de instalação do servidor"
       nomeEmVigor="DeskcommCRM"
       {...props}
@@ -90,7 +88,7 @@ function previaClara(): HTMLImageElement | null {
 }
 
 function escolherArquivo() {
-  const entrada = document.querySelector<HTMLInputElement>("#logo-instalacao-light")!;
+  const entrada = document.querySelector<HTMLInputElement>("#logo-instalacao")!;
   const arquivo = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "logo.png", {
     type: "image/png",
   });
@@ -157,9 +155,7 @@ describe("a prévia do logo não espera o router.refresh()", () => {
       <CampoDeLogo
         escopo="instalacao"
         logoDaCamada={{ url: null }}
-        logoDaCamadaDark={{ url: null }}
         logoHerdado={URL_HERDADA}
-        logoHerdadoDark={null}
         origemDoHerdado="do arquivo de instalação do servidor"
         nomeEmVigor="DeskcommCRM"
       />,

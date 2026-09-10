@@ -351,36 +351,6 @@ export const DICIONARIO: Traducoes = {
   // ─── Navegação (a barra lateral, presente em toda tela) ───
   Inbox: { es: "Inbox" },
   Agenda: { es: "Agenda" },
-  Profissionais: { es: "Profesionales" },
-  "Profissionais externos": { es: "Profesionales externos" },
-  "Profissionais externos (dentistas sem login)": {
-    es: "Profesionales externos (dentistas sin login)",
-  },
-  "Dentistas, corretores e consultores que têm agenda própria mas não têm conta no sistema. Quem gerencia as agendas deles é a secretária.": {
-    es: "Dentistas, corredores y consultores que tienen agenda propia pero no tienen cuenta en el sistema. Quien gestiona sus agendas es la secretaria.",
-  },
-  "Liga ou desliga a agenda de profissionais externos deste tenant — dentistas, corretores e consultores que têm agenda própria mas não têm conta de usuário no sistema. Desligado, a agenda do base funciona normalmente.": {
-    es: "Activa o desactiva la agenda de profesionales externos de este tenant — dentistas, corredores y consultores que tienen agenda propia pero no tienen cuenta de usuario en el sistema. Desactivado, la agenda base funciona con normalidad.",
-  },
-  "Nome (ex.: Dra. Ana)": { es: "Nombre (ej.: Dra. Ana)" },
-  "Especialidades, separadas por vírgula": {
-    es: "Especialidades, separadas por comas",
-  },
-  "Nenhum profissional cadastrado ainda.": {
-    es: "Aún no hay profesionales registrados.",
-  },
-  "Sem especialidade": { es: "Sin especialidad" },
-  "consulta futura": { es: "consulta futura" },
-  "consultas futuras": { es: "consultas futuras" },
-  "Profissional cadastrado": { es: "Profesional registrado" },
-  "Agenda de profissionais ligada": { es: "Agenda de profesionales activada" },
-  "Agenda de profissionais desligada": {
-    es: "Agenda de profesionales desactivada",
-  },
-  "Defina as janelas de atendimento deste profissional. Sem janelas, ninguém consegue marcar com ele.": {
-    es: "Define las franjas de atención de este profesional. Sin franjas, nadie puede agendar con él.",
-  },
-  "Horário salvo": { es: "Horario guardado" },
   Radar: { es: "Radar" },
   "Respostas rápidas": { es: "Respuestas rápidas" },
   Contatos: { es: "Contactos" },
@@ -3079,11 +3049,6 @@ export const DICIONARIO: Traducoes = {
   },
   "Aparência clara": { es: "Apariencia clara" },
   "Aparência escura": { es: "Apariencia oscura" },
-  "Logo para aparência clara": { es: "Logo para apariencia clara" },
-  "Logo para aparência escura (opcional)": { es: "Logo para apariencia oscura (opcional)" },
-  "Sem logo escuro, o sistema usa o logo claro nos dois temas.": {
-    es: "Sin logo oscuro, el sistema usa el logo claro en ambos temas.",
-  },
   // ─── Webhooks ───
   "Receba contatos de fora (landing pages, formulários) e crie automações que agem sozinhas.": {
     es: "Recibe contactos de afuera (landing pages, formularios) y crea automatizaciones que actúan solas.",

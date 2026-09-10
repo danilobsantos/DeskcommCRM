@@ -21,7 +21,6 @@ interface PublicEnv {
    */
   APP_NAME?: string;
   APP_LOGO_URL?: string;
-  APP_LOGO_URL_DARK?: string;
 }
 
 interface Window {

@@ -328,7 +328,7 @@ is_already_in_head() {
 # Aceita valores com ou sem aspas: instalações antigas (sem aspas) passam a
 # funcionar sem precisar reescrever o .env.
 load_env() {
-  local file="${1:-.env}" line key val q=$'\''
+  local file="${1:-.env}" line key val
   [ -f "$file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue;; esac
@@ -367,7 +367,7 @@ load_env() {
         # quatro caracteres a mais, e o erro só aparece longe daqui (o psql
         # recusa a conexão, o login não bate) sem nada apontando para o .env.
         # Achado pelo teste de round-trip.
-        val="${val//"'\''"/$q}"
+        val="${val//"'\\''"/"'"}"
         ;;
     esac
     printf -v "$key" '%s' "$val"

@@ -73,36 +73,33 @@ export function AgendasConectadas() {
     }
   }
   return (
-    <section className="space-y-4 rounded-lg border border-border bg-surface p-4" aria-label={t("Suas agendas Google")}>
-      <div>
-        <h2 className="text-sm font-semibold text-text">{t("Suas agendas Google")}</h2>
-        <p className="mt-1 text-xs text-text-muted">
-          {t(
-            "Escolha quais agendas ocupam seus horários e onde publicar novos compromissos. Os já publicados permanecem na agenda original.",
-          )}
-        </p>
-      </div>
-      {query.isLoading && <p className="text-xs text-text-muted">{t("Carregando agendas…")}</p>}
+    <section className="space-y-3 rounded-md border p-4" aria-label={t("Suas agendas Google")}>
+      <h2 className="font-medium">{t("Suas agendas Google")}</h2>
+      <p className="text-sm text-muted-foreground">
+        {t(
+          "Escolha quais agendas ocupam seus horários e onde publicar novos compromissos. Os já publicados permanecem na agenda original.",
+        )}
+      </p>
+      {query.isLoading && <p>{t("Carregando agendas…")}</p>}
       {query.isError && (
-        <div role="alert" className="space-y-2">
-          <p className="text-xs text-error">{t("Não foi possível carregar suas agendas.")}</p>
-          <Button onClick={() => void query.refetch()} variant="outline" size="sm">
+        <div role="alert">
+          <p>{t("Não foi possível carregar suas agendas.")}</p>
+          <Button onClick={() => void query.refetch()} variant="outline">
             {t("Tentar novamente")}
           </Button>
         </div>
       )}
       {data?.connections.length === 0 && (
-        <Link className="text-xs text-accent underline underline-offset-2 hover:text-accent-hover" href="/app/agenda">
+        <Link className="text-sm underline" href="/app/agenda">
           {t("Conecte sua conta pela Agenda")}
         </Link>
       )}
       {data?.connections.map((connection) => (
-        <div key={connection.id} className="space-y-2 border-t border-border pt-3">
+        <div key={connection.id} className="space-y-2 border-t pt-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-text break-all">{connection.account_email}</p>
+            <p className="text-sm font-medium break-all">{connection.account_email}</p>
             <Button
               variant="outline"
-              size="sm"
               onClick={() =>
                 void execute(() =>
                   apiClient.post("/api/v1/agenda/google/calendarios/atualizar", {
@@ -116,18 +113,18 @@ export function AgendasConectadas() {
             </Button>
           </div>
           {connection.last_sync_error && (
-            <p role="alert" className="text-xs text-error">
+            <p role="alert" className="text-sm text-destructive">
               {connection.last_sync_error}
             </p>
           )}
           {data.calendars
             .filter((c) => c.connection_id === connection.id)
             .map((calendar) => (
-              <div key={calendar.id} className="space-y-1.5 rounded-md border border-border bg-surface-elevated/30 p-3">
-                <p className="text-sm font-medium text-text break-words">{calendar.name}</p>
-                <p className="text-xs text-text-muted">{t(calendar.allowed_conference_types == null ? "Google Meet: atualize a lista para conferir" : calendar.allowed_conference_types.includes("hangoutsMeet") ? "Permite criar links do Google Meet" : "Esta agenda não permite criar Google Meet")}</p>
-                <div className="flex flex-wrap gap-4 text-xs text-text">
-                  <label className="flex items-center gap-2 cursor-pointer">
+              <div key={calendar.id} className="space-y-1 rounded-md bg-muted/40 p-3">
+                <p className="font-medium break-words">{calendar.name}</p>
+                <p className="text-xs text-muted-foreground">{t(calendar.allowed_conference_types == null ? "Google Meet: atualize a lista para conferir" : calendar.allowed_conference_types.includes("hangoutsMeet") ? "Permite criar links do Google Meet" : "Esta agenda não permite criar Google Meet")}</p>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
                       checked={sources.includes(calendar.id)}
@@ -143,7 +140,7 @@ export function AgendasConectadas() {
                     />
                     {t("Conta como ocupado")}
                   </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex items-center gap-2">
                     <input
                       type="radio"
                       name="calendar-destination"
@@ -155,7 +152,7 @@ export function AgendasConectadas() {
                   </label>
                 </div>
                 {!calendar.can_write && (
-                  <p className="text-xs text-text-muted">
+                  <p className="text-xs text-muted-foreground">
                     {t(
                       calendar.can_read
                         ? "Leitura permitida. Esta agenda não está disponível para publicação."
@@ -163,18 +160,18 @@ export function AgendasConectadas() {
                     )}
                   </p>
                 )}
-                <p className="text-xs text-text-muted">
+                <p className="text-xs text-muted-foreground">
                   {calendar.last_sync_at
                     ? `${t("Última sincronização")}: ${new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(calendar.last_sync_at))}`
                     : t("Ainda não sincronizada")}
                 </p>
                 {calendar.reading && (
-                  <p className="text-xs text-text-muted">
+                  <p className="text-xs">
                     {t("Leitura em andamento; a cobertura será confirmada ao terminar.")}
                   </p>
                 )}
                 {calendar.sync_error && (
-                  <p role="alert" className="text-xs text-error">
+                  <p role="alert" className="text-sm text-destructive">
                     {calendar.sync_error}
                   </p>
                 )}
@@ -185,7 +182,6 @@ export function AgendasConectadas() {
       {!!data?.connections.length && (
         <div className="flex flex-wrap gap-2">
           <Button
-            size="sm"
             onClick={() =>
               void execute(() => apiClient.patch("/api/v1/agenda/google/calendarios", start()))
             }
@@ -196,7 +192,6 @@ export function AgendasConectadas() {
           {draft && (
             <Button
               variant="ghost"
-              size="sm"
               onClick={() => {
                 setDraft(null);
                 void query.refetch();

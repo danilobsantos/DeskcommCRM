@@ -12774,10 +12774,9 @@ notify pgrst, 'reload schema';
 -- Idempotente: `create or replace function`, revokes e grants declarativos.
 
 create or replace function public.fn_definir_logo_da_organizacao(
-  p_org       uuid,
-  p_actor     uuid,
-  p_path      text,
-  p_path_dark text default null
+  p_org   uuid,
+  p_actor uuid,
+  p_path  text
 ) returns integer
     language plpgsql
     volatile
@@ -12785,9 +12784,8 @@ create or replace function public.fn_definir_logo_da_organizacao(
     set search_path to 'public', 'pg_temp'
 as $$
 declare
-  v_linhas    integer;
-  v_path      text;
-  v_path_dark text;
+  v_linhas integer;
+  v_path   text;
 begin
   if p_org is null or p_actor is null then
     raise exception 'logo_da_organizacao_argumento_nulo'
@@ -12795,20 +12793,18 @@ begin
   end if;
 
   v_path := nullif(btrim(coalesce(p_path, '')), '');
-  v_path_dark := nullif(btrim(coalesce(p_path_dark, '')), '');
 
-  -- PREFIXO ASSEVERADO DENTRO DO BANCO — mesmo gate da versão anterior.
+  -- O PREFIXO ASSEVERADO DENTRO DO BANCO — o gate que sobrevive ao segundo
+  -- chamador. A rota monta o caminho a partir da organização resolvida do
+  -- cookie, mas "a rota monta certo" é promessa de UM chamador. Sem esta linha,
+  -- um caminho de outro escopo (o `platform/...` que qualquer pessoa lê no HTML
+  -- da tela de login) entraria como logo da organização — e o delete-on-replace
+  -- da rota, rodando como `service_role`, apagaria o logo da instalação inteira
+  -- na troca seguinte.
   if v_path is not null
      and v_path !~ ('^' || p_org::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$')
   then
     raise exception 'logo_da_organizacao_caminho_fora_do_escopo'
-      using errcode = '22023';
-  end if;
-
-  if v_path_dark is not null
-     and v_path_dark !~ ('^' || p_org::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$')
-  then
-    raise exception 'logo_da_organizacao_caminho_dark_fora_do_escopo'
       using errcode = '22023';
   end if;
 
@@ -12829,28 +12825,19 @@ begin
       using errcode = '42501';
   end if;
 
-  -- Merge no CAMPO — mantém `logo_path` preservado se `p_path` for null,
-  -- e faz o mesmo para `logo_path_dark`.
+  -- Merge no CAMPO. `jsonb_set` direto em '{branding,logo_path}' NÃO serviria:
+  -- com `branding` ausente, `create_missing` só cria a ÚLTIMA chave e o caminho
+  -- intermediário faltando devolve o jsonb original intocado — silenciosamente.
   update public.organizations o
      set settings = case
-           when v_path is null and v_path_dark is null
-             then jsonb_set(
-                    coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path' - 'logo_path_dark', true)
            when v_path is null
              then jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path'
-                      || jsonb_build_object('logo_path_dark', v_path_dark), true)
-           when v_path_dark is null
-             then jsonb_set(
-                    coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path_dark'
-                      || jsonb_build_object('logo_path', v_path), true)
+                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path', true)
            else jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
                     coalesce(o.settings -> 'branding', '{}'::jsonb)
-                      || jsonb_build_object('logo_path', v_path, 'logo_path_dark', v_path_dark), true)
+                      || jsonb_build_object('logo_path', v_path), true)
          end
    where o.id = p_org;
 
@@ -12859,8 +12846,8 @@ begin
 end;
 $$;
 
-comment on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text) is
-  'Grava (ou apaga) organizations.settings.branding.logo_path e logo_path_dark com merge no CAMPO. Assevera prefixo por organization_id. Papel insuficiente levanta 42501. Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/api/v1/marca/logo/route.ts.';
+comment on function public.fn_definir_logo_da_organizacao(uuid, uuid, text) is
+  'Grava (ou apaga) organizations.settings.branding.logo_path com merge no CAMPO — não toca em app_name, accent_hex nem nas demais chaves de settings. Assevera que o caminho começa pelo proprio organization_id: caminho de outro escopo levanta 22023. Papel insuficiente levanta 42501. Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/api/v1/marca/logo/route.ts.';
 
 -- ── O FORWARD-FIX DA 0157 ───────────────────────────────────────────────────
 --
@@ -12923,15 +12910,11 @@ begin
            -- "Limpar" com logo gravado NÃO apaga o logo: o campo tem controle
            -- próprio na tela, e limpar nome+cor responde a OUTRA pergunta.
            when v_limpar and coalesce(o.settings #>> '{branding,logo_path}', '') = ''
-                and coalesce(o.settings #>> '{branding,logo_path_dark}', '') = ''
              then coalesce(o.settings, '{}'::jsonb) - 'branding'
            when v_limpar
              then jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    jsonb_build_object(
-                      'logo_path', o.settings #> '{branding,logo_path}',
-                      'logo_path_dark', o.settings #> '{branding,logo_path_dark}'
-                    ), true)
+                    jsonb_build_object('logo_path', o.settings #> '{branding,logo_path}'), true)
            -- `p_marca || preservado`: o lado DIREITO vence em `||`, então o
            -- `logo_path` gravado sobrevive à substituição do objeto.
            -- `jsonb_strip_nulls` SÓ no fragmento preservado — nunca em `p_marca`,
@@ -12939,10 +12922,7 @@ begin
            else jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
                     p_marca || jsonb_strip_nulls(
-                      jsonb_build_object(
-                        'logo_path', o.settings #> '{branding,logo_path}',
-                        'logo_path_dark', o.settings #> '{branding,logo_path_dark}'
-                      )), true)
+                      jsonb_build_object('logo_path', o.settings #> '{branding,logo_path}')), true)
          end
    where o.id = p_org;
 
@@ -12952,7 +12932,7 @@ end;
 $$;
 
 comment on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb) is
-  'Grava organizations.settings.branding com merge ATÔMICO, PRESERVANDO branding.logo_path e branding.logo_path_dark (escritores próprios). Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/actions/settings/updateMarcaDaOrganizacao.ts.';
+  'Grava organizations.settings.branding com merge ATÔMICO (jsonb_set), sem tocar nas demais chaves do jsonb (llm, routing, visibility_mode, atrito, ai_dispatch_mode, canonical_conversation_tags, lost_reasons_extra, plan) e PRESERVANDO branding.logo_path, que tem escritor próprio (fn_definir_logo_da_organizacao, migration 0158). Devolve linhas afetadas: 0 = a organização não existe. Papel insuficiente levanta 42501. Chamador: app/actions/settings/updateMarcaDaOrganizacao.ts.';
 
 -- OS DOIS REVOKES EM CADA FUNÇÃO (CLAUDE.md, item 9) — origens DISTINTAS de
 -- EXECUTE, e tratar uma só deixa a função exposta com o gate verde:
@@ -12963,9 +12943,9 @@ comment on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb) is
 --       toda função criada DEPOIS dele — isto é, para todo apêndice.
 -- `from authenticated` pelo motivo de (B) e mais um: as duas são VOLÁTEIS.
 -- Definer volátil alcançável por qualquer usuário logado é escrita cross-tenant.
-revoke execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text)
+revoke execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text)
   from public, anon, authenticated;
-grant  execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text)
+grant  execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text)
   to service_role;
 
 revoke execute on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb)
@@ -14480,45 +14460,7 @@ alter table public.platform_branding
 -- reconhece `= ANY (ARRAY[...])` e estoura sobre regex. Mesma razão de
 -- `platform_branding_accent_hex`.
 
-
--- ---- logo da marca: coluna DARK (migration 9001) ----
---
--- `logo_path_dark` é o logo para o tema escuro. NULL = usa `logo_path` nos dois
--- temas (backward compat). O CHECK é idêntico ao de `logo_path`.
-
-alter table public.platform_branding
-  add column if not exists logo_path_dark text;
-
-comment on column public.platform_branding.logo_path_dark is
-  'Caminho do arquivo de logo para o tema ESCURO em storage/brand-logos, sempre platform/<uuid>.<png|jpg>. NULL = usa logo_path (light) nos dois temas. Escrito por app/api/v1/marca/logo/route.ts com variant=dark.';
-
-update public.platform_branding
-   set logo_path_dark = null
- where logo_path_dark is not null
-   and logo_path_dark !~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$';
-
-alter table public.platform_branding
-  drop constraint if exists platform_branding_logo_path_dark;
-alter table public.platform_branding
-  add constraint platform_branding_logo_path_dark check (
-    logo_path_dark is null
-    or logo_path_dark ~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$'
-  );
-
 notify pgrst, 'reload schema';
-
-
--- ---- derruba o overload legado de fn_definir_logo_da_organizacao (migration 9002) ----
---
--- A 9001 criou `fn_definir_logo_da_organizacao(p_org,p_actor,p_path,p_path_dark)`
--- com `create or replace` sobre a versão de 3 argumentos da 0158. Assinatura
--- diferente NÃO substitui: cria um SEGUNDO overload. Quem chama com 3 parâmetros
--- (código pré-9001, o cenário de rollback) faz o PostgREST devolver 300 PGRST203
--- "Could not choose the best candidate" — o logo da organização para de gravar.
--- Este `drop` mantém só a versão de 4; quem chamar com 3 resolve por `default null`.
--- No baseline só existe a de 4, então aqui é no-op para quem instala do zero; o
--- alvo real é o clone que atualiza de um baseline pré-9001, onde a de 3 existe.
-drop function if exists public.fn_definir_logo_da_organizacao(uuid, uuid, text);
 
 
 -- ---- o teto de IA que vincula (migration 0159) ----
@@ -22289,24 +22231,6 @@ notify pgrst, 'reload schema';
 alter table public.agent_inbox_items
   add column if not exists resolved_at timestamptz;
 
--- ---- realtime conversation_notes (migration 0219) ----
--- Adicionado à publicação para que a UI de inbox receba atualizações em tempo real
-do $$ begin
-  if exists (select 1 from pg_publication where pubname='supabase_realtime') then
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname='supabase_realtime' and schemaname='public' and tablename='conversation_notes'
-    ) then
-      alter publication supabase_realtime add table public.conversation_notes;
-    end if;
-  end if;
-end $$;
-
--- ---- attendant_availability.last_heartbeat_at (migration 0039) ----
--- Bancos com tabela criada antes da 0039 não ganham a coluna com `create table if not exists`.
-alter table public.attendant_availability
-  add column if not exists last_heartbeat_at timestamptz;
-
 -- ---- roteamento por canal e reservas (migration 0228) ----
 -- 0228 — responsáveis por canal, claim automático serializado e conexão recuperável.
 -- Independente da 0227: assignment dispara os triggers vigentes, nunca escreve drafts.
@@ -23280,82 +23204,6 @@ revoke all on function public.fn_reserve_channel_connection(uuid,uuid,text,text,
 grant execute on function public.fn_reserve_channel_connection(uuid,uuid,text,text,boolean) to authenticated;
 
 notify pgrst,'reload schema';
-
--- ---- agenda: profissionais externos (migration 9003) ----
--- O dono externo: o dentista sem login. `providers` existe como registro de
--- domínio com jornada própria (`schedule`, molde de attendant_availability), e
--- `calendar_appointments` passa a aceitar `provider_id` MUTUAMENTE exclusivo
--- com `owner_user_id`. Aditiva e idempotente — nada a curar, colunas novas são
--- NULLABLE e relaxar `user_id` em calendar_availability_exceptions só ABAIXA.
-create table if not exists public.providers (
-  id uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
-  name text not null,
-  specialties text[] not null default '{}',
-  active boolean not null default true,
-  schedule jsonb not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists idx_providers_org on public.providers (organization_id);
-create index if not exists idx_providers_specialties on public.providers using gin (specialties);
-
-alter table public.providers enable row level security;
-
-drop policy if exists providers_select on public.providers;
-create policy providers_select on public.providers
-  for select using (
-    public.fn_is_platform_admin()
-    or (organization_id in (select public.fn_user_org_ids()))
-  );
-
-drop policy if exists providers_write on public.providers;
-create policy providers_write on public.providers
-  using (
-    public.fn_is_platform_admin()
-    or ((organization_id in (select public.fn_user_org_ids()))
-        and public.fn_role_at_least(organization_id, 'manager'))
-  )
-  with check (
-    public.fn_is_platform_admin()
-    or ((organization_id in (select public.fn_user_org_ids()))
-        and public.fn_role_at_least(organization_id, 'manager'))
-  );
-
-revoke all on public.providers from anon;
-
-alter table public.calendar_appointments
-  add column if not exists provider_id uuid references public.providers(id) on delete set null;
-
-alter table public.calendar_appointments
-  drop constraint if exists calendar_appointments_dono_unico;
-alter table public.calendar_appointments
-  add constraint calendar_appointments_dono_unico
-  check (owner_user_id is null or provider_id is null);
-
-alter table public.calendar_availability_exceptions
-  alter column user_id drop not null;
-
-alter table public.calendar_availability_exceptions
-  add column if not exists provider_id uuid references public.providers(id) on delete cascade;
-
-alter table public.calendar_availability_exceptions
-  drop constraint if exists calendar_exceptions_dono_unico;
-alter table public.calendar_availability_exceptions
-  add constraint calendar_exceptions_dono_unico
-  check (user_id is null or provider_id is null);
-
-create unique index if not exists calendar_exceptions_provider_dia_faixa_key
-  on public.calendar_availability_exceptions (organization_id, provider_id, exception_date, start_minute)
-  where provider_id is not null;
-
-drop trigger if exists trg_providers_updated_at on public.providers;
-create trigger trg_providers_updated_at
-  before update on public.providers
-  for each row execute function public.fn_set_updated_at();
-
-notify pgrst, 'reload schema';
 
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --

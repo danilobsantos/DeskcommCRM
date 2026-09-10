@@ -175,17 +175,16 @@ vi.mock("@/lib/audit", () => ({ audit: (...args: unknown[]) => auditou(...args) 
 const rodarRouting = vi.fn();
 vi.mock("@/lib/routing/worker", () => ({ runRoutingWorker: () => rodarRouting() }));
 
-/** O que o SELECT/UPDATE de `attendant_availability` devolve nesta rodada. */
-let varridos: { user_id: string; id?: string }[] = [];
+/** O que o UPDATE de `attendant_availability` devolve nesta rodada. */
+let varridos: { user_id: string }[] = [];
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: () => {
       const cadeia: Record<string, unknown> = {};
-      for (const metodo of ["update", "eq", "or", "in", "select"]) {
+      for (const metodo of ["update", "eq", "or"]) {
         cadeia[metodo] = () => cadeia;
       }
-      cadeia.then = (resolve: (val: unknown) => void) =>
-        resolve({ data: varridos, error: null });
+      cadeia.select = async () => ({ data: varridos, error: null });
       return cadeia;
     },
   }),
@@ -251,10 +250,7 @@ describe("attendant-heartbeat — audita quando derrubou alguém", () => {
   });
 
   it("varredura que derrubou dois atendentes AUDITA", async () => {
-    varridos = [
-      { id: "a", user_id: "a" },
-      { id: "b", user_id: "b" },
-    ];
+    varridos = [{ user_id: "a" }, { user_id: "b" }];
     const { GET } = await import("@/app/api/v1/cron/attendant-heartbeat/route");
     await GET(requisicaoAutorizada() as never);
     expect(auditou).toHaveBeenCalledTimes(1);

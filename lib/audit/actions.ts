@@ -299,10 +299,6 @@ export const AUDIT_ACTIONS = [
   // event_log (nenhum handler consumiria o tipo — ver register-handlers.ts).
   "platform_branding.updated",
   "platform_google_oauth.updated",
-  // Flag de feature de um TENANT ligada/desligada pela plataforma (migration
-  // 9003). Com `organization_id`: é mutação de tenant, decidida por quem opera
-  // a instalação.
-  "platform.tenant_feature_changed",
   // A conexão da ORGANIZAÇÃO com a conta de anúncios (migration 0213).
   // Auditável porque o token gravado aqui escreve conversões na conta de
   // mídia do cliente: "quem apontou minhas vendas para este destino?" só tem
@@ -411,9 +407,6 @@ export const AUDIT_ACTIONS = [
   "agenda.tipo_criado",
   "agenda.tipo_alterado",
   "agenda.tipo_desativado",
-  // Profissional externo criado/alterado pela secretária (migration 9003).
-  "agenda.provider_created",
-  "agenda.provider_updated",
   // A rodada de renovação — e ela só audita quando FEZ algo, como manda a regra
   // do cron desta base. Uma linha por rodada com efeito, carregando a contagem:
   // é o que permite responder "quantas agendas precisaram reconectar esta

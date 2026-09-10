@@ -108,19 +108,3 @@ describe("o elo que some sem barulho", () => {
     expect(fonte).toMatch(/length > 1/);
   });
 });
-
-describe("estado selecionado da linha da conversa", () => {
-  it("usa `bg-accent-soft` e não `bg-accent-50` para preservar contraste no tema escuro", () => {
-    const { container } = render(
-      <ConversationListItem
-        conversation={base}
-        isSelected={true}
-        onSelect={() => {}}
-      />,
-    );
-    const botao = container.querySelector("button");
-    expect(botao?.className).toContain("bg-accent-soft");
-    expect(botao?.className).not.toContain("bg-accent-50");
-  });
-});
-

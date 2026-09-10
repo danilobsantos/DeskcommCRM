@@ -123,7 +123,6 @@ acessibilidade).
 | [`runbooks/ativar-packaging.md`](runbooks/ativar-packaging.md) | **Ativação da doutrina de packaging** — os 3 passos que não cabem num PR (pacote público, check obrigatório, primeira release) |
 | [`runbooks/custo-e-cota-do-supabase.md`](runbooks/custo-e-cota-do-supabase.md) | **“Meu Supabase estourou a cota”** — como medir a origem do consumo, os dois intervalos da fila e as duas tabelas que só crescem |
 | [`runbooks/waha-hostgator.md`](runbooks/waha-hostgator.md) | Runbook do WAHA em produção |
-| [`agenda-profissionais-externos.md`](agenda-profissionais-externos.md) | **Agenda de profissionais externos (dentista sem login)** — ativar no `/admin`, tipos, jornadas, criar o agente, prompt, tools a habilitar e como testar |
 | [`runbooks/cloudpanel.md`](runbooks/cloudpanel.md) | **VPS que já tem CloudPanel/Nginx nas portas 80/443** — o modo proxy externo do kit, o endereço fixo para o Nginx do host e o 403 do webhook global |
 | [`runbooks/ai-credentials-rotation.md`](runbooks/ai-credentials-rotation.md) | Rotação de credenciais de IA |
 | [`../SECURITY.md`](../SECURITY.md) | Política de reporte de vulnerabilidade |

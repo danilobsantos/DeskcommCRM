@@ -29,10 +29,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/redis-config", () => ({
-  validarConfigRedisRest: () => ({ ok: false, reason: "nao_configurado" as const }),
-}));
-
 describe("contador em memória", () => {
   beforeEach(() => {
     vi.resetModules();

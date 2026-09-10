@@ -69,16 +69,6 @@ const schema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: requiredAlways("NEXT_PUBLIC_SUPABASE_URL").url(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: requiredAlways("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
   SUPABASE_SERVICE_ROLE_KEY: requiredAlways("SUPABASE_SERVICE_ROLE_KEY"),
-  /**
-   * URL interna do Supabase para chamadas server-side (Server Actions, API
-   * Routes, Workers). Quando definida, `lib/supabase/server.ts` e `admin.ts`
-   * usam esta URL em vez de NEXT_PUBLIC_SUPABASE_URL — eliminando a latência
-   * Brasil→Europa em chamadas internas.
-   *
-   * Exemplo: "http://kong:8000" (rede Docker interna).
-   * Ausente = usa NEXT_PUBLIC_SUPABASE_URL (comportamento anterior).
-   */
-  SUPABASE_INTERNAL_URL: z.string().url().optional().default(""),
 
   // Cron / interno
   INTERNAL_SECRET: required("INTERNAL_SECRET"),
@@ -330,7 +320,6 @@ const schema = z.object({
   // O <PublicEnvScript/> injeta os valores em runtime.
   APP_NAME: z.string().optional().default(""),
   APP_LOGO_URL: z.string().optional().default(""),
-  APP_LOGO_URL_DARK: z.string().optional().default(""),
   /**
    * Cor da marca — um hex (`#506d48`), do qual `lib/branding/` deriva a rampa
    * inteira. Vazio = o produto se pinta com a cor dele.

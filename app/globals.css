@@ -465,7 +465,6 @@
 
   /* Accent — Sage */
   --color-accent: var(--color-accent);
-  --color-accent-fg: var(--color-accent-fg);
   --color-accent-foreground: var(--color-accent-fg);
   --color-accent-soft: var(--color-accent-soft);
   --color-accent-hover: var(--color-accent-hover);

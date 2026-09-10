@@ -15,7 +15,6 @@ import { buildInviteEmail } from "@/lib/email/templates/invite";
 const MARCA: MarcaDeSaida = {
   nome: "Vendas Turbo",
   logoUrl: null,
-  logoUrlDark: null,
   accent: "#2f6f4e",
   accentFg: "#ffffff",
   origens: { nome: "banco", cor: "banco" },

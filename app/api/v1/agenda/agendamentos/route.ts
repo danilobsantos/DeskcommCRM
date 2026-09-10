@@ -44,7 +44,6 @@ const listarSchema = z.object({
   contact_id: z.string().uuid().optional(),
   lead_id: z.string().uuid().optional(),
   owner_user_id: z.string().uuid().optional(),
-  provider_id: z.string().uuid().optional(),
   dia: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -79,7 +78,6 @@ const marcarSchema = z.object({
   event_type_id: z.string().uuid(),
   starts_at: z.string().datetime({ offset: true }),
   owner_user_id: z.string().uuid().optional(),
-  provider_id: z.string().uuid().optional(),
   contact_id: z.string().uuid().optional(),
   conversation_id: z.string().uuid().optional(),
   title: z.string().min(1).max(200).optional(),
@@ -156,7 +154,6 @@ export async function GET(req: NextRequest): Promise<Response> {
     contact_id: url.searchParams.get("contact_id") ?? undefined,
     lead_id: url.searchParams.get("lead_id") ?? undefined,
     owner_user_id: url.searchParams.get("owner_user_id") ?? undefined,
-    provider_id: url.searchParams.get("provider_id") ?? undefined,
     dia: url.searchParams.get("dia") ?? undefined,
     de: url.searchParams.get("de") ?? undefined,
     ate: url.searchParams.get("ate") ?? undefined,
@@ -175,7 +172,6 @@ export async function GET(req: NextRequest): Promise<Response> {
     contactId: parsed.data.contact_id ?? null,
     leadId: parsed.data.lead_id ?? null,
     ownerUserId: parsed.data.owner_user_id ?? null,
-    providerId: parsed.data.provider_id ?? null,
     dia: parsed.data.dia ?? null,
     de: parsed.data.de ?? null,
     ate: parsed.data.ate ?? null,

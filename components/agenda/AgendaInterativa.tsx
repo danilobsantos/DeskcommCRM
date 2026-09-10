@@ -48,8 +48,6 @@ export function AgendaInterativa({
   recorte,
   tipos,
   tipo,
-  providerId,
-  ownerUserId,
   onEscolherTipo,
   onMarcarEm,
   onAbrirAgendamento,
@@ -71,8 +69,6 @@ export function AgendaInterativa({
    * errado.
    */
   tipo: { id: string; duracaoMin: number } | null;
-  providerId?: string;
-  ownerUserId?: string;
   /**
    * OS TIPOS, para o seletor que esta tela não tinha — e a ausência dele virou
    * defeito no primeiro contato com dado real.
@@ -101,15 +97,7 @@ export function AgendaInterativa({
   const localeDaData = useLocaleDeData();
   const t = useT();
   const { data: horarios, isError: horariosFalharam } = useHorariosLivres(
-    tipo
-      ? {
-          event_type_id: tipo.id,
-          de: recorte.de,
-          ate: recorte.ate,
-          ...(providerId ? { provider_id: providerId } : {}),
-          ...(ownerUserId ? { owner_user_id: ownerUserId } : {}),
-        }
-      : null,
+    tipo ? { event_type_id: tipo.id, de: recorte.de, ate: recorte.ate } : null,
   );
 
   const horariosPorDia = React.useMemo(() => {

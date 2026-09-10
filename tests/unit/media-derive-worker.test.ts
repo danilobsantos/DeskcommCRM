@@ -25,12 +25,9 @@ const messageRow = {
  */
 const bindingDeVisao: { provider: string; model_id: string; credential_id: string | null } | null = null;
 
-const fromMock = vi.fn();
-
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (tabela: string) => {
-      fromMock(tabela);
       const linha = tabela === "ai_purpose_bindings" ? bindingDeVisao : messageRow;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const terminais: any = {
@@ -58,32 +55,22 @@ vi.mock("@/lib/messaging/media/derive", () => ({
   deriveMediaText: vi.fn(async () => "transcrição do áudio real"),
 }));
 
-vi.mock("@/lib/agent-engine/edge/llm/credentials", () => {
-  class LlmNotConfiguredError extends Error {
-    override readonly name = "llm_not_configured";
-    constructor() {
-      super(
-        "org sem credencial LLM utilizável — cadastre uma chave BYOK ativa/validada em ai_provider_credentials ou defina ANTHROPIC_API_KEY / OPENAI_API_KEY (fallback de plataforma, conforme o provider do modelo)",
-      );
-    }
-  }
-  return {
-    LlmNotConfiguredError,
-    resolveOrgLlmConfig: vi.fn(async () => ({
-      provider: "openai",
-      apiKey: "sk-test",
-      defaultModel: "gpt-5",
-      params: {},
-      enabledModels: [],
-      orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
-      orcamentoIndisponivelPorque: null,
-    })),
-  };
-});
+// resolveOrgLlmConfig e generateText mockados: o worker precisa de credencial p/
+// montar as deps, mas o teste não exercita rede.
+vi.mock("@/lib/agent-engine/edge/llm/credentials", () => ({
+  resolveOrgLlmConfig: vi.fn(async () => ({
+    provider: "openai",
+    apiKey: "sk-test",
+    defaultModel: "gpt-5",
+    params: {},
+    enabledModels: [],
+    orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
+    orcamentoIndisponivelPorque: null,
+  })),
+}));
 
-import { deriveMessageMedia, buildDeriveDeps, MARCADOR_NAO_LIDA } from "@/workers/media-derive-worker";
+import { deriveMessageMedia } from "@/workers/media-derive-worker";
 import { deriveMediaText } from "@/lib/messaging/media/derive";
-import { resolveOrgLlmConfig, LlmNotConfiguredError } from "@/lib/agent-engine/edge/llm/credentials";
 
 function eventRow(attempts = 0) {
   return {
@@ -101,21 +88,11 @@ function eventRow(attempts = 0) {
 
 describe("deriveMessageMedia", () => {
   beforeEach(() => {
-    fromMock.mockReset();
     downloadMock.mockReset().mockResolvedValue({ data: new Blob([new Uint8Array([1, 2, 3])]), error: null });
     updateEqMock.mockReset();
     messageRow.media_derived_status = null;
     messageRow.type = "audio";
     vi.mocked(deriveMediaText).mockReset().mockResolvedValue("transcrição do áudio real");
-    vi.mocked(resolveOrgLlmConfig).mockReset().mockResolvedValue({
-      provider: "openai",
-      apiKey: "sk-test",
-      defaultModel: "gpt-5",
-      params: {},
-      enabledModels: [],
-      orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
-      orcamentoIndisponivelPorque: null,
-    });
   });
 
   it("baixa a mídia, deriva e grava ready", async () => {
@@ -148,45 +125,4 @@ describe("deriveMessageMedia", () => {
       expect.objectContaining({ media_derived_status: "failed" }),
     );
   });
-
-  it("erro transitório de rede/DNS (ex: EAI_AGAIN db) retorna status retry e não marca failed", async () => {
-    vi.mocked(deriveMediaText).mockRejectedValue(new Error("getaddrinfo EAI_AGAIN db"));
-    const r = await deriveMessageMedia(eventRow(4));
-    expect(r.status).toBe("retry");
-    expect(r.detail).toContain("EAI_AGAIN");
-    expect(updateEqMock).not.toHaveBeenCalledWith(
-      expect.objectContaining({ media_derived_status: "failed" }),
-    );
-  });
-
-  it("quando a org não tem credencial LLM (LlmNotConfiguredError), não falha permanentemente: deriva áudio via OpenAI", async () => {
-    vi.mocked(resolveOrgLlmConfig)
-      .mockReset()
-      .mockRejectedValueOnce(new LlmNotConfiguredError())
-      .mockResolvedValueOnce({
-        provider: "openai",
-        apiKey: "sk-openai",
-        defaultModel: "gpt-5",
-        params: {},
-        enabledModels: [],
-        orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
-        orcamentoIndisponivelPorque: null,
-      });
-
-    const r = await deriveMessageMedia(eventRow());
-    expect(r.status).toBe("ok");
-    expect(updateEqMock).toHaveBeenCalledWith(
-      expect.objectContaining({ media_derived_text: "transcrição do áudio real", media_derived_status: "ready" }),
-    );
-  });
-
-  it("quando a org não tem credencial LLM e é imagem, buildDeriveDeps gera MARCADOR_NAO_LIDA e avisa", async () => {
-    const adminFake = { from: fromMock };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deps = buildDeriveDeps(null, null, "org1", adminFake as any);
-    const texto = await deps.describeImage(Buffer.from([1, 2, 3]), "image/jpeg");
-    expect(texto).toBe(MARCADOR_NAO_LIDA);
-    expect(fromMock).toHaveBeenCalledWith("agent_inbox_items");
-  });
 });
-

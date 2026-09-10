@@ -105,28 +105,16 @@ export async function carregaRadarDeRisco(
   const now = opts.now ?? new Date();
   const nowIso = now.toISOString();
 
-  // Fase 1: disparar em paralelo crm_leads e demandas (independentes entre si)
-  const [{ data: leads, error: leadsErr }, { data: semPasso, error: demandaErr }] = await Promise.all([
-    admin
-      .from("crm_leads")
-      .select(
-        "id, title, contact_id, owner_user_id, owner_kind, owner_agent_id, stage_id, last_activity_at, created_at, pipeline_id",
-      )
-      .eq("organization_id", organizationId)
-      .eq("status", "open")
-      .order("last_activity_at", { ascending: true, nullsFirst: true })
-      .limit(SCAN_CAP),
-    admin
-      .from("demandas")
-      .select("id, lead_id, contact_id, aberta_em, origem, contacts(display_name)")
-      .eq("organization_id", organizationId)
-      .is("fechada_em", null)
-      .is("proximo_passo", null)
-      .order("aberta_em", { ascending: true })
-      .limit(SCAN_CAP),
-  ]);
+  const { data: leads, error: leadsErr } = await admin
+    .from("crm_leads")
+    .select(
+      "id, title, contact_id, owner_user_id, owner_kind, owner_agent_id, stage_id, last_activity_at, created_at, pipeline_id",
+    )
+    .eq("organization_id", organizationId)
+    .eq("status", "open")
+    .order("last_activity_at", { ascending: true, nullsFirst: true })
+    .limit(SCAN_CAP);
   if (leadsErr) throw new Error(`radar_query_failed: ${leadsErr.message}`);
-  if (demandaErr) throw new Error(`radar_demandas_failed: ${demandaErr.message}`);
 
   const rows = leads ?? [];
 
@@ -138,69 +126,39 @@ export async function carregaRadarDeRisco(
   const agentIds = [
     ...new Set(rows.map((l) => l.owner_agent_id).filter((a): a is string => a !== null)),
   ];
+  const agentNameById = new Map<string, string>();
+  if (agentIds.length > 0) {
+    const { data: agents } = await admin
+      .from("ai_agents")
+      .select("id, name")
+      .eq("organization_id", organizationId)
+      .in("id", agentIds);
+    for (const a of (agents ?? []) as Array<{ id: string; name: string }>) {
+      agentNameById.set(a.id, a.name);
+    }
+  }
 
   // Janela de esfriamento POR ESTÁGIO (decisão §3.3): "sem resposta há 2 dias" é
   // normal numa negociação e é abandono num agendamento. Uma fonte só —
   // resolveStageWindow — para o radar e o card nunca discordarem do mesmo lead.
   const stageIds = [...new Set(rows.map((l) => l.stage_id).filter(Boolean))];
+  const windowByStage = new Map<string, ReturnType<typeof resolveStageWindow>>();
+  if (stageIds.length > 0) {
+    const { data: stages } = await admin
+      .from("crm_stages")
+      .select("id, expected_duration_hours")
+      .eq("organization_id", organizationId)
+      .in("id", stageIds);
+    for (const s of (stages ?? []) as Array<{
+      id: string;
+      expected_duration_hours: number | null;
+    }>) {
+      windowByStage.set(s.id, resolveStageWindow(s));
+    }
+  }
   const contactIds = [
     ...new Set(rows.map((l) => l.contact_id).filter((c): c is string => c !== null)),
   ];
-
-  // Fase 2: disparar em paralelo TODAS as queries de enriquecimento dos leads
-  const [agentsRes, stagesRes, followupsRes, convsRes, contactsRes] = await Promise.all([
-    agentIds.length > 0
-      ? admin
-          .from("ai_agents")
-          .select("id, name")
-          .eq("organization_id", organizationId)
-          .in("id", agentIds)
-      : Promise.resolve({ data: [] }),
-    stageIds.length > 0
-      ? admin
-          .from("crm_stages")
-          .select("id, expected_duration_hours")
-          .eq("organization_id", organizationId)
-          .in("id", stageIds)
-      : Promise.resolve({ data: [] }),
-    contactIds.length > 0
-      ? admin
-          .from("cron_jobs")
-          .select("contact_id, next_run_at")
-          .eq("organization_id", organizationId)
-          .eq("kind", "at")
-          .eq("enabled", true)
-          .gt("next_run_at", nowIso)
-          .in("contact_id", contactIds)
-      : Promise.resolve({ data: [] }),
-    contactIds.length > 0
-      ? admin
-          .from("conversations")
-          .select("id, contact_id, assignee_kind")
-          .eq("organization_id", organizationId)
-          .in("contact_id", contactIds)
-      : Promise.resolve({ data: [] }),
-    contactIds.length > 0
-      ? admin
-          .from("contacts")
-          .select("id, name, display_name")
-          .eq("organization_id", organizationId)
-          .in("id", contactIds)
-      : Promise.resolve({ data: [] }),
-  ]);
-
-  const agentNameById = new Map<string, string>();
-  for (const a of (agentsRes.data ?? []) as Array<{ id: string; name: string }>) {
-    agentNameById.set(a.id, a.name);
-  }
-
-  const windowByStage = new Map<string, ReturnType<typeof resolveStageWindow>>();
-  for (const s of (stagesRes.data ?? []) as Array<{
-    id: string;
-    expected_duration_hours: number | null;
-  }>) {
-    windowByStage.set(s.id, resolveStageWindow(s));
-  }
 
   // Follow-ups agendados no futuro por contato (mais próximo primeiro) — "em voo".
   const followupByContact = new Map<string, string>();
@@ -208,17 +166,40 @@ export async function carregaRadarDeRisco(
   const convByContact = new Map<string, { id: string; assignee_kind: "user" | "ai" | null }>();
   const nameByContact = new Map<string, string | null>();
 
-  for (const f of followupsRes.data ?? []) {
-    const prev = followupByContact.get(f.contact_id);
-    if (!prev || f.next_run_at < prev) followupByContact.set(f.contact_id, f.next_run_at);
-  }
-  for (const c of convsRes.data ?? []) {
-    if (!convByContact.has(c.contact_id)) {
-      convByContact.set(c.contact_id, { id: c.id, assignee_kind: c.assignee_kind ?? null });
+  if (contactIds.length > 0) {
+    const [followups, convs, contacts] = await Promise.all([
+      admin
+        .from("cron_jobs")
+        .select("contact_id, next_run_at")
+        .eq("organization_id", organizationId)
+        .eq("kind", "at")
+        .eq("enabled", true)
+        .gt("next_run_at", nowIso)
+        .in("contact_id", contactIds),
+      admin
+        .from("conversations")
+        .select("id, contact_id, assignee_kind")
+        .eq("organization_id", organizationId)
+        .in("contact_id", contactIds),
+      admin
+        .from("contacts")
+        .select("id, name, display_name")
+        .eq("organization_id", organizationId)
+        .in("id", contactIds),
+    ]);
+
+    for (const f of followups.data ?? []) {
+      const prev = followupByContact.get(f.contact_id);
+      if (!prev || f.next_run_at < prev) followupByContact.set(f.contact_id, f.next_run_at);
     }
-  }
-  for (const p of contactsRes.data ?? []) {
-    nameByContact.set(p.id, p.display_name ?? p.name ?? null);
+    for (const c of convs.data ?? []) {
+      if (!convByContact.has(c.contact_id)) {
+        convByContact.set(c.contact_id, { id: c.id, assignee_kind: c.assignee_kind ?? null });
+      }
+    }
+    for (const p of contacts.data ?? []) {
+      nameByContact.set(p.id, p.display_name ?? p.name ?? null);
+    }
   }
 
   const agenda = await protecaoAgendaSupabase(admin, organizationId, contactIds, now);
@@ -269,47 +250,45 @@ export async function carregaRadarDeRisco(
     ),
   );
 
+  // PASSO 4 do cap. 5 — o Radar passa a conhecer `demandas`. Incremental de
+  // propósito: a lógica de leads acima é COMPARTILHADA com a capacidade que a
+  // IA usa (lib/mcp/tools/retencao.ts), e a tela e o agente têm de dizer a
+  // mesma coisa sobre o mesmo negócio. Reescrevê-la agora arriscaria essa
+  // paridade sem necessidade; acrescentar não arrisca nada.
+  const { data: semPasso, error: demandaError } = await admin
+    .from("demandas")
+    .select("id, lead_id, contact_id, aberta_em, origem, contacts(display_name)")
+    .eq("organization_id", organizationId)
+    .is("fechada_em", null)
+    .is("proximo_passo", null)
+    .order("aberta_em", { ascending: true })
+    .limit(SCAN_CAP);
+  if (demandaError) throw new Error(`radar_demandas_failed: ${demandaError.message}`);
   let demandasVisiveis = semPasso ?? [];
   if (opts.humanRole === "agent" && demandasVisiveis.length) {
     // Demandas são org-flat. A visibilidade dos candidatos vem das relações sob
     // RLS, em lote separado do pool de leads frios (que não define autorização).
-    const leadIds = [...new Set(demandasVisiveis.flatMap((d) => (d.lead_id ? [d.lead_id] : [])))];
-    const leadlessIds = demandasVisiveis.filter((d) => !d.lead_id).map((d) => d.id);
+    const leadIds = [...new Set(demandasVisiveis.flatMap(d => d.lead_id ? [d.lead_id] : []))];
+    const leadlessIds = demandasVisiveis.filter(d => !d.lead_id).map(d => d.id);
     const visibleLeads = new Set<string>();
     const visibleLeadless = new Set<string>();
     if (leadIds.length) {
-      const result = await admin
-        .from("crm_leads")
-        .select("id")
-        .eq("organization_id", organizationId)
-        .in("id", leadIds);
+      const result = await admin.from("crm_leads").select("id").eq("organization_id", organizationId).in("id", leadIds);
       if (result.error) throw new Error("radar_scope_leads_failed");
       for (const lead of result.data ?? []) visibleLeads.add(lead.id);
     }
     if (leadlessIds.length) {
-      const links = await admin
-        .from("demanda_conversas")
-        .select("demanda_id,conversation_id")
-        .eq("organization_id", organizationId)
-        .in("demanda_id", leadlessIds);
+      const links = await admin.from("demanda_conversas").select("demanda_id,conversation_id").eq("organization_id", organizationId).in("demanda_id", leadlessIds);
       if (links.error) throw new Error("radar_scope_links_failed");
-      const ids = [...new Set((links.data ?? []).map((link) => link.conversation_id))];
+      const ids = [...new Set((links.data ?? []).map(link => link.conversation_id))];
       if (ids.length) {
-        const convs = await admin
-          .from("conversations")
-          .select("id")
-          .eq("organization_id", organizationId)
-          .in("id", ids);
+        const convs = await admin.from("conversations").select("id").eq("organization_id", organizationId).in("id", ids);
         if (convs.error) throw new Error("radar_scope_conversations_failed");
-        const visible = new Set((convs.data ?? []).map((c) => c.id));
-        for (const link of links.data ?? []) {
-          if (visible.has(link.conversation_id)) visibleLeadless.add(link.demanda_id);
-        }
+        const visible = new Set((convs.data ?? []).map(c => c.id));
+        for (const link of links.data ?? []) if (visible.has(link.conversation_id)) visibleLeadless.add(link.demanda_id);
       }
     }
-    demandasVisiveis = demandasVisiveis.filter((d) =>
-      d.lead_id ? visibleLeads.has(d.lead_id) : visibleLeadless.has(d.id),
-    );
+    demandasVisiveis = demandasVisiveis.filter(d => d.lead_id ? visibleLeads.has(d.lead_id) : visibleLeadless.has(d.id));
   }
 
   const semProximoPasso: DemandaSemProximoPasso[] = demandasVisiveis.map((d) => {

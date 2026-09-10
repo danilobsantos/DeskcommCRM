@@ -80,8 +80,6 @@ export default async function AgendaPage() {
   // A semana da âncora, que é o que a grade abre por padrão.
   const inicio = startOfWeek(new Date(), { weekStartsOn: 0 });
   const fim = addDays(inicio, 7);
-  // Semente ampla para o histórico ("Próximos") e navegação imediata sem refetch.
-  const fimSemente = addDays(inicio, 35);
 
   // `.eq("organization_id", activeOrg.orgId)` em TODA consulta desta página, e
   // não só a RLS. A `fn_user_org_ids()` que as policies usam devolve TODAS as
@@ -100,11 +98,11 @@ export default async function AgendaPage() {
     supabase
       .from("calendar_appointments")
       .select(
-        "id, revision, title, starts_at, ends_at, status, owner_user_id, provider_id, contact_id, event_type_id, location_kind, contacts(name, display_name)",
+        "id, revision, title, starts_at, ends_at, status, owner_user_id, contact_id, event_type_id, location_kind, contacts(name, display_name)",
       )
       .eq("organization_id", activeOrg.orgId)
       .gte("starts_at", inicio.toISOString())
-      .lt("starts_at", fimSemente.toISOString())
+      .lt("starts_at", fim.toISOString())
       .order("starts_at"),
   ]);
 
@@ -179,7 +177,12 @@ export default async function AgendaPage() {
     .select("account_email, status")
     .eq("organization_id", activeOrg.orgId)
     .eq("user_id", user.id)
-    // ⚠️ A CONSTANTE, e não o literal — ver comentário do trecho.
+    // ⚠️ A CONSTANTE, e não o literal. Isto era `.eq("provider", "google")` — um
+    // valor que o CHECK de `calendar_connections` PROÍBE existir, então a
+    // consulta casava zero linhas SEMPRE. O efeito na tela: `contaConectada`
+    // vinha `null`, o ramo "Agenda conectada" do cartão nunca entrava, e o botão
+    // "Conectar Google" continuava aparecendo depois de a pessoa já ter
+    // conectado. Ela reconectava, o ciclo repetia.
     .eq("provider", PROVEDOR_GOOGLE)
     .neq("status", "disconnected")
     .order("account_email");
@@ -191,24 +194,6 @@ export default async function AgendaPage() {
   const googleConfigurado = await googleEstaConfigurado();
   const faltaNoGoogle = googleConfigurado ? [] : await faltaParaConectarOGoogle();
 
-  // Profissionais externos (migration 9003) — entram na grade como Pessoas, com
-  // trilha estável derivada do id. Quem não tem a feature ligada vê lista vazia.
-  const { data: profissionais } = await supabase
-    .from("providers")
-    .select("id, name, active")
-    .eq("organization_id", activeOrg.orgId)
-    .eq("active", true)
-    .order("name");
-
-  // Atendentes com disponibilidade explicitamente desabilitada (is_available = false).
-  const { data: atendentesIndisponiveis } = await supabase
-    .from("attendant_availability")
-    .select("user_id")
-    .eq("organization_id", activeOrg.orgId)
-    .eq("is_available", false);
-
-  const usuariosIndisponiveis = (atendentesIndisponiveis ?? []).map((a) => a.user_id);
-
   return (
     <AgendaClient
       fusoDeApresentacao={fusoDeApresentacao}
@@ -216,11 +201,6 @@ export default async function AgendaPage() {
       contaConectada={conexoes?.map(c => c.account_email).join(", ") || null}
       enderecoDeRetorno={enderecoDeRetorno()}
       faltaNoGoogle={faltaNoGoogle}
-      usuariosIndisponiveisIniciais={usuariosIndisponiveis}
-      profissionaisIniciais={(profissionais ?? []).map((p) => ({
-        id: p.id,
-        nome: p.name,
-      }))}
       // SÓ para quem administra a INSTALAÇÃO. A tela do app OAuth vive em
       // `/admin` e faz `notFound()` para o resto — oferecer o link a quem não
       // pode entrar seria trocar um beco por outro.
@@ -244,7 +224,7 @@ export default async function AgendaPage() {
         id: a.id,
         revision: a.revision,
         titulo: a.title ?? "Agendamento",
-        responsavelId: a.owner_user_id ?? a.provider_id ?? "",
+        responsavelId: a.owner_user_id ?? "",
         comeca: a.starts_at,
         termina: a.ends_at,
         origem: "ui" as const,
