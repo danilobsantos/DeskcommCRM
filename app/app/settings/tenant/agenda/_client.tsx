@@ -169,7 +169,7 @@ export function TiposDeAgendamentoClient({
                   value={rascunho.name}
                   onChange={(e) => setRascunho((r) => ({ ...r, name: e.target.value }))}
                   placeholder={t("Retorno")}
-                  className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text outline-hidden focus:border-border-strong"
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium text-text-muted">
@@ -178,7 +178,7 @@ export function TiposDeAgendamentoClient({
                   data-testid="novo-tipo-categoria"
                   value={rascunho.category}
                   onChange={(e) => setRascunho((r) => ({ ...r, category: e.target.value }))}
-                  className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text outline-hidden focus:border-border-strong"
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                 >
                   {CATEGORIAS.map((c) => (
                     <option key={c.valor} value={c.valor}>
@@ -198,7 +198,7 @@ export function TiposDeAgendamentoClient({
                   onChange={(e) =>
                     setRascunho((r) => ({ ...r, duration_minutes: Number(e.target.value) }))
                   }
-                  className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text outline-hidden focus:border-border-strong"
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium text-text-muted">
@@ -207,7 +207,7 @@ export function TiposDeAgendamentoClient({
                   data-testid="novo-tipo-local"
                   value={rascunho.location_kind}
                   onChange={(e) => setRascunho((r) => ({ ...r, location_kind: e.target.value }))}
-                  className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text outline-hidden focus:border-border-strong"
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                 >
                   {LOCAIS.map((l) => (
                     <option key={l.valor} value={l.valor}>
@@ -228,7 +228,7 @@ export function TiposDeAgendamentoClient({
                   onChange={(e) =>
                     setRascunho((r) => ({ ...r, default_owner_user_id: e.target.value }))
                   }
-                  className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text outline-hidden focus:border-border-strong"
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                 >
                   <option value="">{t("Definir depois")}</option>
                   {pessoas.map((p) => (
@@ -272,7 +272,7 @@ export function TiposDeAgendamentoClient({
                   rótulo do sistema — traduzir trocaria "Retorno" por
                   "Seguimiento" (chave existente, de outro contexto). */}
               <span className="text-sm font-medium text-text">{tipo.name}</span>
-              <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-muted">
+              <span className="rounded-full border border-border px-2 py-0.5 text-xs text-text-muted">
                 {t(rotuloDe(CATEGORIAS, tipo.category))}
               </span>
               <span className="text-xs tabular-nums text-text-muted">{tipo.duration_minutes} min</span>
@@ -386,16 +386,16 @@ export function TiposDeAgendamentoClient({
                   if (feito) setEditandoId(null);
                 }}
               >
-                <label className="flex flex-col gap-1 text-xs text-text-muted">
-                  Nome
+                <label className="flex flex-col gap-1 text-xs font-medium text-text-muted">
+                  {t("Nome")}
                   <input
                     name="name"
                     defaultValue={tipo.name}
                     data-testid={`editar-nome-${tipo.id}`}
-                    className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text"
+                    className="mt-1 h-9 rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-text-muted">
+                <label className="flex flex-col gap-1 text-xs font-medium text-text-muted">
                   {t("Duração")}
                   <input
                     name="duration_minutes"
@@ -404,16 +404,16 @@ export function TiposDeAgendamentoClient({
                     max={1440}
                     defaultValue={tipo.duration_minutes}
                     data-testid={`editar-duracao-${tipo.id}`}
-                    className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text"
+                    className="mt-1 h-9 rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-text-muted">
+                <label className="flex flex-col gap-1 text-xs font-medium text-text-muted">
                   {t("Quem atende")}
                   <select
                     name="default_owner_user_id"
                     defaultValue={tipo.default_owner_user_id ?? ""}
                     data-testid={`editar-dono-${tipo.id}`}
-                    className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text"
+                    className="mt-1 h-9 rounded-md border border-border bg-surface-elevated px-3 py-1.5 text-sm text-text outline-hidden transition-colors duration-fast hover:border-border-strong focus:border-border-strong"
                   >
                     <option value="">{t("Sem responsável")}</option>
                     {pessoas.map((p) => (

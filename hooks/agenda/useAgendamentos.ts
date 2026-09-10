@@ -33,6 +33,7 @@ export interface RecorteDaGrade {
   de: string;
   ate: string;
   owner_user_id?: string;
+  provider_id?: string;
 }
 
 /**
@@ -69,6 +70,7 @@ export function useAgendamentos(recorte: RecorteDaGrade | null) {
     queryFn: async (): Promise<Agendamento[]> => {
       const qs = new URLSearchParams({ de: recorte!.de, ate: recorte!.ate });
       if (recorte!.owner_user_id) qs.set("owner_user_id", recorte!.owner_user_id);
+      if (recorte!.provider_id) qs.set("provider_id", recorte!.provider_id);
       try {
         const r = await apiClient.get<{ data: AgendamentoListado[] }>(
           `/api/v1/agenda/agendamentos?${qs.toString()}`,

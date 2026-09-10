@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 
 import { providersHabilitados } from "@/lib/agenda/providers";
-import { horariosLivresDaOrg } from "@/lib/agenda/consulta";
+import { horariosLivresDaOrg, listaAgendamentos } from "@/lib/agenda/consulta";
 import { partesNoFuso } from "@/lib/agenda/fuso";
 import { sidebarGroups } from "@/lib/navigation/registry";
 
@@ -63,6 +63,8 @@ function mockSupabase(config: Record<string, unknown>) {
       eu.lte = () => eu;
       eu.lt = () => eu;
       eu.gt = () => eu;
+      eu.order = () => eu;
+      eu.limit = () => eu;
       eu.maybeSingle = async () =>
         Array.isArray(resultados) ? { data: resultados[0] ?? null, error: null } : { data: resultados ?? null, error: null };
       return eu;
@@ -161,3 +163,27 @@ describe("sidebarGroups + providersRequired", () => {
     expect(grupo(true)).toContain("/app/agenda/profissionais");
   });
 });
+
+describe("listaAgendamentos com providerId", () => {
+  it("reconhece providerId como alvo válido sem exigir contactId ou de+ate", async () => {
+    const supabase = mockSupabase({
+      calendar_appointments: [],
+    });
+    const r = await listaAgendamentos(supabase as never, "org-1", {
+      providerId: "prov-1",
+      contactId: null,
+      leadId: null,
+      ownerUserId: null,
+      dia: null,
+      de: null,
+      ate: null,
+      situacao: null,
+      limite: 20,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.agendamentos).toEqual([]);
+    }
+  });
+});
+
