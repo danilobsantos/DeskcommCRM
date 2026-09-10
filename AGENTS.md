@@ -136,6 +136,10 @@ verify, build-and-size, invariants, e2e, imagens-ok
 - **`supabase/baseline.sql`** — é o que o `install.sh`/`update.sh` do self-host aplicam.
   Toda mudança de schema tem que aparecer aqui **como apêndice idempotente**, senão
   não chega em quem instalou. Ver doutrina de Migrations em `CLAUDE.md`.
+- **`scripts/dokploy-migrate.sh`** — executor de migrations automáticas no Dokploy (`db-migrate`).
+  Garante schema e tabela `supabase_migrations.schema_migrations`, executa apenas migrations
+  pendentes (`supabase/migrations/*.sql`) com `ON_ERROR_STOP=1` e registra carimbo atômico,
+  impedindo reexecuções em cada deploy.
 - **`supabase/migrations/*.sql` já aplicadas** — nunca edite. Corrija com migration nova.
 - **`lib/supabase/admin.ts`** — service role **bypassa RLS**. 89 rotas o usam; toda
   query precisa filtrar `organization_id` manualmente, resolvido de fonte confiável
@@ -167,6 +171,7 @@ verify, build-and-size, invariants, e2e, imagens-ok
    como prova de UX (doutrina de QA Visual em `CLAUDE.md`).
 5. Mudou schema → migration versionada em `supabase/migrations/` **+** apêndice idempotente
    em `supabase/baseline.sql` **+** linha em `supabase/migrations/MANIFEST.md`. Os três juntos.
+   No Dokploy, `scripts/dokploy-migrate.sh` aplica as pendentes no boot do compose via `db-migrate`.
 6. Criou função em `public` → `revoke execute on function ... from public, anon;` e depois
    `grant` só a quem precisa. São **duas** origens de `EXECUTE` e revogar uma só deixa a
    função exposta como RPC alcançável pela anon key. Detalhe em `CLAUDE.md`, item 9 da

@@ -13063,22 +13063,8 @@ end; $$;
 comment on function public.fn_mark_conversation_message is
   'Atualiza agregados da conversa: inbound incrementa unread; outbound zera (respondido).';
 
--- Corrige contadores stale: inbound desde a última resposta do atendente/IA.
-update public.conversations c
-set unread_count_for_assignee = coalesce((
-  select count(*)::integer
-  from public.messages m
-  where m.conversation_id = c.id
-    and m.direction = 'inbound'
-    and m.sent_at > coalesce(c.last_outbound_at, '-infinity'::timestamptz)
-), 0)
-where unread_count_for_assignee <> coalesce((
-  select count(*)::integer
-  from public.messages m
-  where m.conversation_id = c.id
-    and m.direction = 'inbound'
-    and m.sent_at > coalesce(c.last_outbound_at, '-infinity'::timestamptz)
-), 0);
+-- Nota: o backfill de unread_count_for_assignee da migration 0161 foi removido do baseline
+-- para evitar que re-execuções a cada deploy sobrescrevam mensagens lidas manualmente pelo atendente.
 
 notify pgrst, 'reload schema';
 
@@ -23498,3 +23484,17 @@ grant execute on function public.fn_decrypt_oauth(bytea) to service_role;
 grant execute on function public.fn_encrypt_oauth(text) to service_role;
 grant execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) to service_role;
 grant execute on function public.fn_update_budget_consumption() to service_role;
+
+-- ---- reconciliação segura de unread_count_for_assignee pós-redeploy (migration 9006) ----
+update public.conversations
+   set unread_count_for_assignee = 0
+ where status in ('closed', 'resolved', 'archived')
+   and unread_count_for_assignee > 0;
+
+update public.conversations
+   set unread_count_for_assignee = 0
+ where service_closed_at is not null
+   and unread_count_for_assignee > 0;
+
+notify pgrst, 'reload schema';
+

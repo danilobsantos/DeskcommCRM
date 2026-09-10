@@ -439,7 +439,9 @@ Processo padrão (siga sempre):
 
    São duas origens distintas de `EXECUTE`, e tratar só uma deixa a função exposta com o gate verde: **(A)** o grant direto a `anon` do `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon` do baseline, que vale para toda função criada depois dele — isto é, para todo apêndice novo — e que `revoke from public` **não** remove; **(B)** o grant a `PUBLIC` que o Postgres dá a qualquer função ao criá-la, que `revoke from anon` **não** remove. Sem os dois, o PostgREST expõe a função como RPC alcançável pela anon key, que vai para o browser. Vigiado por `tests/invariants/hardening-definer-varredura.test.ts`, que varre todas as `security definer` de `public` (issue #128 — a versão anterior checava uma lista fixa de 6, e 8 de 25 estavam expostas).
 
-**Resumo do fluxo de uma mudança de schema:** arquivo em `migrations/` (fonte da verdade p/ Supabase CLI) **+** apêndice idempotente no `baseline.sql` (p/ o kit self-host) **+** linha no MANIFEST. Os dois artefatos de schema andam juntos. Nunca edite migrations já aplicadas — corrija com uma "forward-fix" nova (e mais um apêndice no baseline).
+10. **Automação no Dokploy (`scripts/dokploy-migrate.sh`):** Em deploys via Dokploy/Compose, o serviço `db-migrate` executa `scripts/dokploy-migrate.sh`. O script garante o registro em `supabase_migrations.schema_migrations`, aplicando apenas as migrations pendentes (`supabase/migrations/*.sql`) com `ON_ERROR_STOP=1`. Isso impede a re-execução de scripts de migration e backfills a cada deploy.
+
+**Resumo do fluxo de uma mudança de schema:** arquivo em `migrations/` (fonte da verdade p/ Supabase CLI e `scripts/dokploy-migrate.sh`) **+** apêndice idempotente no `baseline.sql` (p/ o kit self-host `install.sh`/`update.sh`) **+** linha no MANIFEST. Os dois artefatos de schema andam juntos. Nunca edite migrations já aplicadas — corrija com uma "forward-fix" nova (e mais um apêndice no baseline).
 
 ---
 
