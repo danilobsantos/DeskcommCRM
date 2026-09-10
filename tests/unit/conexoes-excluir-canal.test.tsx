@@ -240,6 +240,20 @@ describe("diálogo de exclusão diz a verdade antes do clique", () => {
       ),
     );
   });
+
+  it("canal com nome bruto de sessão quebra o título sem transbordar o modal", async () => {
+    const rawSession = "org_e43d00ad4bdf4fe2b0ea60782ace9d43_985d3958e62f40d78447e0aabdbaddd3";
+    listagem.data = [canal({ display_name: null, phone_number: null, waha_session_name: rawSession })];
+    getMock.mockResolvedValue({ data: { deletion_impact: IMPACTO_ARQUIVA } });
+
+    render(wrap(<ConnectionsClient wahaConfigured />));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`Excluir ${rawSession}`) }));
+
+    const titulo = await screen.findByRole("heading", { level: 2 });
+    expect(titulo).toHaveTextContent(rawSession);
+    expect(titulo.className).toContain("break-all");
+    expect(titulo.className).toContain("pr-8");
+  });
 });
 
 describe("frasesDoImpacto", () => {

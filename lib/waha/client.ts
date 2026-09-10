@@ -241,6 +241,9 @@ export class WahaClient {
 
   /** Porta granular para a futura reserva: created nunca significa ownership. */
   async createSession(name: string): Promise<{ created: boolean; session: WahaSessionSnapshot }> {
+    if (name.length > 54) {
+      throw new WahaSessionError("create", 400);
+    }
     const res = await this.fetchComTeto(`${this.baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },

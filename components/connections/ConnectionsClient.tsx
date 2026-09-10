@@ -545,8 +545,8 @@ function ExcluirCanalDialog({
   return (
     <Dialog open onOpenChange={(o) => !o && !excluindo && onCancel()}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
+        <DialogHeader className="min-w-0 text-left">
+          <DialogTitle className="pr-8 text-left leading-snug break-all [overflow-wrap:anywhere]">
             {t("Excluir")} {channelLabel(canal, t)}?
           </DialogTitle>
           <DialogDescription asChild>
@@ -657,8 +657,10 @@ function QrDialog({
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+        <DialogHeader className="min-w-0 text-left">
+          <DialogTitle className="pr-8 text-left leading-snug break-all [overflow-wrap:anywhere]">
+            {title}
+          </DialogTitle>
           <DialogDescription>
             {t(
               "No celular: WhatsApp → Aparelhos conectados → Conectar um aparelho → escaneie o código.",

@@ -14,9 +14,9 @@ services:
     restart: "no"
     env_file: .env
     volumes:
-      - ./supabase/baseline.sql:/baseline.sql:ro
-    command: >
-      sh -c 'psql "$${SUPABASE_DB_ADMIN_URL:-$$SUPABASE_DB_URL}" -f /baseline.sql'
+      - ./supabase/migrations:/migrations:ro
+      - ./scripts/dokploy-migrate.sh:/migrate.sh:ro
+    entrypoint: ["/bin/sh", "/migrate.sh"]
     networks:
       - internal
       - supabase

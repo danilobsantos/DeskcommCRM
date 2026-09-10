@@ -6,7 +6,7 @@ import type { WahaClient } from "@/lib/waha/client";
 import { WahaSessionError } from "@/lib/waha/client";
 
 const channelSchema = z.object({
-  id: z.string().uuid(), organization_id: z.string().uuid(), waha_session_name: z.string(),
+  id: z.string().uuid(), organization_id: z.string().uuid(), waha_session_name: z.string().max(54),
   status: z.enum(["STARTING", "SCAN_QR_CODE", "WORKING", "STOPPED", "FAILED"]),
   display_name: z.string().nullable().optional(), phone_number: z.string().nullable().optional(),
   status_reason: z.string().nullable().optional(), archived_at: z.string().nullable().optional(),

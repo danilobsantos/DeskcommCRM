@@ -65,4 +65,13 @@ describe("conexão recuperável", () => {
     expect((await connectWahaChannel(f.db, f.db, f.transport, f.input)).replay).toBe(true);
     expect(f.transport.createSession).not.toHaveBeenCalled();expect(f.transport.deleteSession).not.toHaveBeenCalled();
   });
+  it("recusa nome de sessão com mais de 54 caracteres (limite do WAHA)", async () => {
+    const f = fixture();
+    const badChannel = { ...channel, waha_session_name: "a".repeat(55) };
+    vi.mocked(f.db.rpc).mockResolvedValue({
+      data: { channel: badChannel, receipt_id: key, lease_token: key, replay: false },
+      error: null,
+    } as never);
+    await expect(connectWahaChannel(f.db, f.db, f.transport, f.input)).rejects.toThrow();
+  });
 });

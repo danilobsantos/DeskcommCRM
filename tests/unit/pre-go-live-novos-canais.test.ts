@@ -32,6 +32,8 @@ describe("todo canal criado pela interface nasce em pré-go-live", () => {
     expect(initial).not.toBeNull();
     expect(JSON.parse(initial![1]!)).toEqual(metadataInicialDoCanal());
     expect(fn).toContain("case when p_onboarding then '{\"onboarding\":true}'::jsonb");
+    // O nome da sessão gerado para o WAHA não pode exceder 54 caracteres (limite do WAHA)
+    expect(fn).toContain("'org_'||left(replace(p_org::text,'-',''),8)||'_'||left(replace(gen_random_uuid()::text,'-',''),12)");
   });
 
   it("reconectar canal parceiro preserva a configuração que já existia", () => {
