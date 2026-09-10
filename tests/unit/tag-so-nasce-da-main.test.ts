@@ -22,21 +22,21 @@ function job(yml: string, nome: string): string {
   return linhas.slice(i, fim === -1 ? undefined : fim).join("\n");
 }
 
-describe("nenhuma tag publica sem estar contida na main", () => {
+describe("nenhuma tag publica sem estar contida na production", () => {
   it("o job da trava existe", () => {
-    expect(job(publish, "a-tag-veio-da-main"), "a trava de procedência sumiu de publish-image.yml").not.toBe("");
+    expect(job(publish, "a-tag-veio-da-production"), "a trava de procedência sumiu de publish-image.yml").not.toBe("");
   });
 
   it.each(["build-and-push", "imagem-do-app-sobe"])(
     "%s depende da trava — senão publica antes de ela responder",
     (nome) => {
-      expect(job(publish, nome)).toMatch(/needs:\s*\[[^\]]*a-tag-veio-da-main/);
+      expect(job(publish, nome)).toMatch(/needs:\s*\[[^\]]*a-tag-veio-da-production/);
     },
   );
 
   it("a trava aceita EXATAMENTE `identical` e `behind`, e nada mais", () => {
-    const t = job(publish, "a-tag-veio-da-main");
-    expect(t).toContain("compare/main...");
+    const t = job(publish, "a-tag-veio-da-production");
+    expect(t).toContain("compare/production...");
 
     // Prende o CONJUNTO aceito, não a ausência de uma string. A primeira versão
     // deste caso proibia `/\bahead\|/` — e passou verde quando a sabotagem
@@ -49,7 +49,7 @@ describe("nenhuma tag publica sem estar contida na main", () => {
   });
 
   it("a trava NÃO tem `if:` de job — pulada, ela vira `skipped` e o imagens-ok lê isso como reprovação", () => {
-    const t = job(publish, "a-tag-veio-da-main");
+    const t = job(publish, "a-tag-veio-da-production");
     // `if:` de STEP é permitido; o que não pode é o `if:` na altura do job
     // (quatro espaços), que faz o GitHub pular o job inteiro.
     expect(t.split("\n").filter((l) => /^ {4}if:/.test(l))).toEqual([]);
@@ -79,7 +79,7 @@ describe("a tag nasce no CI, e nunca do GITHUB_TOKEN", () => {
     // não o nome da função — que já mudou uma vez, quando a conferência passou a
     // comparar digest em vez de código de status (issue #488).
     expect(t, "o corte não consulta mais o registro").toMatch(/ghcr\.io\/v2\//);
-    for (const img of ["deskcommcrm", "deskcomm-worker", "deskcomm-scheduler"]) {
+    for (const img of ["conecta-app", "conecta-worker", "conecta-scheduler"]) {
       expect(t, `a conferência não cobre ${img}`).toContain(img);
     }
     expect(t).toMatch(/::error::/);

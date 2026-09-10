@@ -14,7 +14,7 @@ name: Publicar imagem Docker (GHCR)
 on:
   push:
     tags: ["v*"]
-    branches: ["main"]
+    branches: ["production"]
   # NÃO acrescente `release: types: [published]` aqui. Ele já esteve, e o efeito
   # foi medido na v1.3.0: `gh release create` empurra a tag E publica a release,
   # então o MESMO commit foi construído DUAS vezes, com 5 minutos de diferença.
@@ -62,14 +62,14 @@ jobs:
   # já teve na árvore local uma tag `v1.4.0` de um FORK — ela existe hoje
   # renomeada para `jmpo/v1.4.0` justamente para não colidir com a numeração
   # daqui.
-  a-tag-veio-da-main:
+  a-tag-veio-da-production:
     runs-on: ubuntu-latest
     # Sem o bloco, o token herda o default do REPOSITÓRIO — configuração que vive
     # fora do repo. Mesma razão do `permissions: {}` de `imagens-ok`.
     permissions:
       contents: read
     steps:
-      - name: A tag está contida na main?
+      - name: A tag está contida na production?
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -81,21 +81,21 @@ jobs:
             echo "não é push de tag (${GITHUB_REF_TYPE}) — nada a conferir"
             exit 0
           fi
-          estado=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq .status)
-          echo "compare main...${GITHUB_SHA} → ${estado}"
-          # `identical` = a tag é o topo da main; `behind` = está atrás dela, ou
-          # seja, contida. `ahead` e `diverged` são commit que a main não tem.
+          estado=$(gh api "repos/${GITHUB_REPOSITORY}/compare/production...${GITHUB_SHA}" --jq .status)
+          echo "compare production...${GITHUB_SHA} → ${estado}"
+          # `identical` = a tag é o topo da production; `behind` = está atrás dela, ou
+          # seja, contida. `ahead` e `diverged` são commit que a production não tem.
           case "$estado" in
-            identical|behind) echo "ok: o commit da tag está contido na main" ;;
+            identical|behind) echo "ok: o commit da tag está contido na production" ;;
             *)
-              echo "::error::A tag ${GITHUB_REF_NAME} aponta para um commit que a main NÃO contém (${estado})."
-              echo "::error::Publicar isso entregaria ao parque instalado código que nunca passou pelo CI da main."
+              echo "::error::A tag ${GITHUB_REF_NAME} aponta para um commit que a production NÃO contém (${estado})."
+              echo "::error::Publicar isso entregaria ao parque instalado código que nunca passou pelo CI da production."
               exit 1
               ;;
           esac
 
   build-and-push:
-    needs: [a-tag-veio-da-main]
+    needs: [a-tag-veio-da-production]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -108,15 +108,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: deskcommcrm
+          - name: conecta-app
             dockerfile: Dockerfile
-            title: DeskcommCRM
-          - name: deskcomm-worker
+            title: Conecta App
+          - name: conecta-worker
             dockerfile: Dockerfile.worker
-            title: DeskcommCRM worker
-          - name: deskcomm-scheduler
+            title: Conecta Worker
+          - name: conecta-scheduler
             dockerfile: Dockerfile.scheduler
-            title: DeskcommCRM scheduler
+            title: Conecta Scheduler
 
     steps:
       - uses: actions/checkout@v7
@@ -153,9 +153,9 @@ jobs:
             # `enable={{is_default_branch}}` NÃO basta: o metadata-action o
             # considera verdadeiro também num push de TAG, então toda release
             # movia `latest` junto. Isso apagava a distinção que a doutrina
-            # inteira depende — `latest` = topo da main, `stable` = última
+            # inteira depende — `latest` = topo da production, `stable` = última
             # release — e fazia `latest` oscilar entre os dois.
-            type=raw,value=latest,enable=${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'branch' && github.ref_name == 'production' }}
             # `stable` NÃO sai daqui, e a razão é a issue #488. Ele já saiu: era
             # mais um `type=raw` nesta lista, e por isso CADA imagem movia o
             # canal sozinha, ao terminar, sem saber se as irmãs conseguiram.
@@ -218,7 +218,7 @@ jobs:
   # depois disso é esperado (não há Supabase aqui) e não reprova — o que
   # reprova é o processo não chegar a servir.
   imagem-do-app-sobe:
-    needs: [a-tag-veio-da-main]
+    needs: [a-tag-veio-da-production]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -236,12 +236,12 @@ jobs:
           platforms: linux/amd64
           push: false
           load: true
-          tags: deskcomm-smoke:pr
+          tags: conecta-smoke:pr
           build-args: |
             APP_VERSION=smoke
           # Mesmo escopo de cache do build-and-push: as camadas são idênticas,
           # então na prática este job reaproveita aquele build em vez de repeti-lo.
-          cache-from: type=gha,scope=deskcommcrm
+          cache-from: type=gha,scope=conecta-app
 
       - name: O container chega a servir?
         run: |
@@ -252,7 +252,7 @@ jobs:
             -e SUPABASE_SERVICE_ROLE_KEY=chave-de-mentira \
             -e SUPABASE_DB_URL=postgres://u:p@127.0.0.1:5432/postgres \
             -e SENTRY_DSN=off \
-            deskcomm-smoke:pr
+            conecta-smoke:pr
 
           # Espera o boot; falha rápido se o processo morreu (crashloop).
           pronto=nao
@@ -351,7 +351,7 @@ jobs:
           # canal deixaria de ser o mesmo manifesto que a versão.
           dono=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           numero="${VERSAO#v}"
-          for img in deskcommcrm deskcomm-worker deskcomm-scheduler; do
+          for img in conecta-app conecta-worker conecta-scheduler; do
             echo "::group::${img}"
             docker buildx imagetools create \
               --tag "${REGISTRY}/${dono}/${img}:stable" \
@@ -385,3 +385,31 @@ jobs:
           echo "imagem-do-app-sobe: ${{ needs.imagem-do-app-sobe.result }}"
           [ "${{ needs.build-and-push.result }}" = "success" ]
           [ "${{ needs.imagem-do-app-sobe.result }}" = "success" ]
+
+  deploy-dokploy:
+    needs: [build-and-push, imagem-do-app-sobe, promover-stable, imagens-ok]
+    if: always() && github.event_name != 'pull_request' && needs.build-and-push.result == 'success' && needs.imagem-do-app-sobe.result == 'success' && needs.imagens-ok.result == 'success' && (needs.promover-stable.result == 'success' || needs.promover-stable.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Acionar webhook de deploy no Dokploy
+        env:
+          DOKPLOY_WEBHOOK_SECRET: ${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOKPLOY_WEBHOOK_SECRET:-}" ]; then
+            echo "::error::Secret DOKPLOY_DEPLOY_WEBHOOK não configurado no repositório."
+            echo "Configure o secret em Settings > Secrets and variables > Actions > DOKPLOY_DEPLOY_WEBHOOK"
+            exit 1
+          fi
+          echo "Disparando deploy no Dokploy..."
+          status=$(curl -s -o /tmp/dokploy_response.txt -w "%{http_code}" -X POST "$DOKPLOY_WEBHOOK_SECRET")
+          echo "Status HTTP do Dokploy: $status"
+          cat /tmp/dokploy_response.txt || true
+          echo ""
+          if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+            echo "Deploy iniciado com sucesso no Dokploy!"
+          else
+            echo "::error::Falha ao disparar webhook do Dokploy (HTTP $status)"
+            exit 1
+          fi

@@ -8,6 +8,7 @@ import { googleRpc } from "@/lib/agenda/google/sync-store";
 import { canReadCalendar, canWriteCalendar } from "@/lib/agenda/google/transport";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
+import { logger } from "@/lib/logger";
 export async function GET() {
   const requestId = randomUUID();
   const auth = await requireRole("agent", { requestId, resource: "agenda" });
@@ -21,8 +22,13 @@ export async function GET() {
     .eq("user_id", auth.user.id)
     .eq("provider", "google_calendar")
     .order("id");
-  if (error)
-    return fail("internal_error", "Não foi possível carregar suas agendas.", 500, { requestId });
+  if (error) {
+    logger.error("Falha ao buscar calendar_connections", { error, org, requestId });
+    return fail("internal_error", "Não foi possível carregar suas agendas.", 500, {
+      details: error.message,
+      requestId,
+    });
+  }
   if (!connections?.length) return ok({ connections: [], calendars: [] }, { requestId });
   const { data: calendars, error: ce } = await db
     .from("calendar_connection_calendars")
@@ -35,8 +41,13 @@ export async function GET() {
       connections.map((c) => c.id),
     )
     .order("name");
-  if (ce)
-    return fail("internal_error", "Não foi possível carregar suas agendas.", 500, { requestId });
+  if (ce) {
+    logger.error("Falha ao buscar calendar_connection_calendars", { error: ce, org, requestId });
+    return fail("internal_error", "Não foi possível carregar suas agendas.", 500, {
+      details: ce.message,
+      requestId,
+    });
+  }
   return ok(
     {
       connections: connections.map((c) => ({

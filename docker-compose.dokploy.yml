@@ -23,6 +23,7 @@ services:
 
   app:
     mem_limit: 768m
+    image: ${APP_IMAGE:-ghcr.io/danilobsantos/conecta-app:stable}
     build:
       context: .
       dockerfile: Dockerfile
@@ -79,6 +80,7 @@ services:
 
   worker:
     mem_limit: 512m
+    image: ${WORKER_IMAGE:-ghcr.io/danilobsantos/conecta-worker:stable}
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -145,6 +147,7 @@ services:
       - internal
 
   scheduler:
+    image: ${SCHEDULER_IMAGE:-ghcr.io/danilobsantos/conecta-scheduler:stable}
     build:
       context: .
       dockerfile: Dockerfile.scheduler

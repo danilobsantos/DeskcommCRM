@@ -53,7 +53,7 @@ const PUBLICA = fs.readFileSync(path.join(RAIZ, ".github/workflows/publish-image
 const ENV_EXEMPLO = fs.readFileSync(path.join(RAIZ, ".env.hostgator.example"), "utf8");
 
 /** O valor literal que este repositório publica. A âncora. */
-const NAMESPACE_DESTE_REPO = "ghcr.io/melgarafael";
+const NAMESPACE_DESTE_REPO = "ghcr.io/danilobsantos";
 
 /**
  * Um fork que publica as próprias imagens muda `IMG_NS` — e precisa mudar junto
@@ -252,6 +252,7 @@ describe("catraca: ninguém mais repete o namespace", () => {
   const PERMITIDO = new Set([
     "hostgator-setup-kit/_common.sh",
     "docker-compose.prod.yml",
+    "docker-compose.dokploy.yml",
     ".env.hostgator.example",
     "tests/unit/namespace-das-imagens.test.ts",
   ]);

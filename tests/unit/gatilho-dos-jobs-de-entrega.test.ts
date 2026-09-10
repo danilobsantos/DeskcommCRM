@@ -79,10 +79,10 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "tag nasce, nenhuma imagem sai, `stable` congela, e a descoberta é um cliente " +
       "rodando `update.sh` e não recebendo nada.",
   },
-  "publish-image.yml::a-tag-veio-da-main": {
+  "publish-image.yml::a-tag-veio-da-production": {
     condicao: null,
     efeito:
-      "Esta é a trava de procedência: nenhuma tag publica sem estar contida na `main`. " +
+      "Esta é a trava de procedência: nenhuma tag publica sem estar contida na `production`. " +
       "Ela é SEM `if:` de propósito — pulada, ela deixaria `build-and-push` pulado junto " +
       "e o `imagens-ok` leria `skipped` como reprovação.",
   },
@@ -122,6 +122,12 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "Ele precisa de `always()` para poder LER `skipped` dos `needs` e reprovar — e " +
       "desligá-lo (`always() && false`) o torna `skipped` ele mesmo, que a branch " +
       "protection lê como satisfeito.",
+  },
+  "publish-image.yml::deploy-dokploy": {
+    condicao:
+      "always() && github.event_name != 'pull_request' && needs.build-and-push.result == 'success' && needs.imagem-do-app-sobe.result == 'success' && needs.imagens-ok.result == 'success' && (needs.promover-stable.result == 'success' || needs.promover-stable.result == 'skipped')",
+    efeito:
+      "Dispara o webhook de deploy do Dokploy assim que as imagens estiverem publicadas.",
   },
 
   // --- os outros checks obrigatórios ------------------------------------------

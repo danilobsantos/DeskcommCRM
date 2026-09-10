@@ -46,6 +46,7 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { createClient } from "@/lib/supabase/server";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { logger } from "@/lib/logger";
 
 const querySchema = z.object({
   event_type_id: z.string().uuid(),
@@ -117,6 +118,13 @@ export async function GET(req: NextRequest): Promise<Response> {
       jornada_mal_configurada: { codigo: "validation_failed", http: 422 },
       erro_interno: { codigo: "internal_error", http: 500 },
     };
+    if (consulta.codigo === "erro_interno") {
+      logger.error("Falha ao consultar horários livres", {
+        organization_id: activeOrg.orgId,
+        motivo: consulta.motivoParaOperador,
+        requestId,
+      });
+    }
     const { codigo, http } = status[consulta.codigo];
     return fail(codigo, t(consulta.motivoParaOperador), http, { requestId });
   }
