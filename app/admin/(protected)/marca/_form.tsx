@@ -25,12 +25,8 @@ import { useT } from "@/hooks/i18n/useT";
 export interface MarcaGravada {
   readonly app_name: string | null;
   readonly logo_url: string | null;
-  /**
-   * O ARQUIVO subido pela tela. Não vai no `Salvar`: tem rota própria
-   * (`/api/v1/marca/logo`) porque o que atravessa é multipart e porque o
-   * ponteiro é gravado por escritor próprio.
-   */
   readonly logo_path: string | null;
+  readonly logo_path_dark: string | null;
   readonly accent_hex: string | null;
   readonly show_powered_by: boolean;
 }
@@ -46,9 +42,11 @@ interface Props {
    * interface aparece com o nome em texto.
    */
   readonly logoEmVigor: string | null;
+  readonly logoEmVigorDark: string | null;
   /** O que apareceria SEM o arquivo subido — a URL colada no `.env`, se houver. */
   readonly logoDoAmbiente: string | null;
-  readonly origens: { readonly nome: string; readonly logoUrl: string; readonly cor: string };
+  readonly logoDoAmbienteDark: string | null;
+  readonly origens: { readonly nome: string; readonly logoUrl: string; readonly logoUrlDark: string; readonly cor: string };
   readonly definidoNestaTela: boolean;
   readonly fallbackEm: string | null;
   readonly fallbackMotivo: string | null;
@@ -68,7 +66,9 @@ export function FormularioDaMarca({
   gravada,
   nomeEmVigor,
   logoEmVigor,
+  logoEmVigorDark,
   logoDoAmbiente,
+  logoDoAmbienteDark,
   origens,
   definidoNestaTela,
   fallbackEm,
@@ -337,10 +337,10 @@ export function FormularioDaMarca({
       <Card className="space-y-4 p-6">
         <CampoDeLogo
           escopo="instalacao"
-          // Literal, nunca memoizado: a identidade deste objeto é o que diz ao
-          // campo que houve render NOVO do servidor. Ver os Props de CampoDeLogo.
           logoDaCamada={{ url: gravada.logo_path ? logoEmVigor : null }}
+          logoDaCamadaDark={{ url: gravada.logo_path_dark ? logoEmVigorDark : null }}
           logoHerdado={logoDoAmbiente}
+          logoHerdadoDark={logoDoAmbienteDark}
           origemDoHerdado="do arquivo de instalação do servidor"
           nomeEmVigor={nomeEmVigor}
         />

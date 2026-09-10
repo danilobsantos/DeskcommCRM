@@ -9,7 +9,7 @@ import type pg from "pg";
 
 import { extractPdfText } from "@/lib/ai/rag/extractors/pdf";
 import { visaoEmVigor } from "@/lib/ai/pontos/capacidade-em-vigor";
-import { resolveOrgLlmConfig, type LlmEdgeConfig } from "@/lib/agent-engine/edge/llm/credentials";
+import { resolveOrgLlmConfig, LlmNotConfiguredError, type LlmEdgeConfig } from "@/lib/agent-engine/edge/llm/credentials";
 import { createDefaultRegistry } from "@/lib/agent-engine/edge/llm/providers";
 import { createPool } from "@/lib/agent-engine/db/pool";
 import type { EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
@@ -43,6 +43,23 @@ interface MessageRow {
   media_mime: string | null;
   media_storage_path: string | null;
   media_derived_status: string | null;
+}
+
+export function isTransientNetworkError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  const transientPatterns = [
+    "EAI_AGAIN",
+    "ENOTFOUND",
+    "ECONNREFUSED",
+    "ETIMEDOUT",
+    "ECONNRESET",
+    "getaddrinfo",
+    "Connection terminated unexpectedly",
+    "connection timeout",
+    "fetch failed",
+  ];
+  return transientPatterns.some((pattern) => msg.includes(pattern));
 }
 
 export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> {
@@ -99,7 +116,30 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
       openrouterApiKey: process.env.OPENROUTER_API_KEY,
       cacheTtl: "1h",
     };
-    let llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
+    let llm: { provider: string; apiKey: string; defaultModel: string | null } | null = null;
+    try {
+      llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
+    } catch (err) {
+      if (
+        err instanceof LlmNotConfiguredError ||
+        (err instanceof Error &&
+          (err.name === "llm_not_configured" ||
+            err.message.includes("org sem credencial LLM utilizável")))
+      ) {
+        // Org sem credencial utilizável para o provedor padrão (nem fallback de plataforma no .env).
+        // Não pode derrubar a derivação antes de tentar OpenAI (áudio) ou extração de PDF.
+        // Se a mídia for imagem, describeImage avisará na Central via avisarMidiaNaoLida.
+        logger.warn(
+          "[media-derive] org sem credencial LLM utilizável para provedor padrão; tentando fallback defensivo",
+          {
+            organization_id: row.organization_id,
+          },
+        );
+        llm = null;
+      } else {
+        throw err;
+      }
+    }
 
     // ─── O painel de provedores manda AQUI também ────────────────────────────
     //
@@ -139,7 +179,7 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     // (visto nesta VPS: media.derive_requested preso com transcription_401,
     // e o cliente ouvindo "não consigo ouvir áudio" com a chave certa no .env).
     let openaiKey: string | null = null;
-    if (llm.provider === "openai") {
+    if (llm?.provider === "openai") {
       openaiKey = llm.apiKey;
     } else {
       try {
@@ -161,6 +201,13 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     return { consumer_key, status: "ok" };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
+    if (isTransientNetworkError(err)) {
+      logger.warn("[media-derive] transient network/db failure, will retry", {
+        message_id: msg.id,
+        detail,
+      });
+      return { consumer_key, status: "retry", detail };
+    }
     if (row.attempts >= DRAIN_MAX_ATTEMPTS - 1) {
       logger.error("[media-derive] failed permanently", { message_id: msg.id, detail });
       await markFailed();
@@ -198,8 +245,8 @@ async function lerBindingDoPonto(
   return (data as { provider: string; model_id: string; credential_id: string | null } | null) ?? null;
 }
 
-function buildDeriveDeps(
-  llm: { provider: string; apiKey: string; defaultModel: string | null },
+export function buildDeriveDeps(
+  llm: { provider: string; apiKey: string; defaultModel: string | null } | null,
   openaiKey: string | null,
   orgId: string,
   admin: ReturnType<typeof createAdminClient>,
@@ -217,6 +264,7 @@ function buildDeriveDeps(
   // torna o helper uma armadilha que só aparece no CI. O que precisava ser único
   // é a REGRA, e ela é: `visaoEmVigor` decide, aqui e em `media-parts.ts`.
   const catalogo = async (): Promise<boolean | null> => {
+    if (!llm) return null;
     const { data } = await admin
       .from("ai_models")
       .select("supports_vision")
@@ -227,6 +275,14 @@ function buildDeriveDeps(
     return data?.supports_vision ?? null;
   };
   const describeImage: DeriveDeps["describeImage"] = async (buffer, mime) => {
+    if (!llm) {
+      await avisarMidiaNaoLida(
+        orgId,
+        "imagem",
+        "falta cadastrar uma chave de IA (Anthropic, OpenAI ou OpenRouter) com suporte a visão em Agente de IA → Provedores",
+      );
+      return MARCADOR_NAO_LIDA;
+    }
     // ⚠️ A resposta é resolvida AQUI, não na montagem das deps, porque num
     // roteador ela depende do catálogo e a consulta é assíncrona. Antes disto
     // a pergunta ia direto ao registro, que num roteador responde pelo prefixo

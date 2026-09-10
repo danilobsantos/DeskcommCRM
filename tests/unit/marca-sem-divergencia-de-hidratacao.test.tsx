@@ -55,6 +55,9 @@ import type { ActiveOrg, AuthUser } from "@/lib/auth/types";
 import { MarcaDaInstalacaoProvider } from "@/lib/branding/contexto";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/app/ai/agents" }));
+vi.mock("@/lib/theme", () => ({
+  useTheme: () => ({ theme: "light", resolvedTheme: "light", setTheme: vi.fn(), toggle: vi.fn() }),
+}));
 vi.mock("@/app/actions/shell/toggleSidebar", () => ({ toggleSidebar: vi.fn() }));
 vi.mock("@/hooks/i18n/useT", () => ({ useT: () => (chave: string) => chave }));
 // Buscam estado do servidor e não falam de marca — fora do que se mede aqui.
@@ -90,6 +93,7 @@ vi.mock("@/hooks/auth/AuthProvider", () => ({
 const MARCA_DO_BANCO = {
   name: "Sistema do Revendedor",
   logoUrl: "https://cdn.exemplo.test/revendedor.png",
+  logoUrlDark: null,
   initial: "S",
 } as const;
 
@@ -97,6 +101,7 @@ const MARCA_DO_BANCO = {
 const PUBLIC_ENV_DO_NAVEGADOR = {
   APP_NAME: MARCA_DO_BANCO.name,
   APP_LOGO_URL: MARCA_DO_BANCO.logoUrl,
+  APP_LOGO_URL_DARK: MARCA_DO_BANCO.logoUrlDark ?? "",
 };
 
 type PublicEnv = Record<string, string> | undefined;

@@ -57,14 +57,8 @@ import { camadaDaInstalacao, camadaDoAmbiente, resolverMarca } from "./resolve";
 
 export type MarcaDeSaida = {
   readonly nome: string;
-  /**
-   * `null` = não há logo configurado, e quem renderiza NÃO desenha nada no
-   * lugar. Ficou sem leitor nenhum desde que este seam nasceu — os dois
-   * consumidores entraram nesta onda: o topo do convite de time
-   * (`lib/email/templates/invite.ts`) e a casca das telas de acesso
-   * (`app/(public)/layout.tsx`).
-   */
   readonly logoUrl: string | null;
+  readonly logoUrlDark: string | null;
   /** `#hex` sempre — o formato que cliente de e-mail e @react-pdf entendem. */
   readonly accent: string;
   /** Preto ou branco, já com o piso de contraste aplicado. */
@@ -117,6 +111,7 @@ function padraoDoProduto(): MarcaDeSaida {
   return {
     nome: DEFAULT_APP_NAME,
     logoUrl: null,
+    logoUrlDark: null,
     accent: ACCENT_DO_PRODUTO,
     accentFg: melhorFrenteSobre(ACCENT_DO_PRODUTO),
     origens: { nome: "padrao", cor: "padrao" },
@@ -197,18 +192,11 @@ export async function marcaDaSaida(organizationId: string | null): Promise<Marca
     return {
       nome: marca.name,
       logoUrl: marca.logoUrl,
+      logoUrlDark: marca.logoUrlDark,
       accent,
-      // Nunca `#ffffff` fixo: `melhorFrenteSobre` (`contraste.ts:79`) já
-      // decide preto ou branco pelo contraste real. Uma marca amarela colada
-      // pelo revendedor produziria texto branco ilegível no botão — e é
-      // exatamente a marca que se cola sem avisar ninguém.
       accentFg: derivada?.claro.accentFg ?? melhorFrenteSobre(accent),
       origens: {
         nome: marca.origens.nome,
-        // Sem derivação a cor EXIBIDA é a do produto, mesmo que alguma camada
-        // tenha declarado uma semente. Reportar a camada aqui faria o
-        // diagnóstico dizer "a cor veio do banco" enquanto o botão está verde
-        // do produto.
         cor: derivada ? marca.origens.cor : "padrao",
       },
     };

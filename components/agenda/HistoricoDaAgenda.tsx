@@ -147,7 +147,7 @@ export function HistoricoDaAgenda({
                 data-testid={`contador-${a.id}`}
                 className={cn(
                   "rounded-full px-1.5 text-[10px] tabular-nums",
-                  aba === a.id ? "bg-accent-fg/20" : "bg-surface-elevated text-text-subtle",
+                  aba === a.id ? "bg-accent-fg/20 text-accent-fg" : "bg-surface-elevated text-text-subtle",
                 )}
               >
                 {n}

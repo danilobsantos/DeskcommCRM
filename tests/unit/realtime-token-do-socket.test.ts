@@ -206,3 +206,91 @@ describe("a callback do token", () => {
   });
 
 });
+
+describe("a proteção contra join anônimo por corrida de subscribe", () => {
+  it("espera a resolução de auth antes de emitir o subscribe", async () => {
+    let subscribeChamado = false;
+    let authResolvida = false;
+
+    const fakeChannel = {
+      subscribe: vi.fn((_cb?: unknown, _timeout?: unknown) => {
+        subscribeChamado = true;
+        expect(authResolvida, "subscribe foi chamado antes de auth resolver!").toBe(true);
+      }),
+      unsubscribe: vi.fn(),
+    };
+
+    const fakeRealtime = {
+      isConnected: vi.fn(() => false),
+      connect: vi.fn(),
+      _waitForAuthIfNeeded: vi.fn(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        authResolvida = true;
+      }),
+      channel: vi.fn((_topic?: string) => fakeChannel),
+    };
+
+    vi.resetModules();
+    vi.doMock("@supabase/ssr", () => ({
+      createBrowserClient: vi.fn(() => ({ realtime: fakeRealtime })),
+    }));
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://localhost:54321");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-key-de-teste");
+
+    const browser = await import("@/lib/supabase/browser");
+    const client = browser.createClient() as unknown as {
+      realtime: typeof fakeRealtime;
+    };
+
+    const ch = client.realtime.channel("test");
+    ch.subscribe();
+
+    expect(subscribeChamado).toBe(false);
+
+    await vi.waitFor(() => {
+      expect(subscribeChamado).toBe(true);
+    });
+    expect(fakeRealtime.connect).toHaveBeenCalledTimes(1);
+    expect(fakeRealtime._waitForAuthIfNeeded).toHaveBeenCalledTimes(1);
+  });
+
+  it("se o canal for desinscrito antes de auth resolver, cancela o subscribe", async () => {
+    let subscribeChamado = false;
+
+    const fakeChannel = {
+      subscribe: vi.fn((_cb?: unknown, _timeout?: unknown) => {
+        subscribeChamado = true;
+      }),
+      unsubscribe: vi.fn(),
+    };
+
+    const fakeRealtime = {
+      isConnected: vi.fn(() => true),
+      connect: vi.fn(),
+      _waitForAuthIfNeeded: vi.fn(async () => {
+        await new Promise((r) => setTimeout(r, 30));
+      }),
+      channel: vi.fn((_topic?: string) => fakeChannel),
+    };
+
+    vi.resetModules();
+    vi.doMock("@supabase/ssr", () => ({
+      createBrowserClient: vi.fn(() => ({ realtime: fakeRealtime })),
+    }));
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://localhost:54321");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-key-de-teste");
+
+    const browser = await import("@/lib/supabase/browser");
+    const client = browser.createClient() as unknown as {
+      realtime: typeof fakeRealtime;
+    };
+
+    const ch = client.realtime.channel("test");
+    ch.subscribe();
+    ch.unsubscribe();
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(subscribeChamado).toBe(false);
+  });
+});
+

@@ -65,7 +65,7 @@ const camposDoTipo = {
 const criarSchema = z.object(camposDoTipo);
 // `.partial()` em vez de repetir os doze campos como opcionais: repetir criaria
 // duas listas para manter em sincronia, e a segunda envelhece calada.
-const alterarSchema = criarSchema.partial().extend({ id: z.string().uuid() });
+const alterarSchema = criarSchema.partial().extend({ id: z.string().uuid(), is_active: z.boolean().optional() });
 const desativarSchema = z.object({ id: z.string().uuid() });
 
 /**

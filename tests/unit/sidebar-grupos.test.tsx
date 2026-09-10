@@ -20,12 +20,18 @@ const authRef: { user: Pick<AuthUser, "is_platform_admin">; activeOrg: ActiveOrg
   activeOrg: null,
 };
 
+// Caminho controlável por teste (o mock de next/navigation lê daqui).
+const caminhoRef: { caminho: string } = { caminho: "/app/inbox" };
+
 vi.mock("@/hooks/auth/AuthProvider", () => ({
   useAuth: () => authRef,
   usePermission: () => false,
 }));
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/app/inbox",
+  usePathname: () => caminhoRef.caminho,
+}));
+vi.mock("@/lib/theme", () => ({
+  useTheme: () => ({ theme: "light", resolvedTheme: "light", setTheme: vi.fn(), toggle: vi.fn() }),
 }));
 vi.mock("@/components/connections/ConnectionHealthDot", () => ({
   ConnectionHealthDot: () => null,
@@ -149,5 +155,15 @@ describe("Sidebar agrupado", () => {
     expect(screen.getByRole("link", { name: /Inbox/ })).toHaveAttribute("aria-current", "page");
     // "Kanban" saiu da interface; o item da mesma URL agora se chama "Funis".
     expect(screen.getByRole("link", { name: "Funis" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("em /app/agenda/profissionais só o item Profissionais fica ativo (não a Agenda)", () => {
+    // Regressão: `/app/agenda/profissionais` começa com `/app/agenda` — o match
+    // por prefixo marcava os dois. O item mais específico do grupo deve vencer.
+    caminhoRef.caminho = "/app/agenda/profissionais";
+    authRef.activeOrg = { orgId: "org-1", name: "Org", role: "admin", providers_enabled: true };
+    render(<Sidebar collapsed={false} />);
+    expect(screen.getByRole("link", { name: /Profissionais/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /^Agenda$/ })).not.toHaveAttribute("aria-current");
   });
 });

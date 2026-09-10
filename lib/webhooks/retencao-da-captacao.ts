@@ -88,6 +88,7 @@ export async function podarHistoricoDeCaptacao(
     .delete()
     .lt("received_at", limite)
     .select("id")
+    .order("received_at", { ascending: true })
     .limit(lote);
 
   if (error) {

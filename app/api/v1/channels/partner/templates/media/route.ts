@@ -31,6 +31,7 @@ import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { toPublicStorageUrl } from "@/lib/supabase/storage-url";
 
 export const dynamic = "force-dynamic";
 
@@ -101,5 +102,5 @@ export async function POST(req: NextRequest): Promise<Response> {
     return fail("internal_error", "Erro ao preparar o link da imagem.", 500, { requestId });
   }
 
-  return ok({ url: assinada.signedUrl, path: caminho }, { requestId });
+  return ok({ url: toPublicStorageUrl(assinada.signedUrl), path: caminho }, { requestId });
 }

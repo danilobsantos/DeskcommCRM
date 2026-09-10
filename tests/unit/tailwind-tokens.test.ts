@@ -98,6 +98,14 @@ describe("Tailwind 4 — a ponte token → utilitário", () => {
     expect(orfaos, `tokens referenciados no @theme mas ausentes do :root`).toEqual([]);
   });
 
+  it("expõe `--color-accent-fg` no `@theme inline` para que `text-accent-fg` e `bg-accent-fg` existam", () => {
+    // Componentes que pintam fundo `bg-accent` (como botões de visão e abas de status da Agenda)
+    // usam `text-accent-fg` para garantir contraste legível. Sem esse mapeamento no @theme inline,
+    // o Tailwind 4 não gera as classes `text-accent-fg` / `bg-accent-fg`.
+    const tema = bloco("@theme inline");
+    expect(tema).toMatch(/--color-accent-fg\s*:\s*var\(--color-accent-fg\)/);
+  });
+
   it("o `@source` cobre toda pasta que realmente escreve className", () => {
     // `source(none)` desliga a descoberta automática. O preço é este: pasta de
     // UI nova fora da lista perde TODAS as classes, sem erro de build — a tela

@@ -25,6 +25,12 @@ import { MarcaDaInstalacaoProvider } from "@/lib/branding/contexto";
  */
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/app/inbox" }));
+// O tema efetivo é mutável para os casos de logo escuro medirem a troca de
+// logo junto com o tema — o bug reportado ("nem sempre a logo altera junto").
+let temaResolvido: "light" | "dark" = "light";
+vi.mock("@/lib/theme", () => ({
+  useTheme: () => ({ theme: temaResolvido, resolvedTheme: temaResolvido, setTheme: vi.fn(), toggle: vi.fn() }),
+}));
 vi.mock("@/app/actions/shell/toggleSidebar", () => ({ toggleSidebar: vi.fn() }));
 vi.mock("@/hooks/i18n/useT", () => ({ useT: () => (chave: string) => chave }));
 // Os dois buscam estado do servidor e não têm nada a ver com o nome da marca.
@@ -50,6 +56,7 @@ vi.mock("@/components/shell/VersionFooter", () => ({ VersionFooter: () => null }
 let marcaDaInstalacao: Branding = {
   name: "Sistema do Revendedor",
   logoUrl: null,
+  logoUrlDark: null,
   initial: "S",
 };
 
@@ -129,7 +136,8 @@ describe("o logo na barra lateral", () => {
   const LOGO_DA_ORG = "https://cdn.exemplo.test/loja-da-ana.png";
 
   afterEach(() => {
-    marcaDaInstalacao = { name: "Sistema do Revendedor", logoUrl: null, initial: "S" };
+    marcaDaInstalacao = { name: "Sistema do Revendedor", logoUrl: null, logoUrlDark: null, initial: "S" };
+    temaResolvido = "light";
   });
 
   const imagem = () => screen.getByRole("img");
@@ -180,5 +188,45 @@ describe("o logo na barra lateral", () => {
 
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByText("Sistema do Revendedor")).toBeTruthy();
+  });
+
+  it("tema escuro: o logo escuro da ORGANIZAÇÃO substitui o da instalação", () => {
+    // Não-regressão do bug "a logo nem sempre altera junto com o tema": o layout
+    // de `/app` descartava `logoUrlDark` do tenant, então no tema escuro a barra
+    // caía no logo escuro da INSTALAÇÃO mesmo quando a organização tinha o seu.
+    const LOGO_DA_ORG_ESCURO = "https://cdn.exemplo.test/loja-da-ana-dark.png";
+    marcaDaInstalacao = {
+      ...marcaDaInstalacao,
+      logoUrl: LOGO_DA_INSTALACAO,
+      logoUrlDark: "https://cdn.exemplo.test/revendedor-dark.png",
+    };
+    temaResolvido = "dark";
+    contexto = {
+      user: usuario,
+      activeOrg: { ...org, marca: { nome: "Loja da Ana", logoUrl: LOGO_DA_ORG, logoUrlDark: LOGO_DA_ORG_ESCURO } },
+    };
+    renderSidebar({ collapsed: false });
+
+    expect(imagem().getAttribute("src")).toBe(LOGO_DA_ORG_ESCURO);
+    expect(imagem().getAttribute("alt")).toBe("Loja da Ana");
+  });
+
+  it("tema escuro, org sem logo escuro: usa o logo claro dela, não o escuro da instalação", () => {
+    // A personalização do tenant vem PRIMEIRO: se ela só definiu o logo claro,
+    // o tema escuro mostra esse logo claro — não o logo escuro do revendedor,
+    // que é o que a instalação reserva para quem NÃO personalizou.
+    marcaDaInstalacao = {
+      ...marcaDaInstalacao,
+      logoUrl: LOGO_DA_INSTALACAO,
+      logoUrlDark: "https://cdn.exemplo.test/revendedor-dark.png",
+    };
+    temaResolvido = "dark";
+    contexto = {
+      user: usuario,
+      activeOrg: { ...org, marca: { nome: "Loja da Ana", logoUrl: LOGO_DA_ORG } },
+    };
+    renderSidebar({ collapsed: false });
+
+    expect(imagem().getAttribute("src")).toBe(LOGO_DA_ORG);
   });
 });

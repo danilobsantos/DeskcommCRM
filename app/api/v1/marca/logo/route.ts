@@ -85,6 +85,10 @@ export const dynamic = "force-dynamic";
 const escopoSchema = z.enum(["instalacao", "organizacao"]);
 type Escopo = z.infer<typeof escopoSchema>;
 
+/** Qual variante do logo está sendo enviada — light (default) ou dark. */
+const variantSchema = z.enum(["light", "dark"]);
+type Variant = z.infer<typeof variantSchema>;
+
 /**
  * 10 trocas de logo por pessoa a cada 5 min.
  *
@@ -187,22 +191,24 @@ async function abrirContexto(escopo: Escopo): Promise<{ ctx: Contexto } | { recu
 }
 
 /** O caminho HOJE gravado, lido do BANCO. Nunca do cliente. */
-async function caminhoGravado(ctx: Contexto): Promise<string | null> {
+async function caminhoGravado(ctx: Contexto, variant: Variant): Promise<string | null> {
   const admin = createAdminClient();
+  const coluna = variant === "dark" ? "logo_path_dark" : "logo_path";
   if (ctx.escopo === "instalacao") {
     const { data } = await admin
       .from("platform_branding")
-      .select("logo_path")
+      .select(coluna)
       .eq("id", 1)
       .maybeSingle();
-    return (data as { logo_path?: string | null } | null)?.logo_path ?? null;
+    return (data as Record<string, string | null> | null)?.[coluna] ?? null;
   }
   const { data } = await admin
     .from("organizations")
     .select("settings")
     .eq("id", ctx.orgId)
     .maybeSingle();
-  return marcaDaOrganizacaoDeSettings(data?.settings ?? null)?.logo_path ?? null;
+  const marca = marcaDaOrganizacaoDeSettings(data?.settings ?? null);
+  return (marca as Record<string, string | null> | null)?.[coluna === "logo_path_dark" ? "logo_path_dark" : "logo_path"] ?? null;
 }
 
 /**
@@ -218,12 +224,13 @@ async function caminhoGravado(ctx: Contexto): Promise<string | null> {
  * outros fazem read-modify-write do jsonb inteiro. O `row_count` de volta é o que
  * distingue "gravou" de "não gravou".
  */
-async function gravarCaminho(ctx: Contexto, caminho: string | null): Promise<Recusa | null> {
+async function gravarCaminho(ctx: Contexto, caminho: string | null, variant: Variant): Promise<Recusa | null> {
   const admin = createAdminClient();
+  const coluna = variant === "dark" ? "logo_path_dark" : "logo_path";
   if (ctx.escopo === "instalacao") {
     const { error } = await admin
       .from("platform_branding")
-      .upsert({ id: 1, logo_path: caminho, seeded_from_env: false }, { onConflict: "id" });
+      .upsert({ id: 1, [coluna]: caminho, seeded_from_env: false }, { onConflict: "id" });
     if (error) {
       logger.error("[marca/logo] gravação da instalação falhou", {
         codigo: error.code,
@@ -231,27 +238,23 @@ async function gravarCaminho(ctx: Contexto, caminho: string | null): Promise<Rec
       });
       return { codigo: "internal_error", mensagem: "Erro ao gravar o logo.", status: 500 };
     }
-    // A troca aparece no próximo render sem esperar o TTL de 30s do memo.
-    //
-    // ⚠️ Isto já foi um NO-OP, e o comentário aqui dizia "no MESMO processo que
-    // renderiza (na VPS há um processo de app só)" — verdade sobre o processo,
-    // falsidade sobre o que importa. O Turbopack compila esta rota e as telas em
-    // dois runtimes com caches de módulo próprios, então esta chamada zerava uma
-    // cópia do memo que nenhuma tela lê. O memo passou a morar em `globalThis`;
-    // a medição do build está no comentário dele, em `lib/branding/instalacao.ts`.
     invalidarMarcaDaInstalacao();
     return null;
   }
 
+  // Para a organização, a RPC aceita os dois caminhos. No RPC, `null` significa
+  // APAGAR aquele campo — não "não tocar". Então a variante oposta recebe o
+  // valor ATUAL (lido do banco), não null: senão subir o dark apagaria o light
+  // (e o DELETE de uma variante apagaria as duas).
+  const isDark = variant === "dark";
+  const oposta = await caminhoGravado(ctx, isDark ? "light" : "dark");
   const { data, error } = await admin.rpc("fn_definir_logo_da_organizacao", {
     p_org: ctx.orgId,
     p_actor: ctx.userId,
-    p_path: caminho,
+    p_path: isDark ? oposta : caminho,
+    p_path_dark: isDark ? caminho : oposta,
   });
   if (error) {
-    // Os dois códigos que a função levanta de propósito. `42501` é papel — e
-    // chegar aqui significa que o snapshot de membership do gate acima estava
-    // velho, que é exatamente o caso que a duplicação no banco existe para pegar.
     if (error.code === "42501") {
       return {
         codigo: "forbidden_role",
@@ -273,8 +276,6 @@ async function gravarCaminho(ctx: Contexto, caminho: string | null): Promise<Rec
     });
     return { codigo: "internal_error", mensagem: "Erro ao gravar o logo.", status: 500 };
   }
-  // A CATRACA DA ISSUE #144: `data` é o `row_count`. 0 significa que a
-  // organização não casou o filtro, e sem esta linha a tela diria "salvo".
   if (data !== 1) {
     return { codigo: "internal_error", mensagem: "O logo não foi gravado.", status: 500 };
   }
@@ -367,6 +368,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     return fail("validation_failed", "Campo 'escopo' inválido.", 422, { requestId });
   }
 
+  const variantLido = variantSchema.safeParse(form?.get("variant") ?? "light");
+  const variant: Variant = variantLido.success ? variantLido.data : "light";
+
   const aberto = await abrirContexto(escopoLido.data);
   if ("recusa" in aberto) {
     return fail(aberto.recusa.codigo, aberto.recusa.mensagem, aberto.recusa.status, { requestId });
@@ -420,7 +424,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   }
 
-  const anterior = await caminhoGravado(ctx);
+  const anterior = await caminhoGravado(ctx, variant);
   const caminho = caminhoNovoDoLogo(ctx.prefixo, extensaoDe(tipo));
 
   const { error: erroUp } = await createAdminClient()
@@ -431,11 +435,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     return fail("internal_error", "Erro ao subir o logo.", 500, { requestId });
   }
 
-  const recusa = await gravarCaminho(ctx, caminho);
+  const recusa = await gravarCaminho(ctx, caminho, variant);
   if (recusa) {
-    // A gravação falhou DEPOIS do upload: o arquivo novo é que vira órfão, não o
-    // antigo. Tentar apagá-lo aqui seria o caminho certo e não é obrigatório —
-    // por isso é `void`, sem `await` no caminho de erro.
     void createAdminClient().storage.from(BUCKET_DE_LOGOS).remove([caminho]);
     return fail(recusa.codigo, recusa.mensagem, recusa.status, { requestId });
   }
@@ -444,7 +445,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   await registrarAuditoria(ctx, req, requestId, "definido");
 
   return ok(
-    { logo_path: caminho, logo_url: urlPublicaDoLogo(caminho, baseDoStorage()) },
+    { logo_path: caminho, logo_url: urlPublicaDoLogo(caminho, baseDoStorage()), variant },
     { requestId },
   );
 }
@@ -462,10 +463,14 @@ export async function DELETE(req: NextRequest): Promise<Response> {
 
   const requestId = randomUUID();
 
-  const escopoLido = escopoSchema.safeParse(new URL(req.url).searchParams.get("escopo"));
+  const params = new URL(req.url).searchParams;
+  const escopoLido = escopoSchema.safeParse(params.get("escopo"));
   if (!escopoLido.success) {
     return fail("validation_failed", "Parâmetro 'escopo' inválido.", 422, { requestId });
   }
+
+  const variantLido = variantSchema.safeParse(params.get("variant") ?? "light");
+  const variant: Variant = variantLido.success ? variantLido.data : "light";
 
   const aberto = await abrirContexto(escopoLido.data);
   if ("recusa" in aberto) {
@@ -485,12 +490,12 @@ export async function DELETE(req: NextRequest): Promise<Response> {
     });
   }
 
-  const anterior = await caminhoGravado(ctx);
-  const recusa = await gravarCaminho(ctx, null);
+  const anterior = await caminhoGravado(ctx, variant);
+  const recusa = await gravarCaminho(ctx, null, variant);
   if (recusa) return fail(recusa.codigo, recusa.mensagem, recusa.status, { requestId });
 
   await apagarAnterior(ctx, anterior);
   await registrarAuditoria(ctx, req, requestId, "removido");
 
-  return ok({ logo_path: null, logo_url: null }, { requestId });
+  return ok({ logo_path: null, logo_url: null, variant }, { requestId });
 }

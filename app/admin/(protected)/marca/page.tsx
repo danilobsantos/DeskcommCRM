@@ -95,17 +95,16 @@ export default async function Page() {
           app_name: linha?.app_name ?? null,
           logo_url: linha?.logo_url ?? null,
           logo_path: linha?.logo_path ?? null,
+          logo_path_dark: linha?.logo_path_dark ?? null,
           accent_hex: linha?.accent_hex ?? null,
-          // `true` é o default da coluna: sem linha ainda, é o valor que o
-          // `upsert` gravaria de qualquer forma.
           show_powered_by: linha?.show_powered_by ?? true,
         }}
         nomeEmVigor={marca.name}
         logoEmVigor={marca.logoUrl}
+        logoEmVigorDark={marca.logoUrlDark}
         logoDoAmbiente={semOArquivo.logoUrl}
+        logoDoAmbienteDark={semOArquivo.logoUrlDark}
         origens={marca.origens}
-        // `seeded_from_env` ligado significa que a linha é cópia do arquivo de
-        // instalação, não escolha de alguém nesta tela. Sem linha, também não é.
         definidoNestaTela={linha !== null && !linha.seeded_from_env}
         fallbackEm={instanteLegivel(linha?.fallback_at ?? null, tagDeIdioma(idioma))}
         fallbackMotivo={linha?.fallback_reason ?? null}

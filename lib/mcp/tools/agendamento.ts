@@ -23,6 +23,7 @@ import {
   horariosLivresDaOrg,
   idDoTipoPorSlug,
   listaAgendamentos,
+  listaProfissionais,
   listaTiposDeAtendimento,
   MAXIMO_DE_DIAS,
 } from "@/lib/agenda/consulta";
@@ -140,6 +141,33 @@ export const crmListEventTypes: McpToolDefinition<typeof tiposShape> = {
   },
 };
 
+const listarProfissionaisShape = {};
+
+export const crmListProviders: McpToolDefinition<typeof listarProfissionaisShape> = {
+  name: "crm_list_providers",
+  description:
+    "Lista os PROFISSIONAIS EXTERNOS da organização — dentistas, corretores, consultores — que têm agenda própria " +
+    "mas NÃO têm conta de usuário no sistema. Use quando o cliente quer ser atendido por um profissional " +
+    "específico, ou quando `owner_user_id` não se aplica. NÃO confunda com `crm_list_team_members`, que lista os " +
+    "atendentes-usuários da equipe. O `id` que volta aqui é o que você passa em `provider_id` de " +
+    "`crm_find_free_slots` e `crm_book_appointment`. Lista vazia = a organização não tem profissionais externos " +
+    "cadastrados — ofereça horário pelos atendentes de sempre.",
+  inputSchema: listarProfissionaisShape,
+  category: "read",
+  requiresRole: "agent",
+  requiresScope: "mcp:read",
+  handler: async (_input, ctx) => {
+    const profissionais = await listaProfissionais(ctx.supabase, ctx.organizationId);
+    return {
+      profissionais: profissionais.map((p) => ({
+        id: p.id,
+        nome: p.nome,
+        especialidades: p.especialidades,
+      })),
+    };
+  },
+};
+
 const horariosLivresShape = {
   event_type_slug: z
     .string()
@@ -170,6 +198,11 @@ const horariosLivresShape = {
     .optional()
     .describe("dia civil pedido pelo cliente, em YYYY-MM-DD. Use para uma data específica; o servidor aplica o fuso da agenda."),
   owner_user_id: z.string().uuid().optional(),
+  provider_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("o id do PROFISSIONAL externo (dentista sem login) quando a consulta é com ele e não com um atendente-usuário. Use com exclusividade: não mande junto com owner_user_id."),
   limite: z
     .number()
     .int()
@@ -227,7 +260,8 @@ export const crmFindFreeSlots: McpToolDefinition<typeof horariosLivresShape> = {
 
     const consulta = await horariosLivresDaOrg(ctx.supabase, ctx.organizationId, {
       eventTypeSlug: input.event_type_slug,
-      ownerUserId: input.owner_user_id ?? null,
+      ownerUserId: input.provider_id ? null : input.owner_user_id ?? null,
+      ownerProviderId: input.provider_id ?? null,
       de,
       ate,
       agora,
@@ -429,6 +463,11 @@ const marcarShape = {
   starts_at: z.string().datetime({ offset: true }).describe("o instante exato do início, vindo de `crm_find_free_slots`"),
   contact_id: z.string().uuid().describe("quem vai ser atendido"),
   owner_user_id: z.string().uuid().optional(),
+  provider_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("o PROFISSIONAL externo dono da consulta. Use com exclusividade: não mande junto com owner_user_id."),
   title: z.string().min(1).max(200).optional(),
   notes: z.string().max(2000).optional(),
 };
@@ -466,6 +505,7 @@ export const crmBookAppointment: McpToolDefinition<typeof marcarShape> = {
           starts_at: input.starts_at,
           contact_id: input.contact_id,
           ...(input.owner_user_id ? { owner_user_id: input.owner_user_id } : {}),
+          ...(input.provider_id ? { provider_id: input.provider_id } : {}),
           ...(input.title ? { title: input.title } : {}),
           ...(input.notes ? { notes: input.notes } : {}),
         },

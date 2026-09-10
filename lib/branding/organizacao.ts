@@ -78,12 +78,8 @@ export function marcaDaOrganizacaoDeSettings(settings: unknown): MarcaDaOrganiza
   return {
     app_name: texto(envelope.app_name),
     accent_hex: texto(envelope.accent_hex),
-    // Caminho no bucket, nunca URL — quem grava é `fn_definir_logo_da_organizacao`
-    // (migration 0158), que assevera o prefixo contra o `organization_id` DENTRO
-    // do banco. `texto()` pelo mesmo motivo dos outros dois: um `logo_path` que
-    // não fosse string desceria para `logoDaCamada` e viraria uma URL montada a
-    // partir de um objeto.
     logo_path: texto(envelope.logo_path),
+    logo_path_dark: texto(envelope.logo_path_dark),
   };
 }
 

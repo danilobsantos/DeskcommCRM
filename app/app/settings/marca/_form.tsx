@@ -57,6 +57,7 @@ interface Props {
     readonly app_name: string | null;
     readonly accent_hex: string | null;
     readonly logo_path: string | null;
+    readonly logo_path_dark: string | null;
   };
   /** A linha da marca da INSTALAÇÃO — a camada logo abaixo desta. */
   readonly instalacao: LinhaDaInstalacao;
@@ -64,6 +65,7 @@ interface Props {
   readonly ambiente: {
     readonly APP_NAME?: string;
     readonly APP_LOGO_URL?: string;
+    readonly APP_LOGO_URL_DARK?: string;
     readonly APP_ACCENT_HEX?: string;
   };
 }
@@ -150,16 +152,14 @@ export function FormularioDaMarcaDaOrganizacao({ gravada, instalacao, ambiente }
           camadaDaOrganizacao({
             app_name: nomeLimpo.length > 0 ? nomeLimpo : null,
             accent_hex: hexLimpo.length > 0 ? hexLimpo : null,
-            // GRAVADO, não digitado: o logo não é campo deste formulário — ele
-            // já está no banco quando esta tela renderiza. Entra na prévia para
-            // que o bloco "de onde vem cada coisa" possa responder sobre ele.
             logo_path: gravada.logo_path,
+            logo_path_dark: gravada.logo_path_dark,
           }),
           ...abaixo,
         ],
         REGUA_DO_PRODUTO,
       ),
-    [nomeLimpo, hexLimpo, gravada.logo_path, abaixo],
+    [nomeLimpo, hexLimpo, gravada.logo_path, gravada.logo_path_dark, abaixo],
   );
 
   // A MESMA serialização, com o MESMO escopo, que o layout de `/app` roda no
@@ -345,14 +345,14 @@ export function FormularioDaMarcaDaOrganizacao({ gravada, instalacao, ambiente }
         */}
         <CampoDeLogo
           escopo="organizacao"
-          // Literal, nunca memoizado: a identidade deste objeto é o que diz ao
-          // campo que houve render NOVO do servidor. Ver os Props de CampoDeLogo.
           logoDaCamada={{
             url: resolvida.origens.logoUrl === "organizacao" ? resolvida.logoUrl : null,
           }}
+          logoDaCamadaDark={{
+            url: resolvida.origens.logoUrlDark === "organizacao" ? resolvida.logoUrlDark : null,
+          }}
           logoHerdado={semAOrganizacao.logoUrl}
-          // Texto-fonte cru, não traduzido aqui: CampoDeLogo já chama t()
-          // internamente sobre esta prop (ver componente compartilhado).
+          logoHerdadoDark={semAOrganizacao.logoUrlDark}
           origemDoHerdado="de quem instalou o sistema"
           nomeEmVigor={resolvida.name}
         />
