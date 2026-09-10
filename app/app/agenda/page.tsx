@@ -80,6 +80,8 @@ export default async function AgendaPage() {
   // A semana da âncora, que é o que a grade abre por padrão.
   const inicio = startOfWeek(new Date(), { weekStartsOn: 0 });
   const fim = addDays(inicio, 7);
+  // Semente ampla para o histórico ("Próximos") e navegação imediata sem refetch.
+  const fimSemente = addDays(inicio, 35);
 
   // `.eq("organization_id", activeOrg.orgId)` em TODA consulta desta página, e
   // não só a RLS. A `fn_user_org_ids()` que as policies usam devolve TODAS as
@@ -102,7 +104,7 @@ export default async function AgendaPage() {
       )
       .eq("organization_id", activeOrg.orgId)
       .gte("starts_at", inicio.toISOString())
-      .lt("starts_at", fim.toISOString())
+      .lt("starts_at", fimSemente.toISOString())
       .order("starts_at"),
   ]);
 
@@ -198,6 +200,15 @@ export default async function AgendaPage() {
     .eq("active", true)
     .order("name");
 
+  // Atendentes com disponibilidade explicitamente desabilitada (is_available = false).
+  const { data: atendentesIndisponiveis } = await supabase
+    .from("attendant_availability")
+    .select("user_id")
+    .eq("organization_id", activeOrg.orgId)
+    .eq("is_available", false);
+
+  const usuariosIndisponiveis = (atendentesIndisponiveis ?? []).map((a) => a.user_id);
+
   return (
     <AgendaClient
       fusoDeApresentacao={fusoDeApresentacao}
@@ -205,6 +216,7 @@ export default async function AgendaPage() {
       contaConectada={conexoes?.map(c => c.account_email).join(", ") || null}
       enderecoDeRetorno={enderecoDeRetorno()}
       faltaNoGoogle={faltaNoGoogle}
+      usuariosIndisponiveisIniciais={usuariosIndisponiveis}
       profissionaisIniciais={(profissionais ?? []).map((p) => ({
         id: p.id,
         nome: p.name,

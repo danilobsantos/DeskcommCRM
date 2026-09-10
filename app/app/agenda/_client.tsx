@@ -10,7 +10,7 @@ import { addDays, endOfMonth, format, startOfDay, startOfMonth, startOfWeek } fr
 import * as React from "react";
 
 import { AvisoDaConexaoGoogle } from "./_components/AvisoDaConexaoGoogle";
-import { CartaoDaConexaoGoogle } from "./_components/CartaoDaConexaoGoogle";
+
 
 import { AgendaInterativa } from "@/components/agenda/AgendaInterativa";
 import { FiltroDePessoas } from "@/components/agenda/FiltroDePessoas";
@@ -75,6 +75,7 @@ export function AgendaClient({
   tiposIniciais,
   agendamentosIniciais,
   profissionaisIniciais,
+  usuariosIndisponiveisIniciais,
 }: {
   fusoDeApresentacao: string | null;
   googleConfigurado: boolean;
@@ -96,14 +97,21 @@ export function AgendaClient({
   agendamentosIniciais: Agendamento[];
   /** Profissionais externos ativos (migration 9003) — viram Pessoas na grade. */
   profissionaisIniciais: Array<{ id: string; nome: string }>;
+  /** Atendentes com disponibilidade desabilitada (is_available = false). */
+  usuariosIndisponiveisIniciais?: string[];
 }) {
   const localeDaData = useLocaleDeData();
   const t = useT();
   const { data: pessoasDaEquipe = [] } = usePessoasDaAgenda();
+  const indisponiveisSet = React.useMemo(
+    () => new Set(usuariosIndisponiveisIniciais ?? []),
+    [usuariosIndisponiveisIniciais],
+  );
   // Os profissionais externos entram no mesmo roster, com trilha estável do id —
   // a grade já resolve a cor de um bloco pelo `responsavelId` casando a Pessoa.
+  // Atendentes com disponibilidade desabilitada saem da lista de atendimento.
   const pessoas = [
-    ...pessoasDaEquipe,
+    ...pessoasDaEquipe.filter((p) => !indisponiveisSet.has(p.id)),
     ...profissionaisIniciais.map((p) => ({
       id: p.id,
       nome: p.nome,
@@ -251,6 +259,23 @@ export function AgendaClient({
     return { de: inicio.toISOString(), ate: fim.toISOString() };
   }, [visao, ancora]);
 
+  // A janela de busca abrange a visão visível mais os próximos 35 dias para que
+  // compromissos futuros (como os de profissionais externos na próxima semana)
+  // apareçam no histórico ("Próximos") e estejam prontos ao avançar o período.
+  const recorteDaBusca = React.useMemo(() => {
+    const inicio =
+      visao === "mes"
+        ? startOfMonth(ancora)
+        : visao === "semana"
+          ? startOfWeek(ancora, { weekStartsOn: 0 })
+          : startOfDay(ancora);
+    const fimGrade =
+      visao === "mes" ? addDays(endOfMonth(ancora), 1) : addDays(inicio, visao === "semana" ? 7 : 1);
+    const fimFuturo = addDays(new Date(), 35);
+    const fim = fimGrade.getTime() > fimFuturo.getTime() ? fimGrade : fimFuturo;
+    return { de: inicio.toISOString(), ate: fim.toISOString() };
+  }, [visao, ancora]);
+
   // A janela que o SERVIDOR pintou. Sem esta comparação, navegar para outra
   // semana mostraria os compromissos DESTA por um instante — o fallback estaria
   // respondendo a uma pergunta que ninguém fez. Cair para lista vazia é pior de
@@ -265,11 +290,11 @@ export function AgendaClient({
   // três, e eu só olhei dois.
   //
   // `useState(() => x)[0]` faz o mesmo congelamento sem tocar em ref no render.
-  const [recorteDoServidor] = React.useState(() => recorteDaGrade);
+  const [recorteDoServidor] = React.useState(() => recorteDaBusca);
   const naJanelaDoServidor =
-    recorteDaGrade.de === recorteDoServidor.de && recorteDaGrade.ate === recorteDoServidor.ate;
+    recorteDaBusca.de >= recorteDoServidor.de && recorteDaBusca.ate <= recorteDoServidor.ate;
 
-  const { data: agendamentosVivos } = useAgendamentos(recorteDaGrade);
+  const { data: agendamentosVivos } = useAgendamentos(recorteDaBusca);
   const todos: Agendamento[] =
     agendamentosVivos ?? (naJanelaDoServidor ? agendamentosIniciais : []);
 
@@ -333,13 +358,6 @@ export function AgendaClient({
         <EntradaDaAgenda onContext={onContext}/>
       </React.Suspense>
 
-      <CartaoDaConexaoGoogle
-        configurado={googleConfigurado}
-        falta={faltaNoGoogle}
-        linkDeConfiguracao={linkDeConfiguracaoDoGoogle}
-        contaConectada={contaConectada}
-        enderecoDeRetorno={enderecoDeRetorno}
-      />
 
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="min-w-0">
@@ -857,6 +875,8 @@ export function AgendaClient({
         recorte={recorteDaGrade}
         tipos={tiposIniciais.map((t) => ({ id: t.id, nome: t.nome, duracaoMin: t.duracaoMin }))}
         tipo={tipo ? { id: tipo.id, duracaoMin: tipo.duracaoMin } : null}
+        providerId={responsavelDaMarcacao.tipo === "profissional" ? responsavelDaMarcacao.id : undefined}
+        ownerUserId={responsavelDaMarcacao.tipo === "usuario" && responsavelDaMarcacao.id ? responsavelDaMarcacao.id : undefined}
         onEscolherTipo={setTipoId}
         onMarcarEm={(instante) => {
           setHorarioEscolhido({ instante, rotulo: format(new Date(instante), "HH:mm") });

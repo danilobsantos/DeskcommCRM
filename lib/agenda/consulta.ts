@@ -194,7 +194,7 @@ export async function horariosLivresDaOrg(
         .maybeSingle()
     : await supabase
         .from("attendant_availability")
-        .select("schedule")
+        .select("schedule, is_available")
         .eq("organization_id", organizationId)
         .eq("user_id", donoUserId)
         .maybeSingle();
@@ -222,6 +222,17 @@ export async function horariosLivresDaOrg(
       ok: false,
       codigo: "jornada_mal_configurada",
       motivoParaOperador: "O profissional deste agendamento está inativo.",
+      motivoParaCliente: RECUSA_PARA_O_CLIENTE + " " + NAO_OFERECA,
+    };
+  }
+  if (
+    !donoProviderId &&
+    (disponibilidade as { is_available?: boolean } | null)?.is_available === false
+  ) {
+    return {
+      ok: false,
+      codigo: "jornada_mal_configurada",
+      motivoParaOperador: "O atendente deste agendamento não está disponível no momento (is_available=false).",
       motivoParaCliente: RECUSA_PARA_O_CLIENTE + " " + NAO_OFERECA,
     };
   }
@@ -437,6 +448,7 @@ export interface ParametrosDaLista {
   de?: string | null;
   ate?: string | null;
   ownerUserId?: string | null;
+  providerId?: string | null;
   situacao?: SituacaoDoAgendamento | null;
   limite: number;
 }
@@ -467,7 +479,12 @@ export async function listaAgendamentos(
   params: ParametrosDaLista,
 ): Promise<ResultadoDaLista> {
   const temAlvo = Boolean(
-    params.contactId || params.leadId || params.dia || params.ownerUserId || (params.de && params.ate),
+    params.contactId ||
+      params.leadId ||
+      params.dia ||
+      params.ownerUserId ||
+      params.providerId ||
+      (params.de && params.ate),
   );
   if (!temAlvo) {
     // Sem recorte, isto varreria a agenda inteira da organização. Recusa com ensino,
@@ -553,6 +570,7 @@ export async function listaAgendamentos(
   if (idsPorLead) q = q.in("id", idsPorLead);
   if (params.contactId) q = q.eq("contact_id", params.contactId);
   if (params.ownerUserId) q = q.eq("owner_user_id", params.ownerUserId);
+  if (params.providerId) q = q.eq("provider_id", params.providerId);
   if (params.situacao) q = q.eq("status", params.situacao);
   if (params.dia) {
     q = q.gte("starts_at", `${params.dia}T00:00:00Z`).lt("starts_at", `${params.dia}T23:59:59.999Z`);
