@@ -402,8 +402,17 @@ jobs:
             echo "Configure o secret em Settings > Secrets and variables > Actions > DOKPLOY_DEPLOY_WEBHOOK"
             exit 1
           fi
-          echo "Disparando deploy no Dokploy..."
-          status=$(curl -s -o /tmp/dokploy_response.txt -w "%{http_code}" -X POST "$DOKPLOY_WEBHOOK_SECRET")
+          BRANCH_NAME="production"
+          if [ "${{ github.ref_type }}" = "branch" ]; then
+            BRANCH_NAME="${{ github.ref_name }}"
+          fi
+
+          echo "Disparando deploy no Dokploy para a branch: $BRANCH_NAME..."
+          status=$(curl -s -o /tmp/dokploy_response.txt -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Event: push" \
+            -d "{\"ref\":\"refs/heads/$BRANCH_NAME\",\"after\":\"${GITHUB_SHA}\",\"head_commit\":{\"id\":\"${GITHUB_SHA}\",\"message\":\"Deploy automatico da branch $BRANCH_NAME via GitHub Actions\"}}" \
+            "$DOKPLOY_WEBHOOK_SECRET")
           echo "Status HTTP do Dokploy: $status"
           cat /tmp/dokploy_response.txt || true
           echo ""
