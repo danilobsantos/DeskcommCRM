@@ -31,6 +31,14 @@ describe("reserva WAHA preserva pré-go-live da main", () => {
     const first=await reserve(org,key,onboarding);
     expect(first.channel.organization_id).toBe(org);
     expect(first.channel.metadata).toEqual({...metadataInicialDoCanal(),...(onboarding?{onboarding:true}:{})});
+    // O WAHA (devlikeapro/waha:latest-2026.7.2) valida `name` de sessão com
+    // @MaxLength(54). `org_<32>_<32>` = 69 tomava 400 em todo POST /api/sessions.
+    // Formato canônico pós-merge main→dev (2026-09-11): `org_<8>_<12>` (25 chars,
+    // migration 9005 — a última da cadeia, então é o que o banco de verdade gera;
+    // a 0237 do upstream gerava `org_<8>_<32>` e também cabia, mas a cadeia
+    // termina na 9005). O que este invariante prende é teto + estabilidade.
+    expect(first.channel.waha_session_name).toMatch(/^org_[0-9a-f]{8}_[0-9a-f]{12}$/);
+    expect(first.channel.waha_session_name.length).toBeLessThanOrEqual(54);
     await pool.query("select fn_finish_channel_connection($1,$2,$3,'FAILED','connection_repair_required')",[org,first.receipt_id,first.lease_token]);
     // Mudança explícita do operador não pode ser desfeita por retry de conexão.
     const mode=onboarding?"pre_go_live":"open";
