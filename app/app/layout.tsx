@@ -20,12 +20,26 @@ import {
 import { ConexaoCaidaBanner } from "@/components/app/ConexaoCaidaBanner";
 import { IdiomaProvider } from "@/lib/i18n/IdiomaProvider";
 import { listarConexoesCaidas, type ConexaoCaida } from "@/lib/channels/health";
+import { VoiceCallProvider } from "@/components/voice/VoiceCallContext";
+import { acessoFoiRevogado } from "@/lib/auth/vinculo-revogado";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await loadAuthUser();
   if (!user) redirect("/login");
 
   let activeOrg = await resolveActiveOrg(user);
+
+  // Sem organização ativa existem DOIS estados, e eles pedem telas opostas:
+  //
+  //  - nunca teve  → provisionamento que falhou no signup. `/get-started`
+  //                  existe exatamente para isso e continua sendo o caminho.
+  //  - teve e foi revogada → precisa SABER disso (tela /acesso-revogado).
+  //
+  // A consulta só roda neste ramo, que é o raro: quem tem organização não paga
+  // nada por ela.
+  if (!activeOrg && !user.support && (await acessoFoiRevogado(user.id))) {
+    redirect("/acesso-revogado");
+  }
 
   const admin = createAdminClient();
 
@@ -65,13 +79,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       paPromise,
       brandInstalacaoPromise,
     ]);
+  /**
+   * A cor desta organização, serializada, ou `null` quando ela não tem uma.
+   *
+   * Resolvida no MESMO `settings` que o gate de onboarding logo abaixo já lê —
+   * zero consulta nova. A ordem das camadas mora em `lib/branding/organizacao.ts`.
+   */
+  let cssDaOrganizacao: string | null = null;
 
   // EPIC-02: gate /app/* on completed onboarding.
   // EPIC-11: gate /app/* on org not being suspended (S-11.08).
   if (orgRow && !orgRow.onboarded_at && !user.support) redirect("/onboarding");
   if (orgRow?.status === "suspended") redirect("/account-suspended");
-
-  let cssDaOrganizacao: string | null = null;
 
   if (activeOrg) {
     // G4-02: expõe visibility_mode ao client (inbox decide visões visíveis).
@@ -131,6 +150,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     : null;
 
   // A decisão lê a política da plataforma e da empresa sem reconsultar `settings`
+  // (ambas já vieram no Promise.all acima — `requiresMfa` do upstream faria as
+  // mesmas leituras de novo). Núcleo idêntico (`exigeCadastroDeMfa`).
   const plataformaExige = (paRes?.data?.mfa_required as boolean | undefined) ?? null;
   const empresaExige = empresaExigeMfa(orgRow?.settings);
   const needsMfaGate = exigeCadastroDeMfa({
@@ -140,7 +161,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     empresaExige,
   });
 
-  const shell = <AppShell sidebarCollapsed={collapsed}>{children}</AppShell>;
+  const shell = (
+    <VoiceCallProvider>
+      <AppShell sidebarCollapsed={collapsed}>{children}</AppShell>
+    </VoiceCallProvider>
+  );
 
   return (
     // O idioma envolve a árvore inteira e recebe o código PRONTO — ele não

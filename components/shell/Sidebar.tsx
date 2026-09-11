@@ -9,6 +9,8 @@ import { toggleSidebar } from "@/app/actions/shell/toggleSidebar";
 import { useAuth } from "@/hooks/auth/AuthProvider";
 import { ConnectionHealthDot } from "@/components/connections/ConnectionHealthDot";
 import { VersionFooter } from "@/components/shell/VersionFooter";
+import { LogotipoDoProduto, SimboloDoProduto } from "@/components/branding/MarcaDoProduto";
+import { marcaEhADoProduto } from "@/lib/branding";
 import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
 import { useTheme } from "@/lib/theme";
 import { GRUPO_NO_RODAPE, sidebarGroups } from "@/lib/navigation/registry";
@@ -107,12 +109,16 @@ export function SidebarContent({
   // (instalação) só aparece para quem NÃO personalizou. Antes, no tema escuro, uma
   // organização com só o logo claro caía no logo escuro da instalação — a logo
   // "nem sempre" acompanhava o tema. `|| null` mantém a regra de que string vazia
-  // é AUSÊNCIA (mesma semântica de `resolveBranding` e `primeiroDefinido`).
+  // é AUSÊNCIA (mesma semântica de `resolveBranding` e `primeiroDefinido`,
+  // e do `||` do upstream: com `??` um `""` apagaria o logo do revendedor).
   const orgLight = activeOrg?.marca?.logoUrl || null;
   const orgDark = activeOrg?.marca?.logoUrlDark || null;
   const logoLight = orgLight ?? brand.logoUrl;
   const logoDark = orgDark ?? orgLight ?? brand.logoUrlDark ?? brand.logoUrl;
   const logo = resolvedTheme === "dark" ? (logoDark ?? logoLight) : logoLight;
+  // Só quando NINGUÉM — nem a instalação, nem a organização — pôs marca própria:
+  // é a condição de `lib/branding.ts`, avaliada sobre o que a barra vai mostrar.
+  const marcaDoProduto = marcaEhADoProduto({ name: nome, logoUrl: logo ?? null });
 
   return (
     <>
@@ -130,10 +136,18 @@ export function SidebarContent({
           // desconhecida; forçar as duas distorceria o logo de quem configurou.
           // eslint-disable-next-line @next/next/no-img-element
           <img src={logo} alt={nome} className="h-7 w-auto max-w-[10rem] object-contain" />
+        ) : marcaDoProduto ? (
+          // O desenho do produto, inline (ver `components/branding/MarcaDoProduto.tsx`):
+          // logotipo com a barra aberta, só o símbolo com ela recolhida.
+          collapsed ? (
+            <SimboloDoProduto nome={nome} className="h-8 w-8" />
+          ) : (
+            <LogotipoDoProduto nome={nome} className="h-8 w-auto" />
+          )
         ) : (
           <span className={cn("font-semibold tracking-tight", collapsed && "sr-only")}>{nome}</span>
         )}
-        {collapsed && (
+        {collapsed && !marcaDoProduto && (
           <span aria-hidden className="text-lg font-bold text-primary">
             {/* Spread e não `[0]`: nome começando com emoji ou acento composto
                 quebraria no meio do code point. Mesma regra de `resolveBranding`

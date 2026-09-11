@@ -70,6 +70,18 @@ if [ "$HAS_ORG" = "t" ] && [ "$COUNT_APPLIED" -lt 50 ]; then
   ) | psql "$DB_URL" >/dev/null
 fi
 
+# 2b. Remediação do merge main→dev de 2026-09-11 (colisão de timestamp):
+# a 9003 da dev nasceu com o mesmo timestamp da 0233 do upstream
+# (20260907120000) e o carimbo é por timestamp — instalações que já aplicaram
+# a 9003 têm essa versão registrada e PULARIAM a 0233 (schema da voz ausente).
+# A 9003 foi renumerada para 20260911130000; apaga-se o carimbo obsoleto para
+# as duas reaplicarem (ambas idempotentes: if-not-exists / drop-if-exists).
+STALE_9003=$(psql "$DB_URL" -t -A -c "SELECT name FROM supabase_migrations.schema_migrations WHERE version = '20260907120000';")
+if [ "$STALE_9003" = "9003_agenda_profissionais_externos" ]; then
+  echo "🔧 [db-migrate] Carimbo obsoleto da 9003 detectado — liberando 0233 + 9003 renumerada..."
+  psql "$DB_URL" -c "DELETE FROM supabase_migrations.schema_migrations WHERE version = '20260907120000';" >/dev/null
+fi
+
 # 3. Busca lista de versões já aplicadas no banco
 APPLIED=$(psql "$DB_URL" -t -A -c "SELECT version FROM supabase_migrations.schema_migrations;")
 
