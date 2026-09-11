@@ -1,0 +1,10 @@
+# Graphify: evidências visuais de testes/docs não entram no grafo de código
+evidence/
+e2e-artifacts/
+docs/evidence/
+.superpowers/evidence/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
