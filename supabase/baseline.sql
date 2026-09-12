@@ -24135,3 +24135,51 @@ update public.conversations
 
 notify pgrst, 'reload schema';
 
+-- ---- catálogo Gemini: remove mortos da 2.x (migration 9007) ----
+-- Espelho da migration: `gemini-2.0-flash` desligado pelo Google em 01/06/2026;
+-- a família 2.5 aposenta em 20/10/2026. Deprecar some da tela e preserva o
+-- histórico de custo — nunca DELETE. Preço do 3.5-flash-lite assumido
+-- ($0,15/$1,25; fontes divergem), ver cabeçalho da migration.
+update public.ai_models set deprecated_at = now()
+ where provider = 'google'
+   and model_id in ('gemini-2.0-flash',
+                    'gemini-2.5-flash',
+                    'gemini-2.5-flash-lite',
+                    'gemini-2.5-pro')
+   and deprecated_at is null;
+
+insert into public.ai_models
+  (provider, model_id, display_name, description, context_window,
+   input_price_per_million_cents, output_price_per_million_cents,
+   supports_tools, supports_vision, released_at)
+values
+  ('google', 'gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite',
+   'Substituto oficial do 2.0-flash; o piso de custo da geração 3 para alto volume.',
+   1000000, 25, 150, true, true, '2026-05-07'),
+  ('google', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite',
+   'Alto volume e baixa latência na geração 3.',
+   1000000, 15, 125, true, true, '2026-07-21')
+on conflict (provider, model_id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  context_window = excluded.context_window,
+  input_price_per_million_cents = excluded.input_price_per_million_cents,
+  output_price_per_million_cents = excluded.output_price_per_million_cents,
+  supports_tools = excluded.supports_tools,
+  supports_vision = excluded.supports_vision,
+  released_at = excluded.released_at,
+  deprecated_at = null;
+
+insert into public.ai_pricing
+  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
+values
+  ('gemini-3.1-flash-lite', 25, 150, 'catálogo 9007'),
+  ('gemini-3.5-flash-lite', 15, 125, 'catálogo 9007 — $0,15/$1,25 assumido, fontes divergem ($0,30/$2,50 em outras); rever')
+on conflict (model) do update set
+  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
+  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
+  notes = excluded.notes,
+  superseded_at = null;
+
+notify pgrst, 'reload schema';
+
