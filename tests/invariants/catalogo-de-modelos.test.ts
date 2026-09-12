@@ -122,12 +122,12 @@ describe("catálogo de modelos", () => {
       `select m.model_id || ' (preço veio de: ' || coalesce(p.notes, '(sem linha)') || ')'
          from public.ai_models m
          left join public.ai_pricing p on p.model = m.model_id
-        where m.deprecated_at is null
-          and m.model_id in ('claude-opus-5','claude-sonnet-5','claude-opus-4-8',
-                             'gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','gpt-5.5',
-                             'gpt-5.5-pro','gpt-5.4','gpt-5.4-mini','gpt-5.4-nano',
-                             'gpt-5.4-pro','gemini-3.1-pro-preview','gemini-3.5-flash',
-                             'gemini-2.5-flash-lite','gemini-2.0-flash')
+         where m.deprecated_at is null
+           and m.model_id in ('claude-opus-5','claude-sonnet-5','claude-opus-4-8',
+                              'gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','gpt-5.5',
+                              'gpt-5.5-pro','gpt-5.4','gpt-5.4-mini','gpt-5.4-nano',
+                              'gpt-5.4-pro','gemini-3.1-pro-preview','gemini-3.5-flash',
+                              'gemini-3.1-flash-lite','gemini-3.5-flash-lite')
           and (p.model is null or p.notes not like 'catálogo%')
         order by 1;`,
     );
@@ -150,6 +150,7 @@ describe("catálogo de modelos", () => {
       "gpt-5.6-terra",
       "gpt-5.6-luna",
       "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
     ]) {
       expect(ids.has(esperado), `${esperado} ausente do catálogo`).toBe(true);
     }
