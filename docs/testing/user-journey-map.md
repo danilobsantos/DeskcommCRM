@@ -168,6 +168,11 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J5.7 | Revogar atendente | perde acesso na hora (próxima navegação) |
 | J5.8 | Revogar último admin | bloqueado com explicação |
 | J5.9 | Link de convite expirado/adulterado | tela clara, sem stack |
+| J5.10 `[P0]` | Convite pendente aparece na aba **Membros** | seção "Convites" lista e-mail, papel, interface, status (Pendente/Aceito/Expirado/Revogado), data de envio e de expiração, quem convidou · antes só existia numa lista efêmera dentro do modal "Convidar membros" · `lib/team/convite-status.test.ts` + `tests/e2e/invite-lifecycle.spec.ts` casos 13–16 |
+| J5.11 `[P0]` | E-mail do convite **não saiu** (VPS sem Resend) | a linha mostra "Não saiu" + botão **Copiar link** ali mesmo (usa `team_invites.email_dispatched`, antes só legível no `api_audit_log`) — o admin não fica achando que enviou |
+| J5.12 | Admin **revoga** um convite pendente | `POST /api/v1/team/invites/[id]/revoke` marca `revoked_at`; o aceite passa a recusar o token mesmo dentro da validade; audita `member.invite_revoked` |
+| J5.13 | Admin **reenvia** um convite | `POST /api/v1/team/invites/[id]/resend` re-assina o mesmo `invite_id`, renova 24h, audita `member.invited`; reconvidar o mesmo e-mail pendente pela tela de convite RENOVA a linha (índice único parcial) |
+| J5.14 | Manager vê a lista, mas não as ações | leitura é `team_invites_select` (manager+); reenviar/revogar são admin-only (403) |
 
 ## J6 — Webhooks: receber, automatizar, provar `[P0]`
 

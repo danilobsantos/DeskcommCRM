@@ -4,6 +4,7 @@ set -euo pipefail
 
 COMPOSE="docker-compose.prod.yml"
 COMPOSE_TRAEFIK="docker-compose.traefik.yml"
+COMPOSE_NPM="docker-compose.npm.yml"
 
 # Proxy reverso desta instalação. Vem do .env (load_env), com default 'caddy' —
 # ou seja, toda instalação que já existe continua exatamente como está.
@@ -12,26 +13,30 @@ COMPOSE_TRAEFIK="docker-compose.traefik.yml"
 #   traefik → a VPS JÁ tem um Traefik nessas portas (Hostinger, Coolify,
 #             Dokploy...). Entra o override, que desliga o Caddy e publica o app
 #             por labels. Ver o cabeçalho de docker-compose.traefik.yml.
+#   npm     → a VPS JÁ tem um Nginx Proxy Manager nessas portas (não lê labels
+#             Docker — o roteamento é manual, na UI dele). Entra o override, que
+#             desliga o Caddy e garante o `app` na rede/IP que o Proxy Host
+#             espera. Ver o cabeçalho de docker-compose.npm.yml.
 #
 # Todo `docker compose` do kit passa por aqui: com proxy externo, um comando sem
-# o override subiria o Caddy e ele iria bater de frente com o Traefik.
+# o override subiria o Caddy e ele iria bater de frente com o proxy da hospedagem.
 dc() {
-  if [ "${REVERSE_PROXY:-caddy}" = "traefik" ]; then
-    docker compose -f "$COMPOSE" -f "$COMPOSE_TRAEFIK" "$@"
-  else
-    docker compose -f "$COMPOSE" "$@"
-  fi
+  case "${REVERSE_PROXY:-caddy}" in
+  traefik) docker compose -f "$COMPOSE" -f "$COMPOSE_TRAEFIK" "$@" ;;
+  npm)     docker compose -f "$COMPOSE" -f "$COMPOSE_NPM" "$@" ;;
+  *)       docker compose -f "$COMPOSE" "$@" ;;
+  esac
 }
 
 # A mesma lista de -f, como texto, para as mensagens que ensinam o comando ao
 # dono. Se a mensagem omitisse o override numa instalação com proxy externo, o
 # próprio dono derrubaria o site seguindo a instrução do kit.
 dc_files() {
-  if [ "${REVERSE_PROXY:-caddy}" = "traefik" ]; then
-    printf -- '-f %s -f %s' "$COMPOSE" "$COMPOSE_TRAEFIK"
-  else
-    printf -- '-f %s' "$COMPOSE"
-  fi
+  case "${REVERSE_PROXY:-caddy}" in
+  traefik) printf -- '-f %s -f %s' "$COMPOSE" "$COMPOSE_TRAEFIK" ;;
+  npm)     printf -- '-f %s -f %s' "$COMPOSE" "$COMPOSE_NPM" ;;
+  *)       printf -- '-f %s' "$COMPOSE" ;;
+  esac
 }
 
 # ── A rede externa por onde o proxy de fora alcança o app ────────────────────
@@ -171,6 +176,18 @@ veredito_rede_do_proxy() {  # veredito_rede_do_proxy <driver encontrado> <rede> 
 # Define TRAEFIK_NETWORK quando ela vem vazia — de propósito, é o mesmo default
 # que o instalador grava no .env.
 garantir_rede_do_proxy() {
+  # NPM nunca é criado por nós: a rede é sempre do stack do Proxy Manager (ou de
+  # quem hospeda), então não há "nossa" bridge para oferecer — só checar e, se
+  # sumiu (prune, down -v), morrer explicando em vez do opaco erro do compose.
+  if [ "${REVERSE_PROXY:-caddy}" = "npm" ]; then
+    local rede
+    rede="${PROXY_NETWORK_NAME:-proxy_network}"
+    docker network inspect "$rede" >/dev/null 2>&1 && return 0
+    die "A rede Docker '$rede' (a do Nginx Proxy Manager) não existe.
+Rode 'docker network ls', identifique a rede do seu NPM (Settings > a que o
+contêiner dele já está conectado) e ponha PROXY_NETWORK_NAME=<nome> no .env
+antes de tentar de novo."
+  fi
   [ "${REVERSE_PROXY:-caddy}" = "traefik" ] || return 0
   local nossa drv erro
   nossa="$(rede_reservada_do_proxy)"
@@ -795,7 +812,39 @@ setup_event_log_drain_cron() {
   if crontab -l 2>/dev/null | grep -qF -e "$url_drain"; then first_time=0; fi
 
   local cron_line="* * * * * curl -fsS -H \"Authorization: Bearer ${secret}\" \"${url_drain}\" >/dev/null 2>&1 ${marcador}"
-  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
+  # ⚠️ `|| true` OBRIGATÓRIO, e não é defensividade: `crontab -l` sai com status
+  # 1 (sem stdout, só um aviso no stderr) quando o usuário NUNCA teve crontab —
+  # o caso NORMAL de uma VPS recém-provisionada, que é o caso normal de quem
+  # instala este produto. Sob `set -o pipefail` (linha 3 deste arquivo, e
+  # `install.sh:12`) esse 1 vaza pelo pipe mesmo com os estágios seguintes
+  # bem-sucedidos — `false | true` também sai 1 —, e o `set -e` mata o
+  # instalador AQUI, no bloco 11, DEPOIS de a linha do cron já ter sido gravada.
+  # O dono vê o script morrer sem mensagem, numa instalação que na verdade
+  # funcionou.
+  #
+  # ACHADO DUAS VEZES, POR DUAS PESSOAS QUE NÃO SE FALARAM, NO MESMO DIA:
+  # @luiscgc91 (PR #683) e @rafaelbatistazz (issue #715 + PR #726), os dois
+  # instalando numa VPS limpa. Os dois escreveram EXATAMENTE a mesma linha. Isso
+  # não é redundância — é a medida de quanto o defeito doía, e a razão de este
+  # comentário ser longo: ele existe para a terceira pessoa não precisar
+  # descobrir de novo.
+  #
+  # A issue #715 descreve o sintoma como quem o viveu: o instalador para logo
+  # depois de "✓ chave de cifra ativa no banco", cai na tela "A instalação
+  # parou", e os contêineres estão SAUDÁVEIS. Rodar de novo passa — porque aí o
+  # crontab já não está vazio, o que faz o defeito parecer fantasma.
+  #
+  # Reproduzido com um dublê de `crontab` que sai 1 no `-l`: sem o `|| true`, a
+  # linha seguinte a este bloco nunca é alcançada. Vigiado por DOIS testes, de
+  # propósito: `tests/shell/cron-sem-crontab-previo.test.sh` mede cada função
+  # isolada, e o bloco `cron numa VPS sem crontab nenhum` de
+  # `hostgator-setup-kit/test-validators.sh` (de @rafaelbatistazz) roda AS DUAS
+  # no mesmo processo — como o `install.sh` faz — e confere que as duas linhas
+  # foram gravadas.
+  #
+  # Stdin vazio para o `cron_merge` é exatamente o que "sem crontab prévio" deve
+  # produzir — o comportamento não muda, só o status.
+  ( { crontab -l 2>/dev/null || true; } | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
   c_grn "✓ automações ativas (cron do event-log-drain, a cada minuto)"
 
   if [ "$first_time" = 1 ]; then
@@ -834,7 +883,9 @@ setup_update_agent_cron() {
   local legado="cd ${PROJECT_DIR} && bash hostgator-setup-kit/agent.sh"
   local marcador; marcador="$(cron_tag agent)"
   local cron_line="*/5 * * * * ${legado} >/dev/null 2>&1 ${marcador}"
-  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
+  # Mesmo motivo do drain acima, e é por isso que o conserto é nos DOIS: a
+  # primeira instalação passa pelos dois blocos na mesma rodada.
+  ( { crontab -l 2>/dev/null || true; } | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
   c_grn "✓ atualização pela tela ativa (agente a cada 5 minutos)"
 }
 

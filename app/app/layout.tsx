@@ -89,6 +89,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // EPIC-02: gate /app/* on completed onboarding.
   // EPIC-11: gate /app/* on org not being suspended (S-11.08).
+  // NOTA DO MERGE main→dev (2026-09-14): o upstream reestruturou este trecho
+  // para um paralelo-de-4 com `requiresMfa` — que refaz por dentro as 2 leituras
+  // (platform_admins + settings) que o paralelo-de-6 acima já trouxe. Mantido o
+  // paralelo da dev: mesmas decisões, zero consulta nova.
   if (orgRow && !orgRow.onboarded_at && !user.support) redirect("/onboarding");
   if (orgRow?.status === "suspended") redirect("/account-suspended");
 

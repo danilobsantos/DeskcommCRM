@@ -18,10 +18,27 @@ import type { InvitePayload } from "@/lib/auth/invite-token";
  *   entra num CRM vazio, e essa foi a experiência medida de dois convidados
  *   reais.
  *
- * Aqui NÃO se decide se o convite vale — quem decide é quem chama, e os dois
+ * A VALIDADE DO TOKEN não se decide aqui — quem decide é quem chama, e os dois
  * chamam `verifyInviteToken` antes (o segundo por dentro de
  * `decidirConviteDoSignup`, que ainda confere o e-mail contra o que o provedor
- * confirmou). Este módulo é o efeito, não a autoridade.
+ * confirmou).
+ *
+ * A LINHA DE `team_invites` (migration 0238), sim, é tratada aqui — e precisa
+ * ser, nos dois sentidos:
+ *
+ * - **Revogação.** Um convite cancelado na tela de Equipe mantém assinatura e
+ *   validade boas no token; o que diz que ele morreu é a linha. Deixar essa
+ *   checagem no botão de aceite (onde ela nasceu, no PR #664) daria acesso a
+ *   um convite revogado a quem chegasse pelo OUTRO caminho — confirmar o
+ *   e-mail —, que é justamente o caminho de quem ainda não tem conta, ou seja,
+ *   o caso comum.
+ * - **Fechamento.** Sem gravar `accepted_at`, o convite de quem entrou pelo
+ *   e-mail fica listado como **Pendente para sempre** na aba Membros, e o
+ *   administrador reenvia ou revoga um convite que já foi aceito.
+ *
+ * Convite sem linha (emitido antes desta migration, ou instalação cujo envio
+ * não tinha service-role) segue o fluxo: a checagem de revogação de MEMBERSHIP
+ * dentro de `fn_accept_team_invite` continua valendo.
  */
 
 export type ResultadoDoConvite =
@@ -35,9 +52,20 @@ export async function aplicarConvite(params: {
 }): Promise<ResultadoDoConvite> {
   const { userId, payload, requestId } = params;
 
+  const admin = createAdminClient();
+
+  // Convite REVOGADO na tela de Equipe. Sem linha, segue — ver o cabeçalho.
+  const { data: linhaDoConvite } = await admin
+    .from("team_invites")
+    .select("revoked_at")
+    .eq("id", payload.invite_id)
+    .eq("organization_id", payload.organization_id)
+    .maybeSingle();
+  if (linhaDoConvite?.revoked_at) return { ok: false, motivo: "invalid_or_expired" };
+
   // Org, papel e convidador vêm EXCLUSIVAMENTE do token assinado; o usuário,
   // de quem chamou. Nada aqui vem de body de requisição.
-  const { data: resultado, error } = await createAdminClient().rpc("fn_accept_team_invite", {
+  const { data: resultado, error } = await admin.rpc("fn_accept_team_invite", {
     p_interface_settings: payload.interface_settings ?? { preset: "completa" },
     p_user: userId,
     p_org: payload.organization_id,
@@ -67,6 +95,17 @@ export async function aplicarConvite(params: {
       requestId: requestId ?? null,
     });
   }
+
+  // Fecha o convite na aba Membros. Idempotente: `is("accepted_at", null)` faz
+  // o replay do mesmo token não mexer em nada, e `is("revoked_at", null)` impede
+  // que uma corrida marque como aceito um convite cancelado no mesmo instante.
+  await admin
+    .from("team_invites")
+    .update({ accepted_at: new Date().toISOString(), accepted_by: userId })
+    .eq("id", payload.invite_id)
+    .eq("organization_id", payload.organization_id)
+    .is("accepted_at", null)
+    .is("revoked_at", null);
 
   // Sem isto a pessoa entra sem organização escolhida e o app não sabe qual
   // mostrar — o mesmo motivo pelo qual o botão de aceite sempre gravou aqui.

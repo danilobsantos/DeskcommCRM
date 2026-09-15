@@ -106,8 +106,15 @@ function makeSupabase(
       }
       if (table === 'conversations') {
         return {
-          select: (cols?: string) => ({
-            eq: () => ({
+          select: (cols?: string) => {
+            // Encadeável SEM LIMITE de propósito: a consulta da conversa filtra
+            // por id E por `organization_id` (este handler também roda com o
+            // client de service role, que bypassa RLS). Um dublê que fixa a
+            // quantidade de `eq` quebra quando a consulta ganha o filtro que
+            // fecha o vazamento entre organizações — com um erro que não fala do
+            // comportamento sob teste.
+            const cadeia: Record<string, unknown> = {
+              eq: () => cadeia,
               maybeSingle: async () =>
                 opts.semColunaArquivada === true && (cols ?? '').includes('archived_at')
                   ? {
@@ -118,8 +125,9 @@ function makeSupabase(
                       },
                     }
                   : { data: conversation, error: null },
-            }),
-          }),
+            };
+            return cadeia;
+          },
           update: () => ({ eq: async () => ({ error: null }) }),
         };
       }

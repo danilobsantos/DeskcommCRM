@@ -60,8 +60,14 @@ export async function GET(req: NextRequest): Promise<Response> {
         { requestId },
       );
     }
+    // `.message` sozinho esconde a causa real (lição do upstream em produção em
+    // 2026-09-12) — `code`/`details`/`hint` contam a história. Via `logger`,
+    // não `console.error` (doutrina de log do repo).
     logger.error("[attendant-heartbeat] sweep failed (select)", {
       error: selectError.message,
+      code: selectError.code,
+      details: selectError.details,
+      hint: selectError.hint,
       requestId,
     });
     return fail("internal_error", "Failed to sweep stale heartbeats.", 500, { requestId });

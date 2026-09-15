@@ -48,11 +48,11 @@ export async function acceptInviteAction(token: string): Promise<AcceptInviteRes
     return { ok: false, error: "email_mismatch", expectedEmail: payload.email };
   }
 
-  // Org/papel/convidador vêm exclusivamente do token assinado; usuário do JWT.
-  // O efeito mora em `lib/auth/aplicar-convite.ts` porque `/auth/confirm`
-  // também precisa dele: quem confirma o e-mail vindo de um convite já provou
-  // tudo o que este botão prova, e ficava parado numa tela pedindo mais um
-  // clique.
+  // Org, papel e convidador vêm EXCLUSIVAMENTE do token assinado; usuário do JWT.
+  //
+  // A linha de `team_invites` (a revogação e o fechamento do convite) é tratada
+  // dentro de `aplicarConvite`, e não aqui: `/auth/confirm` chama a MESMA função
+  // e precisa das duas coisas. Ver o cabeçalho de `lib/auth/aplicar-convite.ts`.
   const resultado = await aplicarConvite({ userId: user.id, payload });
   if (!resultado.ok) return { ok: false, error: resultado.motivo };
 
