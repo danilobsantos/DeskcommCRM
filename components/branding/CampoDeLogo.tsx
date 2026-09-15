@@ -312,37 +312,24 @@ export function CampoDeLogo({
                 style={{ backgroundColor: fundo }}
               >
                 {logo ? (
-                  // O chip claro na aparência escura é o MESMO que a barra
-                  // lateral e a tela de entrada aplicam de verdade
-                  // (`components/shell/Sidebar.tsx`, `app/(public)/layout.tsx`):
-                  // esta prévia deixaria de ser prévia se mostrasse o logo cru
-                  // onde o app real desenha um chip por baixo. Aqui não dá pra
-                  // usar a variante `dark:` do Tailwind — as duas caixas
-                  // renderizam lado a lado no MESMO tema real, simulando os
-                  // dois via `style` — então a condição é o rótulo da caixa, não
-                  // o tema da página. `logo` é o logo DO TEMA da caixa
-                  // (claro/escuro por tenant) — sem ele, o tenant não via o
-                  // próprio logo escuro nunca.
-                  <span
-                    className={
-                      rotulo === t("Aparência escura")
-                        ? "rounded-md bg-white px-2 py-1 shadow-sm"
-                        : undefined
-                    }
-                  >
-                    {/* <img> e não next/image pelo mesmo motivo da barra lateral e da
-                      tela de acesso: a URL é do projeto de quem hospeda, e
-                      `next/image` exige allowlist de domínios fechada em BUILD — a
-                      imagem pré-buildada do self-host recusaria o domínio do
-                      operador. Altura fixa e largura livre para não distorcer arte
-                      de proporção desconhecida. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={logo}
-                      alt={nomeEmVigor}
-                      className="max-h-12 w-auto max-w-full object-contain"
-                    />
-                  </span>
+                  // SEM chip claro de propósito (divergência assumida do upstream
+                  // #659, mesma da barra lateral e da tela de entrada): `logo`
+                  // já é a arte DO TEMA da caixa (claro/escuro por tenant) — a
+                  // premissa do chip ("uma arte só, pensada para fundo claro")
+                  // não vale, e a moldura branca mentiria na prévia sobre o que
+                  // o app real desenha.
+                  // <img> e não next/image pelo mesmo motivo da barra lateral e da
+                  // tela de acesso: a URL é do projeto de quem hospeda, e
+                  // `next/image` exige allowlist de domínios fechada em BUILD — a
+                  // imagem pré-buildada do self-host recusaria o domínio do
+                  // operador. Altura fixa e largura livre para não distorcer arte
+                  // de proporção desconhecida.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={logo}
+                    alt={nomeEmVigor}
+                    className="max-h-12 w-auto max-w-full object-contain"
+                  />
                 ) : (
                   <span
                     className="text-sm font-semibold tracking-tight"
