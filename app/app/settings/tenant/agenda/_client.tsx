@@ -28,6 +28,7 @@ export interface TipoRow {
   is_active: boolean;
   reminder_enabled: boolean;
   reminder_minutes_before: number;
+  reminder_extra_offsets_minutes: number[] | null;
 }
 
 /**
@@ -131,8 +132,47 @@ function LembreteDoCompromisso({ tipo }: { tipo: TipoRow }) {
           className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text disabled:opacity-50"
         />
       </label>
+      <label className="flex flex-col gap-1 text-xs text-text-muted">
+        {t("E de novo, quantos minutos antes")}
+        <input
+          name="reminder_extra_offsets_minutes"
+          type="text"
+          inputMode="numeric"
+          disabled={!ligado}
+          placeholder="180"
+          defaultValue={(tipo.reminder_extra_offsets_minutes ?? []).join(", ")}
+          data-testid={`editar-lembrete-extras-${tipo.id}`}
+          className="rounded-md border border-border bg-surface-elevated p-2 text-sm text-text disabled:opacity-50"
+        />
+        <span className="text-[11px] text-text-muted">
+          {t("Opcional. Até 3, separados por vírgula. Ex.: 180 avisa de novo 3 horas antes.")}
+        </span>
+      </label>
     </>
   );
+}
+
+/**
+ * "180, 60" → `[180, 60]`.
+ *
+ * Campo de texto porque a tela precisa alcançar os três degraus que a rota
+ * aceita, e três caixas numéricas para um recurso opcional é mais formulário do
+ * que o recurso merece.
+ *
+ * O que NÃO é número some em silêncio de propósito: a recusa com nome é da
+ * rota, que fala sobre faixa e quantidade. Aqui a limpeza é só de pontuação —
+ * vírgula sobrando, espaço, ponto-e-vírgula de quem copiou de outro lugar.
+ */
+export function lerDegrausExtras(bruto: string | null): number[] {
+  if (!bruto) return [];
+  return [
+    ...new Set(
+      bruto
+        .split(/[,;]/)
+        .map((p) => Number(p.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0),
+    ),
+  ].sort((a, b) => b - a);
 }
 
 export function TiposDeAgendamentoClient({
@@ -377,7 +417,11 @@ export function TiposDeAgendamentoClient({
                   data-testid={`lembrete-ligado-${tipo.id}`}
                   className="text-xs tabular-nums text-text-muted"
                 >
-                  {t("avisa o cliente")} {tipo.reminder_minutes_before} min {t("antes")}
+                  {t("avisa o cliente")}{" "}
+                  {[tipo.reminder_minutes_before, ...(tipo.reminder_extra_offsets_minutes ?? [])]
+                    .sort((a, b) => b - a)
+                    .join(", ")}{" "}
+                  min {t("antes")}
                 </span>
               ) : null}
               {!tipo.is_active ? <span className="text-xs text-text-subtle">{t("desativado")}</span> : null}
@@ -469,6 +513,16 @@ export function TiposDeAgendamentoClient({
                         // O campo desabilitado também não aparece, e omitir é o
                         // certo: desligar o aviso não pode apagar a antecedência
                         // que alguém escolheu (ver `LembreteDoCompromisso`).
+                        // Mesmo desenho do campo de minutos: com o aviso
+                        // desligado o campo não entra no `FormData` e a lista
+                        // guardada fica intacta para quando alguém religar.
+                        ...(dados.get("reminder_enabled") === "on"
+                          ? {
+                              reminder_extra_offsets_minutes: lerDegrausExtras(
+                                String(dados.get("reminder_extra_offsets_minutes") ?? ""),
+                              ),
+                            }
+                          : {}),
                         ...(dados.get("reminder_minutes_before")
                           ? {
                               reminder_minutes_before: Number(

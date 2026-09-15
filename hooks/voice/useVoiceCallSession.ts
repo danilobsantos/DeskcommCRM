@@ -79,6 +79,30 @@ interface VoiceCallsListResponse {
   data: VoiceCallRow[];
 }
 
+/**
+ * A resposta de `POST /voice/calls` COMPLETA a linha que o Realtime já trouxe,
+ * em vez de substituí-la.
+ *
+ * A ponte de eventos grava a ligação ~200 ms antes de a rota responder, e o
+ * Realtime entrega essa linha primeiro. Substituir pela resposta trocava uma
+ * linha mais fresca por outra mais velha — e, enquanto a resposta não trazia
+ * `owner_user_id`, `minha` virava `false` e o painel de quem discou sumia, com
+ * o botão de desligar junto. Vale o que o Realtime já tem; a resposta só
+ * preenche o que ele trouxe nulo (`created_by`, por exemplo, que a ponte não
+ * conhece).
+ */
+export function mesclarRespostaDaChamada(
+  atual: VoiceCallRow | null,
+  resposta: VoiceCallRow,
+): VoiceCallRow {
+  if (!atual || atual.id !== resposta.id) return resposta;
+  const mesclada = { ...resposta } as Record<string, unknown>;
+  for (const [chave, valor] of Object.entries(atual)) {
+    if (valor !== null && valor !== undefined) mesclada[chave] = valor;
+  }
+  return mesclada as unknown as VoiceCallRow;
+}
+
 /** Chamada que a UI mostra AGORA: a mais recente ainda não `ended`. */
 function ehRelevante(row: VoiceCallRow): boolean {
   return row.status !== "ended";
@@ -391,7 +415,7 @@ export function useVoiceCallSession(remoteAudioRef: RefObject<HTMLAudioElement |
     if (!podeLigar) return;
     try {
       const res = await apiClient.post<{ data: VoiceCallRow }>("/api/v1/voice/calls", { contactId });
-      setCall(res.data);
+      setCall((atual) => mesclarRespostaDaChamada(atual, res.data));
     } catch (err) {
       showApiError(err);
     }

@@ -2,7 +2,7 @@ import type { JobClaim } from "@/lib/agent-engine/queue/claim";
 import { assertAgendaEffectSupabase } from "@/lib/agenda/efeito";
 import { AgendaDeferredError } from "@/lib/agenda/protecao-followup";
 import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
-import { StaleServiceBoundaryError } from "@/lib/atendimento/fronteira";
+import { isFollowupCasRecusado, StaleServiceBoundaryError } from "@/lib/atendimento/fronteira";
 import { assertServiceBoundarySupabase } from "@/lib/atendimento/origem";
 /**
  * Follow-up flow engine — worker tick (Task 4.1). Orchestrates DB access
@@ -816,14 +816,14 @@ export function createSupabaseAdminClient(admin: SupabaseClient): AdminClient {
       const revision=revisions.get(id);if(revision===undefined) throw new StaleServiceBoundaryError();
       const {data,error}=await admin.rpc("fn_followup_apply_step",{p_org:orgId,p_id:id,p_revision:revision,p_patch:patch,p_event:event});
       if(error?.code==="23505") return;
-      if(error?.code==="40001") throw new StaleServiceBoundaryError();
+      if(isFollowupCasRecusado(error)) throw new StaleServiceBoundaryError();
       if(error) throw error;revisions.set(id,Number(data));
     },
     async updateEnrollment(id, orgId, patch) {
       const revision=revisions.get(id);
       if(revision===undefined) throw new StaleServiceBoundaryError();
       const {data,error}=await admin.rpc("fn_followup_patch",{p_org:orgId,p_id:id,p_revision:revision,p_patch:patch});
-      if(error?.code==="40001") throw new StaleServiceBoundaryError();
+      if(isFollowupCasRecusado(error)) throw new StaleServiceBoundaryError();
       if(error) throw new Error(error.message);
       revisions.set(id,Number(data));
     },

@@ -697,11 +697,15 @@ export async function sendMessageHandler(
         // coisa que só faz sentido para template.
         //
         // Mas quem SABE falar template é o adapter, quando sabe. Antes disto a
-        // linha de baixo era o único caminho, e ela lê `META_PHONE_NUMBER_ID` e
+        // linha de baixo era o único caminho, e ela lia `META_PHONE_NUMBER_ID` e
         // `META_SYSTEM_USER_TOKEN` do ambiente: template de QUALQUER canal saía
         // pelo número da Meta, com o token da Meta. Para o canal intermediado
         // isso não é falha de envio — é a mensagem saindo pelo número ERRADO
         // para o cliente certo, e ninguém percebe porque ela sai.
+        //
+        // Hoje a linha de baixo resolve a credencial DA SESSÃO e o ambiente ficou
+        // só como reserva (fatia F4 da #850), então ela precisa do número desta
+        // conexão: `sessionRef` sai da MESMA linha que o adapter recebe acima.
         // ─── Pré-voo ANTES de escolher transporte ──────────────────────────
         //
         // Vale para os dois caminhos, e é por isso que está aqui e não dentro
@@ -737,6 +741,10 @@ export async function sendMessageHandler(
           : await sendTemplateForSession(supabase, {
               beforeSend: checkBoundary,
               organizationId: ctx.organization_id,
+              // O número DESTA conexão: é por ele (com a organização) que a
+              // credencial da tela é achada. Sem ele, a resolução não casaria
+              // linha nenhuma e o envio voltaria ao ambiente.
+              sessionRef: resolveSessionRef(c.channel_sessions),
               to: chatId,
               name: input.template_name ?? "",
               language: input.template_language ?? "",

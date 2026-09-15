@@ -8,6 +8,356 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [1.27.2] — 2026-09-15
+
+### Corrigido
+
+- **A chamada de voz pelo WhatsApp liga de verdade depois de parear** Quem pareava o número de chamada de voz e clicava em "Chamar" recebia "Não foi
+  possível completar a chamada. Tente novamente em instantes." e continuava
+  recebendo, mesmo com o número pareado, até alguém reiniciar o serviço de voz. O
+  pareamento pedia ao serviço para "re-parear" logo depois de criar a sessão, e
+  isso deixava a ligação presa a uma conexão já descartada. Agora o pareamento
+  cria a sessão uma vez só, e o código QR chega do mesmo jeito.
+
+  Consertos que vinham no mesmo caminho:
+
+  - Celulares brasileiros que o WhatsApp registrou sem o nono dígito eram
+    discados com ele, e o telefone do outro lado nunca tocava: a tela ficava em
+    "Chamando…" até desistir. O CRM agora pergunta ao WhatsApp qual é o número
+    registrado antes de ligar.
+  - A ligação feita pelo CRM era registrada como recebida. A que o cliente não
+    atendia virava um aviso de "chamada perdida" na Central, pedindo para ligar
+    de volta a quem você acabou de ligar. Agora ela aparece na linha do tempo
+    como "Chamada de voz sem resposta", sem aviso.
+  - Ao começar a ligação, a tela às vezes mostrava um erro enquanto o telefone
+    do outro lado já tocava, e o painel da ligação podia sumir.
+  - Desvincular o aparelho pelo celular deixava a tela dizendo "pareado" para
+    sempre. Agora ela volta a "não pareado" e dá para parear de novo.
+  - Clicar em "Parear" de novo, com o aparelho recém-vinculado e a tela ainda
+    desatualizada, podia desconectar o aparelho. Agora o CRM confere com o
+    serviço de voz antes de apagar qualquer coisa.
+  - Desconectar o número quando o serviço de voz já tinha perdido a sessão dava
+    erro sem fim. Agora desconecta.
+  - O código QR que vencia continuava na tela sem funcionar. Agora a tela avisa
+    que venceu e libera o botão para gerar outro.
+
+## [1.27.1] — 2026-09-15
+
+### Corrigido
+
+- **O dia bloqueado também vale para o horário da noite** Em agendas com fuso diferente de UTC — no Brasil, os horários da noite —, a folga ou o feriado cadastrado para um dia não barrava o horário perto da virada: a lista de horários livres o oferecia, e a IA conseguia marcá-lo. As exceções de data passam a ser buscadas pelo dia local da jornada, e não pelo dia UTC do horário pedido — o mesmo dia que a lista de horários pergunta. A tela, a IA e a conferência da marcação feita pela IA usam a mesma leitura, então mudam juntas. O encaixe que uma pessoa marca fora da lista continua dispensando a exceção de data, como antes.
+
+- **A ocupação do Google Agenda vale para quem marca na agenda de outra pessoa** Um Atendente que marca na agenda de outra pessoa passa a conferir a ocupação contra o Google Agenda dela, e não só contra os compromissos do sistema. Antes, a conexão de Google do dono não era visível para o Atendente, e com ela sumiam os compromissos pessoais do dono: a lista de horários livres os oferecia e a marcação era aceita por cima deles, tanto no horário da lista quanto no encaixe fora dela. A tela e a recusa dizem só ocupado ou livre; para conferir, o sistema lê o início e o fim de cada compromisso do Google de quem atende, nunca o título ou o conteúdo do evento. A grade da agenda ainda não desenha esses compromissos para o Atendente; quando ele escolhe um desses horários, a recusa avisa que o horário já está ocupado na agenda de quem atende.
+
+## [1.27.0] — 2026-09-15
+
+### Adicionado
+
+- **Processamento que para de tentar agora aparece na Central de avisos** Quando um processamento em segundo plano falha cinco vezes e o sistema desiste dele — ler uma foto ou um áudio que o cliente mandou, rodar uma automação, preparar um material da base de conhecimento, ou fazer a IA responder uma mensagem de cliente —, a Central de avisos passa a receber um alerta crítico com o tipo do processamento e o motivo da falha. Antes isso acontecia em silêncio: o efeito não ocorria e nada indicava o problema em nenhuma tela. Quando o que não aconteceu foi a resposta da IA, o aviso tem título próprio ("A IA deixou de responder uma mensagem de cliente") e orienta a responder pelo Inbox. Para uma pane não inundar a Central, cada organização tem no máximo dois desses avisos abertos por vez — um para a IA que deixou de responder e um para os demais processamentos —, e um não esconde o outro: o aviso aberto de uma foto que não pôde ser lida não impede o da IA de aparecer. Depois de corrigir a causa, marque o aviso como resolvido para voltar a ser avisado.
+
+### Alterado
+
+- **Três índices redundantes saem do banco** O banco mantinha três índices cujo trabalho já era feito por outro índice da mesma tabela. Eles cobravam o preço em toda gravação e ocupavam espaço em disco. Foram removidos na atualização. As buscas que os usavam continuam atendidas por índice — o maior, da mesma tabela — e nenhuma proteção contra duplicidade foi perdida.
+
+### Corrigido
+
+- **Automações da Agenda voltam a disparar quando alguém marca ou confirma pela tela** Quando uma pessoa da equipe marcava, confirmava, remarcava ou cancelava um compromisso pela tela da Agenda, o compromisso era gravado normalmente, mas as automações ligadas a esses momentos — por exemplo "quando um agendamento for confirmado, avise o cliente" — não rodavam. O aviso para as regras era recusado pelo banco sem nada aparecer na tela. Agora ele é registrado pelo mesmo caminho que o resto do sistema usa, e as regras da Agenda disparam também para o que é feito pela equipe. Os compromissos marcados pelo assistente de IA não eram afetados.
+
+- **O registro de auditoria não pode mais ser alterado nem apagado pela chave de serviço** Num projeto Supabase, a tabela de auditoria herdava do próprio Supabase a permissão de alterar, apagar e esvaziar registros — inclusive pela chave de serviço, que ignora as regras de acesso por organização. Na prática, quem tivesse essa chave conseguia apagar ou reescrever um registro escolhido da auditoria. Essas permissões foram removidas: a auditoria agora só recebe registros novos e é lida. A limpeza legítima, que apaga apenas registros mais antigos que o prazo de retenção configurado, continua funcionando como antes.
+
+- **A falha ao atualizar a conversa depois de uma mensagem passa a ficar registrada nos três canais** Quando uma mensagem é gravada e a atualização da conversa falha logo em seguida, a mensagem existe, mas a conversa não sobe na lista do Inbox e, no canal oficial, a janela de resposta de 24 horas não abre. No canal oficial essa falha não era registrada em lugar nenhum; no canal intermediado ficava só no log do servidor, que se perde quando ele reinicia. Agora os três canais gravam a ocorrência no registro de eventos do banco, com a conversa, o sentido da mensagem e o motivo. Nenhuma tela mostra esse registro ainda: ele serve para quem investiga uma conversa que ficou para trás. O texto da mensagem do cliente não é copiado para ele.
+
+- **Foto ou áudio que o provedor de IA recusou passa a abrir aviso na Central** O aviso "O agente não conseguiu ler uma foto ou áudio que o cliente enviou" já aparecia na Central quando o modelo escolhido não enxerga imagens, quando o provedor não está disponível nesta instalação ou quando falta a chave para transcrever áudio. Quando a falha vinha da própria chamada ao provedor — chave recusada, modelo que a conta não pode usar, tempo esgotado — ou do download do arquivo, o sistema tentava cinco vezes e desistia sem avisar ninguém. Agora essa desistência abre o mesmo aviso, com a frase de erro do provedor, que diferencia chave errada de modelo não liberado. No mesmo momento a Central recebe também o aviso de processamento que parou de tentar, se não houver um desses já aberto; numa pane, fica no máximo um de cada aberto por organização. Esses avisos não escondem o de que a IA deixou de responder um cliente, que abre por conta própria.
+
+## [1.26.0] — 2026-09-15
+
+### Adicionado
+
+- **Quem opera a agenda agora pode confirmar um pedido de horário pela tela** Na agenda, a aba "Aguardando confirmação" e o painel de detalhe do compromisso ganharam o botão Confirmar. Em negócios que exigem aprovação de cada horário, o pedido que o assistente reservou só virava compromisso se o cliente respondesse no WhatsApp — caso contrário o prazo vencia e a reserva era cancelada automaticamente. Agora a decisão pode ser tomada por quem atende, com um clique.
+
+- **O App da Meta passa a ser cadastrado pela tela de administração, sem editar o servidor** Para receber mensagens pelo número oficial da Meta, era preciso abrir o arquivo de configuração do servidor e escrever lá a chave secreta do aplicativo e um código de confirmação inventado por quem instalou.
+
+  Agora quem administra a instalação faz isso em **Admin › API Oficial (Meta)**: cola a chave secreta do aplicativo e o sistema gera sozinho o token de verificação, mostrado uma única vez, pronto para copiar para o painel da Meta. A chave fica guardada cifrada e nunca volta a aparecer. Se o token se perder, dá para gerar outro na mesma tela — ela avisa antes que o novo precisa ser colado na Meta.
+
+  A tela de Conexões e o primeiro acesso passam a apontar para esse lugar, em vez de mandar configurar o servidor.
+
+  Você não precisa fazer nada. Quem já tem a chave e o token no arquivo de configuração continua funcionando como está: o arquivo segue valendo como reserva, e só deixa de ser usado quando alguém salvar pela tela.
+
+  A guarda da credencial na instalação é contribuição de @webtecnica.
+
+- **A agenda aceita encaixe fora da grade quando quem marca é da equipe** O sistema oferece horários numa grade fixa: a partir do começo de cada faixa do
+  expediente, de duração em duração. Isso vale para o que o assistente oferece ao
+  cliente — mas quem atende precisa poder marcar o que combinou por fora dela: o
+  cliente que só pode 10:30, o encaixe, o atendimento que começa mais cedo.
+
+  Antes, o servidor recusava todo horário fora da grade, viesse de quem viesse, e a
+  saída era mudar o horário do cliente para caber numa régua interna.
+
+  Agora, quando quem marca é **uma pessoa da equipe logada no sistema**, o servidor
+  aceita horário fora da grade, até fora do expediente, desde que o responsável já
+  tenha publicado seus horários de atendimento.
+
+  Na tela, isso fica em **Agenda › Novo agendamento**: depois de escolher o dia, abaixo
+  dos horários dele aparece **"Outro horário"**. A pessoa digita a hora e segue para a
+  mesma confirmação de sempre. O dia sem nenhum horário publicado (um domingo, por
+  exemplo) também pode ser escolhido — de hoje em diante, nos meses que o calendário
+  do painel deixa abrir —, e ali o campo de hora já abre direto. A hora digitada vale
+  no fuso que o painel mostra ("Horários no fuso …"). **Remarcar**, na lista de
+  compromissos, abre o mesmo painel e tem a mesma opção.
+
+  "Outro horário" não aparece para quem tem o papel **Somente leitura**, que não pode
+  marcar, nem enquanto o responsável não publicou seus horários. Clicar num horário
+  vazio da grade e arrastar um compromisso continuam oferecendo só os horários da
+  grade.
+
+  O assistente e as integrações por token não ganham o encaixe: para eles o horário
+  continua tendo de ser um da grade do expediente, respeitando a antecedência mínima
+  e a janela de reserva do tipo.
+
+  Para os dois, o sistema recusa marcar em cima de outro agendamento do mesmo
+  responsável (cancelado ou falta não contam), ou de um evento do Google Agenda dele
+  numa agenda marcada como "Conta como ocupado" (evento marcado como "Disponível" no
+  Google não conta). Quando a recusa acontece pelo painel, o motivo aparece logo acima
+  do botão Confirmar, o painel continua aberto e, no encaixe, a hora digitada continua
+  no campo. A conferência do Google tem dois limites.
+
+  O primeiro: ela só conhece o que a sincronização já trouxe, que vai de um dia atrás
+  até cerca de 90 dias à frente. Marcar depois desse período, ou em cima de um evento
+  criado no Google e ainda não sincronizado, passa. Para períodos fora da
+  sincronização, a tela de horários avisa "Ocupação do Google ainda não verificada
+  neste período."
+
+  O segundo: uma pessoa com papel de Atendente, marcando na agenda de outra pessoa,
+  não enxerga o Google Agenda dela, e a marcação passa. O próprio responsável,
+  gerentes e administradores enxergam.
+
+### Alterado
+
+- **A versão da Graph API passa a morar num lugar só** A versão da Graph API com que a instalação fala (hoje `v22.0`) deixa de estar copiada à mão em dez arquivos de produção e passa a viver num só, com uma catraca que reprova a suíte se alguém escrever a versão à mão em qualquer outro arquivo. Nada muda para quem opera: a instalação continua falando `v22.0`, e `META_GRAPH_VERSION` continua mandando quando existe — inclusive quando ela está preenchida com espaço ou vazia, que antes virava URL sem versão. O que muda é o dia do bump: subir de versão passa a ser uma edição deliberada num arquivo, em vez de dez edições com uma esquecível.
+
+  Crédito: @webtecnica.
+
+### Corrigido
+
+- **Sincronizar modelos e enviar modelo usam a credencial salva na tela do canal** O envio de texto do canal oficial já resolvia a credencial da conexão (sessão primeiro, ambiente como reserva). O caminho do MODELO não: tanto o POST de `/api/v1/channels/templates` quanto o envio de modelo liam `META_SYSTEM_USER_TOKEN` e `META_PHONE_NUMBER_ID` do `.env`. Numa instalação que conectou o número pela tela, "Sincronizar modelos" respondia **400 `missing_meta_token`** para quem tinha a credencial salva e visível na própria tela, e o segundo número oficial da instalação não sincronizava nem enviava um modelo — logo o modelo, que é o que a janela fechada exige.
+
+  Agora os dois caminhos resolvem pela sessão, com o ambiente só como reserva, pela mesma porta que o resto do canal usa. A ordem dos desfechos não muda: sem canal oficial a resposta continua `no_meta_channel`, e sem credencial nenhuma (nem na sessão, nem no ambiente) continua `missing_meta_token` e o envio segue o desfecho de "canal não conectado" (`meta_not_configured`, recuperável) em vez de virar falha.
+
+  Nada muda para quem só tem o ambiente: a instalação continua sincronizando e enviando pelo `.env` como antes.
+
+- **O botão Confirmar do painel de marcação volta a aparecer em telas de notebook** Em telas de notebook comuns, o painel de **Agenda › Novo agendamento** (e o de
+  **Remarcar**) cortava a parte de baixo sem mostrar barra de rolagem. Depois de
+  escolher o horário, o botão **Confirmar** ficava fora da área visível: inteiro
+  escondido em 1280×800 e 1366×768, e cortado ao meio em 1440×900. Não havia como
+  clicar nele com o mouse.
+
+  Agora a coluna do calendário rola por conta própria quando não cabe, e escolher um
+  horário leva a confirmação até a vista. O contexto à esquerda e a lista de horários
+  à direita ficam parados, e em telas grandes e no celular nada muda.
+
+- **Cadastrar um contato com telefone já usado explica o motivo, em vez de "Erro interno"** Criar pela tela um contato cujo telefone já pertencia a outro contato da mesma organização
+  terminava num aviso de "Erro interno. Tente de novo em instantes." — e tentar de novo dava o
+  mesmo erro, porque não havia nada de errado com o servidor: o telefone já estava em uso.
+
+  Agora o aviso diz o que aconteceu: "Já existe um contato com este telefone." (em espanhol,
+  "Ya existe un contacto con este teléfono."). O cadastro continua recusado, como antes; o que
+  muda é a explicação.
+
+  Por baixo, a resposta de `POST /api/v1/contacts` passou de 500 para 409, com o código
+  `contact_exists` e o id do contato que já usa o telefone em `details.contact_id`. Por
+  enquanto nenhuma tela usa esse id — ela só mostra a frase —, e essa rota aceita apenas a
+  sessão de quem está logado, não token de integração. O e-mail e o CPF também não podem se
+  repetir nessa tabela, e o 409 só sai quando já existe um contato ativo com aquele telefone:
+  qualquer outra recusa continua como antes.
+
+  Você não precisa fazer nada.
+
+  Achado e corrigido por @webtecnica.
+
+## [1.25.1] — 2026-09-15
+
+### Corrigido
+
+- **A agenda para de chamar de falha do servidor o erro de quem chamou errado** A listagem da agenda respondia "erro do servidor" para toda recusa que não fosse
+  "falta um recorte". O caso que apareceu na prática é o id de um CONTATO enviado
+  no lugar do id de um negócio — a mesma troca que a #509 mediu. A consulta era
+  recusada corretamente, mas a resposta dizia que o problema era do servidor: a
+  tela tratava como falha nossa, e o monitoramento de erros contava como incidente
+  uma requisição que só estava com o parâmetro trocado.
+
+  Agora essa recusa sai como erro de quem chamou, com um código próprio que diz que
+  o id mandado não é um negócio do funil e que a correção é usar o do contato. O
+  "erro do servidor" fica reservado para o que é falha de verdade, com teste que
+  atravessa a rota para separar os dois.
+
+  Você não precisa fazer nada.
+
+  Achado e corrigido por @webtecnica.
+
+- **Atualizar o CRM deixa de desligar os lembretes** Toda atualização desligava o lembrete de todos os tipos de agendamento em que
+  alguém o tinha ligado. Sem erro e sem aviso: a tela mostrava o controle
+  desmarcado como se ninguém o tivesse marcado, e o cliente deixava de receber o
+  aviso do compromisso.
+
+  A correção de histórico que fazia isso era certa quando foi escrita, numa época
+  em que nada lia esse campo — só que ela voltava a ser aplicada a cada
+  atualização, e o disparador nasceu no meio do caminho. Agora ela roda uma vez
+  por banco e para de reescrever a sua escolha.
+
+  **Se você já usou lembretes, confira se continuam ligados** em Configurações ›
+  Agenda, no campo "Avisar o cliente antes do compromisso". Uma atualização
+  anterior pode tê-los desligado, e esta versão não religa sozinha: religar por
+  conta própria mandaria mensagem para clientes de quem desligou de propósito.
+
+- **A IA deixa de afirmar o tamanho de um catálogo que não mediu** Quando a varredura do catálogo era cortada e a loja não informava o total, a resposta ao
+  cliente saía com o número `null` no meio da frase — o agente dizia "o catálogo desta loja
+  tem null". Era uma afirmação sobre um tamanho que ninguém mediu, justamente no lugar onde a
+  regra é declarar a dúvida.
+
+  O mesmo valia para a lista vazia: "não encontrei" podia ser ouvido como "a loja não tem",
+  quando o que houve foi uma varredura que não chegou ao fim. Lista vazia só é ausência quando
+  a varredura terminou.
+
+  Agora o tamanho medido continua sendo dito — é ele que explica o corte a quem opera — e o que
+  não foi medido é dito como desconhecido. Nada muda no que o operador precisa fazer: as mesmas
+  ferramentas respondem, e a regra de não afirmar ausência sem varredura completa já valia.
+
+- **Três mensagens seguidas deixam de virar três negócios** Quando alguém escrevia várias mensagens em sequência — "oi", "tudo bem?",
+  "queria marcar" —, cada uma podia abrir um negócio novo no funil. O mesmo
+  cliente aparecia duas ou três vezes, tudo no mesmo minuto, e quem organiza a
+  fila tinha que limpar à mão.
+
+  Agora a entrada é serializada por cliente: a segunda mensagem encontra o card
+  que a primeira criou, em vez de criar outro.
+
+  Continua possível ter mais de um negócio aberto para o mesmo cliente quando é
+  você quem cria — o que mudou vale só para o card que o sistema abre sozinho.
+
+- **Integração com token de servidor volta a conseguir escrever** Um token de servidor sem escopo de agente era tratado como se fosse uma pessoa
+  logada, e o sistema tentava anotar o token como "quem fez". O banco recusava,
+  porque token não é gente — então mandar mensagem ou marcar compromisso por
+  token respondia **erro interno**, sem pista do motivo.
+
+  Agora o token é reconhecido como integração, e essas escritas voltam a
+  funcionar. Se você tem um sistema ligado por token, três coisas passam a valer
+  para ele junto com isso:
+
+  **O envio por token respeita o modo de teste do canal.** Enquanto o número
+  estiver em teste, só os números da lista de teste recebem; para os outros a
+  mensagem fica como falha, com o motivo "modo de teste do canal". É a mesma
+  regra que já valia para a IA e para as automações. Para liberar, abra
+  "Configurar acesso da IA" no número, em Conexões, e deixe-o como "IA aberta ao
+  público".
+
+  **Comparecimento e falta continuam sendo registrados pela equipe.** Por token, a
+  API recusa com o pedido de confirmação humana na Agenda, em vez de devolver um
+  erro genérico.
+
+  **Mensagem enviada por token não pausa a IA** na conversa, ao contrário da
+  resposta de um atendente pela tela.
+
+  Token de agente de IA nunca foi afetado, e continua igual.
+
+## [1.25.0] — 2026-09-15
+
+### Adicionado
+
+- **O aniversário do contato pode disparar uma automação** A data de nascimento já aparecia na ficha do contato e não acionava nada: para
+  parabenizar alguém era preciso descobrir sozinho quem fazia aniversário.
+
+  Em Automações, o gatilho "No aniversário de um contato" já pode ser escolhido, e
+  a ação de mandar WhatsApp é a mesma das outras regras. A mensagem sai às 9h no
+  fuso da organização, uma vez por pessoa, e só para quem configurou a regra.
+
+- **A instalação pode aceitar só quem foi convidado** Em **Admin › Cadastro** há um interruptor novo: **cadastro apenas por convite**. Ligado, `/signup` deixa de aceitar quem chega sem convite — e quem chega com um convite válido entra igual.
+
+  **Nada muda para quem não ligar.** O padrão é o comportamento de sempre: qualquer pessoa cria conta e abre a própria empresa. Instalações que já existem não precisam fazer nada.
+
+  **Por que isto é do produto, e não do proxy.** Fechar `/signup` no nginx era a única saída até aqui, e ela erra por construção: proxy não sabe o que é um convite. Medido numa instalação real em 2026-09-10 — a regra que bloqueava `/signup` bloqueou junto o `/signup?invite=…`, ou seja, exatamente quem deveria passar, e o convidado ficou sem conseguir entrar.
+
+  **A recusa tem tela.** Quem abre o cadastro sem convite numa instalação fechada vê uma página com a marca e o idioma da instalação, explicando que o acesso é por convite e oferecendo o login — não um `403 Forbidden` cru do servidor.
+
+  **Fecha nas quatro portas, não só na tela.** A tela é adulterável e a server action é chamável direto, então a recusa acontece também em `signUp()`, em `/auth/confirm` (que é quem provisiona a organização, e pega inclusive conta nascida fora da tela) e na recuperação de organização. Uma porta só seria outro capacho.
+
+  **Se o banco parar de responder, a instalação fechada continua fechada.** A leitura guarda o último valor conhecido em vez de cair no padrão — senão um soluço do banco reabriria o cadastro sem ninguém ver. E instalação que ainda não aplicou esta versão do schema continua aberta, como sempre esteve.
+
+- **Automação externa agora consegue abrir a primeira conversa com um cliente novo** Até aqui, uma automação de prospecção (por exemplo, um fluxo que acabou de captar um lead) não
+  tinha como abrir a primeira conversa com esse cliente pela chave de integração: só dava para
+  mandar mensagem numa conversa que já existia. Agora existe uma nova capacidade de integração
+  ("Iniciar conversa com cliente novo e enviar mensagem") que cadastra o cliente se precisar, abre
+  a conversa no número de WhatsApp escolhido — o próprio fluxo decide qual, em vez de o sistema
+  escolher sozinho — e manda a primeira mensagem. Crédito: @hamiltonviana.
+
+- **O lembrete de compromisso pode avisar mais de uma vez** Um tipo de agendamento tinha um lembrete só. Quem queria avisar o cliente com um
+  dia de antecedência **e de novo poucas horas antes** não tinha como: ligar o
+  segundo aviso exigiria apagar o primeiro.
+
+  Em Configurações › Agenda, cada tipo ganhou o campo "E de novo, quantos minutos
+  antes", que aceita até três avisos adicionais. Vazio é o comportamento de
+  sempre, um lembrete só — nada muda para quem não mexer no campo.
+
+### Corrigido
+
+- **O acompanhamento que já encerrou deixa de derrubar o banco** O banco da instalação podia ir a 100% de processador sem ninguém usando o produto. A causa era um acompanhamento (follow-up) que já tinha acabado: o sistema tentava atualizá-lo, o banco recusava, e o recuso era do tipo que o próprio banco pede "tente de novo". Ele tentava de novo — milhares de vezes por minuto — e o processador não saía do teto.
+
+  Isso não muda tela, fluxo nem configuração. Na próxima atualização o recuso deixa de pedir retry, e o banco volta a respirar.
+
+  Nada para fazer na VPS além de atualizar quando o aviso aparecer.
+
+- **O primeiro pareamento de chamada de voz recebe o código QR** Com o serviço de voz configurado, a tela prepara a sessão antes de abrir a conexão de eventos e pedir o QR. A conexão do pareamento e a ponte que acompanha as chamadas passam a enviar a credencial já usada nas demais operações. Falhas ao receber o código aparecem na tela e permitem tentar novamente.
+
+## [1.24.0] — 2026-09-14
+
+### Adicionado
+
+- **Você passa a ver, por cliente, qual agente está publicado** Se você administra a instalação, agora dá para saber se cada cliente está sendo atendido sem abrir cliente por cliente: a tela de Uso ganhou a coluna com o agente publicado (e o mesmo campo no CSV), e cada cliente ganhou a aba **Agente**, com a versão que o motor executa, o provedor e o modelo. A leitura fica registrada na auditoria com o seu usuário e a organização visitada. Nada precisa ser feito na VPS. Crédito: @jostoz.
+
+### Corrigido
+
+- **O agente para de dizer que a mensagem veio vazia quando ela tem texto** Quando chegava um áudio ou uma foto sem legenda, o agente lia a coluna crua da
+  mensagem e recebia o corpo vazio — mesmo com a transcrição já gravada e o texto
+  à vista na tela da conversa. Com isso ele respondia ao cliente dizendo que a
+  mensagem tinha vindo em branco, e a trava que impede exatamente essa frase
+  ficava desarmada, porque aos olhos dele não havia texto nenhum. Agora a
+  mensagem que acorda o agente é lida pela mesma função que monta o histórico da
+  conversa: com texto, com transcrição ou com o marcador da mídia, ele nunca mais
+  anuncia vazio.
+
+  Achado e corrigido por @webtecnica.
+
+- **O hub de IA respeita o idioma escolhido** Ao abrir a área de IA em espanhol, títulos, seções e descrições agora acompanham o idioma escolhido em vez de aparecerem em português. Crédito: @alexneverland.
+
+- **Grafo corrompido deixa de passar no schema** O schema do fluxo validava cada nó e cada aresta isoladamente, então um grafo corrompido passava no salvamento: aresta apontando para nó que não existe mais (o estrago que o editor produz ao excluir um nó), dois nós com o mesmo id e duas arestas com o mesmo id. O `flowGraphSchema` agora tem uma catraca de integridade que rejeita os três casos com mensagem explícita dizendo o id a corrigir — `aresta "e-3" aponta para nó inexistente: "no-9"`, `id de nó repetido: "no-1"`, `id de aresta repetido: "e-2"`.
+
+  Esses grafos só quebravam longe do defeito: no meio de um disparo, quando uma aresta não resolvia para nó nenhum. Como salvar o rascunho e carregar a versão usam a mesma porta, o erro passa a aparecer na hora de salvar, com o id na mensagem, em vez de virar um caso de suporte.
+
+  Quem já tem rascunho corrompido passa a ver o erro ao abrir e salvar o fluxo e precisa corrigir a aresta — não há migração automática, decisão registrada na issue #699. Grafo íntegro e campo desconhecido seguem como antes, com controle nos testes.
+
+- **Material .txt e .md salvo no Windows entra na base de conhecimento sem mojibake** Arquivo de texto salvo no Bloco de Notas — que grava em cp1252 (ANSI) por padrão, e é assim que quem monta a base de conhecimento no Windows escreve os `.txt` e `.md` — entrava no conhecimento do agente com cada acento virando U+FFFD — "Ação" entrava como "A��o". Não dava erro, não dava aviso: o material aparecia como pronto na tela, o índice era construído, e o agente passava a citar o texto corrompido para o cliente.
+
+  Agora a leitura dos bytes usa a mesma decisão de codificação que a importação de planilhas já usava (lê como UTF-8 e só troca para windows-1252 quando o arquivo prova não ser UTF-8), e material que não é texto — um `.xlsx` renomeado para `.md`, ou um `.txt` salvo como "Unicode" (UTF-16) — é recusado no envio com uma frase dizendo o que fazer, em vez de entrar como lixo. Material que já era UTF-8 entra exatamente como antes.
+
+- **O canal não volta sozinho para o modo de teste depois de aberto ao público** O modo de acesso da IA de um canal mora em três chaves de metadata: uma diz se o
+  canal está aberto, em allowlist por origem ou em lista de testadores; outra diz
+  se ele está em pré-go-live. Ao abrir o canal ao público, a segunda chave era
+  gravada sempre com o mesmo valor — "em teste" — mesmo quando o canal já não
+  estava em teste. Sozinha, a chave errada não mudava nada. Na volta, sim: o script
+  que liga o allowlist POR ORIGEM gravava só a primeira chave, então o canal
+  reaparecia em modo de teste com a lista de testadores antiga, em vez de atender
+  quem tem autorização por origem. A IA parava de responder a quem deveria atender
+  sem erro nenhum na tela, e o próprio simulador do script prometia que o contato
+  seria atendido.
+
+  Agora as duas chaves andam juntas nas duas pontas: abrir ao público tira o canal
+  do teste, e o script escreve o alvo nos dois campos — recusando a gravação se o
+  motor continuaria lendo modo de teste. O simulador do script passou a prometer o
+  mesmo veredito que o motor executa.
+
+  Canais que hoje estão abertos com a chave velha continuam abertos: ela sai na
+  próxima gravação da tela ou do script. Você não precisa fazer nada para adotar.
+
+  Achado e corrigido por @webtecnica.
+
 ## [1.23.0] — 2026-09-14
 
 ### Adicionado
@@ -4381,7 +4731,14 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.23.0...HEAD
+[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.27.2...HEAD
+[1.27.2]: https://github.com/melgarafael/DeskcommCRM/compare/v1.27.1...v1.27.2
+[1.27.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.27.0...v1.27.1
+[1.27.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.26.0...v1.27.0
+[1.26.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.25.1...v1.26.0
+[1.25.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.25.0...v1.25.1
+[1.25.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.24.0...v1.25.0
+[1.24.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.23.0...v1.24.0
 [1.23.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.22.0...v1.23.0
 [1.22.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.20.0...v1.21.0

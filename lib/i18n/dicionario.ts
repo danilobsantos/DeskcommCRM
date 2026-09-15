@@ -3590,9 +3590,6 @@ export const DICIONARIO: Traducoes = {
     es: "Un número recién conectado envía poco y sube de a poco — enviar demasiado al principio es la causa nº 1 de bloqueo.",
   },
   "Salvar proteção": { es: "Guardar protección" },
-  "não configurado nesta instalação — defina no servidor antes de continuar": {
-    es: "no configurado en esta instalación — defínelo en el servidor antes de continuar",
-  },
   "Copiado.": { es: "Copiado." },
   Copiar: { es: "Copiar" },
   "Conectado:": { es: "Conectado:" },
@@ -4302,6 +4299,10 @@ export const DICIONARIO: Traducoes = {
   // Mensagens que as rotas de voz devolvem traduzidas (`traduzir(..., idioma)`).
   "Chamada de voz ligada.": { es: "Llamadas de voz activadas." },
   "Chamada de voz desligada.": { es: "Llamadas de voz desactivadas." },
+  "O número de voz está sem conexão com o WhatsApp neste momento. Aguarde alguns segundos e tente de novo; se continuar, desconecte o número e pareie de novo em Configurações › Canais.":
+    {
+      es: "El número de voz está sin conexión con WhatsApp en este momento. Espera unos segundos y vuelve a intentarlo; si continúa, desconecta el número y vuelve a vincularlo en Configuración › Canales.",
+    },
   "Chamada de voz desligada e aparelho desconectado.": {
     es: "Llamadas de voz desactivadas y dispositivo desconectado.",
   },
@@ -4916,8 +4917,8 @@ export const DICIONARIO: Traducoes = {
   "Este servidor ainda não está pronto para RECEBER por este caminho.": {
     es: "Este servidor todavía no está listo para RECIBIR por este camino.",
   },
-  "Dá para conectar e já enviar, mas as respostas do cliente não vão chegar até quem instalou o sistema completar uma configuração no servidor. Se você quer atender hoje, o caminho do código com o celular funciona agora — e dá para trocar depois, sem perder nada.": {
-    es: "Se puede conectar y ya enviar, pero las respuestas del cliente no van a llegar hasta que quien instaló el sistema complete una configuración en el servidor. Si quieres atender hoy, el camino del código con el celular funciona ahora — y se puede cambiar después, sin perder nada.",
+  "Dá para conectar e já enviar, mas as respostas do cliente não vão chegar até quem administra a instalação cadastrar o App da Meta, em Admin › API Oficial (Meta). Se você quer atender hoje, o caminho do código com o celular funciona agora — e dá para trocar depois, sem perder nada.": {
+    es: "Se puede conectar y ya enviar, pero las respuestas del cliente no van a llegar hasta que quien administra la instalación registre la App de Meta, en Admin › API Oficial (Meta). Si quieres atender hoy, el camino del código con el celular funciona ahora — y se puede cambiar después, sin perder nada.",
   },
   "O WhatsApp desta instalação ainda não subiu.": { es: "El WhatsApp de esta instalación todavía no arrancó." },
   "Ele roda no seu próprio servidor. Dá para seguir sem ele agora e conectar o número depois, em": {
@@ -6202,6 +6203,43 @@ export const DICIONARIO: Traducoes = {
   "Recebeu um convite novo? Abra o link que chegou no seu e-mail — ele funciona mesmo com esta tela aberta, e devolve o seu acesso.": {
     es: "¿Recibiste una invitación nueva? Abre el enlace que llegó a tu correo — funciona incluso con esta pantalla abierta, y te devuelve el acceso.",
   },
+  // ── Cadastro apenas por convite (migration 0253) ──────────────────────────
+  "Cadastro apenas por convite": { es: "Registro solo por invitación" },
+  "Esta instalação não aceita cadastro aberto. Se você foi convidado, use o link que chegou no seu e-mail — ele já vem com o convite.": {
+    es: "Esta instalación no acepta registro abierto. Si te invitaron, usa el enlace que llegó a tu correo — ya trae la invitación.",
+  },
+  "Esse convite expirou ou não é mais válido. Peça um novo a quem te convidou — esta instalação não aceita cadastro sem convite.": {
+    es: "Esa invitación venció o ya no es válida. Pide una nueva a quien te invitó — esta instalación no acepta registro sin invitación.",
+  },
+  "Esta instalação aceita cadastro apenas por convite. Se você foi convidado, use o link que chegou no seu e-mail.": {
+    es: "Esta instalación acepta registro solo por invitación. Si te invitaron, usa el enlace que llegó a tu correo.",
+  },
+  "Esta instalação aceita cadastro apenas por convite. Peça um convite a quem administra o sistema.": {
+    es: "Esta instalación acepta registro solo por invitación. Pide una invitación a quien administra el sistema.",
+  },
+  "Sua conta foi confirmada, mas esta instalação aceita cadastro apenas por convite — então não criamos uma empresa para você. Peça um convite a quem administra o sistema; o link dele já traz tudo o que falta.": {
+    es: "Tu cuenta fue confirmada, pero esta instalación acepta registro solo por invitación — así que no creamos una empresa para ti. Pide una invitación a quien administra el sistema; su enlace ya trae todo lo que falta.",
+  },
+  "Cadastro": { es: "Registro" },
+  "Quem pode criar conta": { es: "Quién puede crear una cuenta" },
+  "Quem pode criar uma conta nesta instalação.": {
+    es: "Quién puede crear una cuenta en esta instalación.",
+  },
+  "Vale para a instalação inteira, não para uma empresa só. Quem já tem conta continua entrando normalmente.": {
+    es: "Vale para toda la instalación, no para una sola empresa. Quien ya tiene cuenta sigue entrando normalmente.",
+  },
+  "Ligado: só entra quem recebeu um convite. Quem abrir a tela de cadastro sem convite vê um aviso e é levado ao login.": {
+    es: "Activado: solo entra quien recibió una invitación. Quien abra la pantalla de registro sin invitación ve un aviso y va al inicio de sesión.",
+  },
+  "Desligado: qualquer pessoa pode criar uma conta e abrir a própria empresa. É como o sistema sempre funcionou.": {
+    es: "Desactivado: cualquier persona puede crear una cuenta y abrir su propia empresa. Es como el sistema siempre funcionó.",
+  },
+  "Com isto ligado, a única porta de entrada é o convite — inclusive para você, se um dia precisar de uma conta nova. Convide pela tela de Equipe antes de precisar.": {
+    es: "Con esto activado, la única puerta de entrada es la invitación — incluso para ti, si algún día necesitas una cuenta nueva. Invita desde la pantalla de Equipo antes de necesitarlo.",
+  },
+  "Não deu para salvar. Tente de novo em instantes.": {
+    es: "No se pudo guardar. Inténtalo de nuevo en unos instantes.",
+  },
   "Já tem conta?": { es: "¿Ya tienes cuenta?" },
   "Email ou senha incorretos.": { es: "Correo o contraseña incorrectos." },
   "Erro inesperado. Tente novamente.": { es: "Error inesperado. Intenta de nuevo." },
@@ -6359,6 +6397,10 @@ export const DICIONARIO: Traducoes = {
   "O que se pode marcar, quanto dura e quem atende. É isto que a tela de marcar e o agente de IA oferecem ao cliente.": { es: "Qué se puede agendar, cuánto dura y quién atiende. Esto es lo que la pantalla de agendar y el agente de IA le ofrecen al cliente." },
   "Avisar o cliente antes do compromisso, pelo WhatsApp": { es: "Avisar al cliente antes de la cita, por WhatsApp" },
   "Quantos minutos antes": { es: "Cuántos minutos antes" },
+  "E de novo, quantos minutos antes": { es: "Y de nuevo, cuántos minutos antes" },
+  "Opcional. Até 3, separados por vírgula. Ex.: 180 avisa de novo 3 horas antes.": {
+    es: "Opcional. Hasta 3, separados por coma. Ej.: 180 avisa de nuevo 3 horas antes.",
+  },
   "avisa o cliente": { es: "avisa al cliente" },
   "antes": { es: "antes" },
   "O lembrete precisa sair pelo menos 15 minutos antes do compromisso.": { es: "El recordatorio debe salir al menos 15 minutos antes de la cita." },
@@ -6488,6 +6530,40 @@ export const DICIONARIO: Traducoes = {
     es: "cifrado no disponible en esta instalación (GUC app.nuvemshop_oauth_key ausente) — el secreto no fue guardado",
   },
   "Falta cadastrar o aplicativo do Google desta instalação. Leva um minuto e você faz por aqui mesmo.": { es: "Falta registrar la aplicación de Google de esta instalación. Toma un minuto y lo haces aquí mismo." },
+
+  // ─── O App da Meta da instalação (/admin/meta, migration 0257) ───
+  "API Oficial da Meta desta instalação": { es: "API Oficial de Meta de esta instalación" },
+  "É com estas duas informações que o sistema confere que cada mensagem recebida pelo número oficial veio mesmo da Meta. Elas valem para a instalação inteira — cada empresa conecta o próprio número depois, em Conexões.": { es: "Con estos dos datos el sistema comprueba que cada mensaje recibido por el número oficial vino realmente de Meta. Valen para toda la instalación — cada empresa conecta su propio número después, en Conexiones." },
+  "Não deu para ler a configuração salva agora, então o que aparece abaixo pode não ser o que está valendo. Recarregue a página antes de trocar qualquer coisa.": { es: "No se pudo leer la configuración guardada ahora, así que lo que aparece abajo puede no ser lo que está vigente. Recarga la página antes de cambiar cualquier cosa." },
+  "Chave secreta do aplicativo": { es: "Clave secreta de la aplicación" },
+  "••••••••  (já cadastrada)": { es: "••••••••  (ya registrada)" },
+  "32 letras e números": { es: "32 letras y números" },
+  "Fica no painel da Meta, em Configurações do app › Básico. Ela é guardada cifrada e nunca volta a aparecer nesta tela.": { es: "Está en el panel de Meta, en Configuración de la app › Básica. Se guarda cifrada y nunca vuelve a aparecer en esta pantalla." },
+  "Esta instalação já tem a chave e o token no arquivo de configuração do servidor. O que você salvar aqui passa a valer no lugar deles — e, a partir daí, é o token desta tela que precisa estar colado no painel da Meta.": { es: "Esta instalación ya tiene la clave y el token en el archivo de configuración del servidor. Lo que guardes aquí pasa a valer en su lugar — y, desde entonces, es el token de esta pantalla el que tiene que estar pegado en el panel de Meta." },
+  "Última alteração em": { es: "Último cambio el" },
+  "Já existe um token gerado.": { es: "Ya hay un token generado." },
+  "Ainda não existe. Ele é criado pelo sistema na primeira vez que você salva a chave secreta — ninguém precisa inventar nada.": { es: "Todavía no existe. El sistema lo crea la primera vez que guardas la clave secreta — nadie tiene que inventar nada." },
+  "Seu token de verificação": { es: "Tu token de verificación" },
+  "Copie agora.": { es: "Cópialo ahora." },
+  "Por segurança, ele não aparece de novo depois que você sair desta página. Se perder, é só gerar outro aqui.": { es: "Por seguridad, no vuelve a aparecer después de que salgas de esta página. Si lo pierdes, basta con generar otro aquí." },
+  "No painel da Meta, em WhatsApp › Configuração › Webhook, este token vai no campo “Verificar token”. O outro campo, “URL de callback”, é de cada número: ele aparece em Conexões › API Oficial (Meta), depois que o número é conectado. Abra Conexões em outra aba, para não perder o token desta página.": { es: "En el panel de Meta, en WhatsApp › Configuración › Webhook, este token va en el campo “Verificar token”. El otro campo, “URL de devolución de llamada”, es de cada número: aparece en Conexiones › API Oficial (Meta), después de conectar el número. Abre Conexiones en otra pestaña, para no perder el token de esta página." },
+  "Abrir Conexões em outra aba": { es: "Abrir Conexiones en otra pestaña" },
+  "Abrir API Oficial (Meta) na administração": { es: "Abrir API Oficial (Meta) en la administración" },
+  "Gerar token": { es: "Generar token" },
+  "Gerar novo token": { es: "Generar nuevo token" },
+  "Gerar um novo token de verificação?": { es: "¿Generar un nuevo token de verificación?" },
+  "O token atual deixa de valer na hora. As mensagens que já chegam continuam chegando, porque elas são conferidas pela chave secreta. O que muda: a Meta só consegue confirmar o endereço do webhook de novo depois que você colar o token novo no painel dela.": { es: "El token actual deja de valer en el acto. Los mensajes que ya llegan siguen llegando, porque se comprueban con la clave secreta. Lo que cambia: Meta solo puede volver a confirmar la dirección del webhook después de que pegues el token nuevo en su panel." },
+  "A chave parece incompleta. Copie de novo do painel da Meta — ela tem 32 caracteres.": { es: "La clave parece incompleta. Cópiala de nuevo del panel de Meta — tiene 32 caracteres." },
+  "Cadastre a chave secreta do aplicativo primeiro. Sem ela o token não vale.": { es: "Registra primero la clave secreta de la aplicación. Sin ella el token no vale." },
+  "Nada mudou. Digite uma chave nova para substituir a atual.": { es: "Nada cambió. Escribe una clave nueva para reemplazar la actual." },
+  "Não consegui conferir o que já está gravado, então nada foi alterado. Tente de novo em instantes.": { es: "No pude comprobar lo que ya está guardado, así que no se cambió nada. Inténtalo de nuevo en unos instantes." },
+  "Não deu para salvar, e nada foi gravado.": { es: "No se pudo guardar, y no se grabó nada." },
+  "Chave secreta salva.": { es: "Clave secreta guardada." },
+  "Token de verificação gerado.": { es: "Token de verificación generado." },
+  "Não deu para copiar. Selecione o texto e copie à mão.": { es: "No se pudo copiar. Selecciona el texto y cópialo a mano." },
+  "Já cadastrado na administração da instalação. Ele aparece uma vez só, quando é gerado — se não foi guardado, quem administra a instalação gera outro em Admin › API Oficial (Meta).": { es: "Ya registrado en la administración de la instalación. Aparece una sola vez, cuando se genera — si no se guardó, quien administra la instalación genera otro en Admin › API Oficial (Meta)." },
+  "Ainda não configurado. Quem administra a instalação cadastra em Admin › API Oficial (Meta), e o token aparece lá pronto para copiar.": { es: "Todavía no configurado. Quien administra la instalación lo registra en Admin › API Oficial (Meta), y el token aparece allí listo para copiar." },
+  "cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — o verify token não foi gravado": { es: "cifrado no disponible en esta instalación (GUC app.nuvemshop_oauth_key ausente) — el verify token no fue guardado" },
   "O que ele consulta antes de responder": { es: "Qué consulta antes de responder" },
   "Marque o material do seu negócio que este assistente pode ler. Ele procura ali antes de responder, em vez de improvisar — e cita de onde tirou.": { es: "Marca el material de tu negocio que este asistente puede leer. Busca ahí antes de responder, en vez de improvisar — y cita de dónde lo sacó." },
   "Você ainda não cadastrou nenhum material.": { es: "Todavía no registraste ningún material." },
@@ -6918,6 +6994,7 @@ export const DICIONARIO: Traducoes = {
   "Funil não encontrado.": { es: "Embudo no encontrado." },
   "Informe o novo horário.": { es: "Indica el nuevo horario." },
   "Já existe um fluxo com este nome.": { es: "Ya existe un flujo con este nombre." },
+  "Já existe um contato com este telefone.": { es: "Ya existe un contacto con este teléfono." },
   "Janela inválida.": { es: "Ventana inválida." },
   "Janela inválida: 'from' deve ser anterior a 'to'.": { es: "Ventana inválida: 'from' debe ser anterior a 'to'." },
   "Lead não encontrado.": { es: "Lead no encontrado." },
@@ -7027,6 +7104,9 @@ export const DICIONARIO: Traducoes = {
   },
   "Este horário não está disponível. Consulte os horários livres e escolha outro.": {
     es: "Este horario no está disponible. Consulta los horarios libres y elige otro.",
+  },
+  "Este horário já está ocupado na agenda de quem atende — por outro compromisso ou pelo Google Agenda.": {
+    es: "Este horario ya está ocupado en la agenda de quien atiende — por otro compromiso o por Google Calendar.",
   },
   "listagem sem recorte: informe contato, lead, dia, período (de+ate) ou responsável.": {
     es: "listado sin recorte: indica contacto, lead, día, período (de+ate) o responsable.",
@@ -7346,6 +7426,15 @@ export const DICIONARIO: Traducoes = {
   "você ainda não publicou seus horários": { es: "todavía no publicaste tus horarios" },
   "não consegui carregar os horários": { es: "no pude cargar los horarios" },
   "nenhum horário livre neste dia": { es: "ningún horario libre en este día" },
+  // O encaixe no painel de marcação (#858): a pessoa digita um horário fora da grade.
+  "Outro horário": { es: "Otro horario" },
+  "Usar": { es: "Usar" },
+  "nenhum horário publicado neste dia": { es: "ningún horario publicado en este día" },
+  "Nenhum horário publicado neste dia.": { es: "Ningún horario publicado en este día." },
+  "Vale fora dos horários publicados. A agenda só recusa se o horário já estiver ocupado.": {
+    es: "Vale fuera de los horarios publicados. La agenda solo lo rechaza si el horario ya está ocupado.",
+  },
+  "Não foi marcado. Tente de novo.": { es: "No se agendó. Inténtalo de nuevo." },
   "Marcar outro": { es: "Agendar otro" },
   "Ver na agenda": { es: "Ver en la agenda" },
   "horários": { es: "horarios" },
@@ -7432,6 +7521,7 @@ export const DICIONARIO: Traducoes = {
   "Abrindo o áudio…": { es: "Abriendo el audio…" },
   "Sem áudio: o canal de voz não abriu": { es: "Sin audio: el canal de voz no se abrió" },
   "Chamada de voz": { es: "Llamada de voz" },
+  "Chamada de voz sem resposta": { es: "Llamada de voz sin respuesta" },
   "A chamada de voz não está configurada.": { es: "La llamada de voz no está configurada." },
   "Falta o endereço do serviço (": { es: "Falta la dirección del servicio (" },
   ") nas variáveis de ambiente desta instalação.": {
@@ -7468,6 +7558,12 @@ export const DICIONARIO: Traducoes = {
   "chamada de voz": { es: "llamada de voz" },
   "chamadas de voz": { es: "llamadas de voz" },
   "Não foi possível iniciar o pareamento.": { es: "No fue posible iniciar el emparejamiento." },
+  "O código de pareamento venceu. Clique em parear para gerar outro.": {
+    es: "El código de vinculación venció. Haz clic en vincular para generar otro.",
+  },
+  "Não foi possível receber o código de pareamento. Tente novamente.": {
+    es: "No fue posible recibir el código de emparejamiento. Inténtalo de nuevo.",
+  },
 
   // Mensajes de error de importación de planilha (lib/catalogo/planilha.ts)
   "A planilha está vazia.": { es: "La planilla está vacía." },
@@ -8582,6 +8678,8 @@ export const DICIONARIO: Traducoes = {
   "Agendamento criado.": { es: "Cita creada." },
   "Agendamento remarcado.": { es: "Cita reprogramada." },
   "Agendamento cancelado.": { es: "Cita cancelada." },
+  "Horário confirmado.": { es: "Horario confirmado." },
+  "Confirmar horário": { es: "Confirmar horario" },
   "Marcado como realizado.": { es: "Marcado como realizado." },
   "Marcado como falta — o horário volta a ficar livre.": { es: "Marcado como inasistencia — el horario vuelve a quedar libre." },
   "Mídia": { es: "Multimedia" },

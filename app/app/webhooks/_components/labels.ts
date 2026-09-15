@@ -27,6 +27,7 @@ export const TRIGGER_LABELS: Record<TriggerEvent, string> = {
   "appointment.confirmed": "Quando um horário pendente for confirmado",
   "appointment.rescheduled": "Quando um horário for remarcado",
   "appointment.cancelled": "Quando um horário for cancelado",
+  "contact.birthday": "No aniversário de um contato",
 };
 
 export const ACTION_LABELS: Record<ActionType, string> = {

@@ -60,6 +60,7 @@ export const AUDIT_ACTIONS = [
   "contact.anonymized",
   "contact.merge_pending",
   "contact.merged",
+  "contact.aniversario_emitido",
   "lgpd.anonymize_executed",
   // A cascata retomando o que uma execução interrompida não terminou (#310).
   "lgpd.anonymize_catchup",
@@ -210,6 +211,13 @@ export const AUDIT_ACTIONS = [
   "channel.reactivated",
   // Chamada de voz WhatsApp (WaCalls, spec 18) — pareamento do segundo
   // dispositivo vinculado, opt-in por org. Admin only.
+  //
+  // `voice.session_prepared` NÃO é mais emitida: era o passo "preparar" que
+  // antecedia o `/pair` do upstream, e o `/pair` foi embora (ver
+  // `app/api/v1/voice/sessions/pair/route.ts`). Fica na lista porque a trilha
+  // de quem pareou entre 2026-09-14 e a remoção tem linhas com esse nome, e o
+  // painel rotula a partir daqui.
+  "voice.session_prepared",
   "voice.session_pair_started",
   // As mutações da chamada em si. Todas auditadas porque todas têm efeito no
   // mundo: uma ligação sai do CRM para o telefone de uma pessoa, alguém a
@@ -323,11 +331,28 @@ export const AUDIT_ACTIONS = [
   // veem, e a pergunta "quem repintou isto?" só tem resposta aqui: não há
   // event_log (nenhum handler consumiria o tipo — ver register-handlers.ts).
   "platform_branding.updated",
+  // A política de cadastro da INSTALAÇÃO trocada em `platform_settings`
+  // (migration 0233) — mutação de plataforma, sem `organization_id`. Auditável
+  // porque decide quem consegue ENTRAR no sistema inteiro, e "por que ninguém
+  // mais cria conta?" só tem resposta aqui: não há event_log que cubra o tipo
+  // (nenhum handler o consumiria — ver register-handlers.ts) e a troca não
+  // deixa rastro em nenhuma outra tabela.
+  "platform.signup_mode_updated",
   "platform_google_oauth.updated",
-  // Flag de feature de um TENANT ligada/desligada pela plataforma (migration
+ // Flag de feature de um TENANT ligada/desligada pela plataforma (migration
   // 9003). Com `organization_id`: é mutação de tenant, decidida por quem opera
   // a instalação.
   "platform.tenant_feature_changed",
+  // A credencial do APP da Meta da INSTALAÇÃO (migration 0257): o App Secret que
+  // assina a entrega do webhook e o verify token que responde ao handshake.
+  // Auditável pelo mesmo motivo da linha acima, e com alcance maior — quem tem o
+  // App Secret assina uma entrega de webhook VÁLIDA com dados que ele inventar,
+  // movendo contato e lead no funil de QUALQUER cliente daquela instalação.
+  // Sem `organization_id`: não é credencial de tenant. `"platform_meta_app.
+  // verify_token_rotated"` é uma ação separada porque a rotação derruba a
+  // verificação de URL que estava valendo até alguém colar o valor novo na Meta.
+  "platform_meta_app.updated",
+  "platform_meta_app.verify_token_rotated",
   // A conexão da ORGANIZAÇÃO com a conta de anúncios (migration 0213).
   // Auditável porque o token gravado aqui escreve conversões na conta de
   // mídia do cliente: "quem apontou minhas vendas para este destino?" só tem
