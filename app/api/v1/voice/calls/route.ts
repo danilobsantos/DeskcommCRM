@@ -14,6 +14,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { logger } from "@/lib/logger";
 import { createClient } from "@/lib/supabase/server";
+import { exigirVozLigada } from "@/lib/voice/guarda";
 import { getWacallsClient, wacallsFriendlyError } from "@/lib/wacalls/client";
 import { resolveWacallsSession } from "@/lib/wacalls/session";
 
@@ -44,6 +45,19 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const supabase = await createClient();
+
+  // Segundo portão do mesmo consentimento. Não é redundante com o do
+  // pareamento: uma organização que pareou e DEPOIS desligou fica, por um
+  // instante, com sessão viva e escolha `false` — e é nesse instante que
+  // alguém clicaria "Chamar". O desligar despareia, mas a ordem dos efeitos
+  // não é uma coisa em que vale a pena confiar num caminho que expõe a conta.
+  // `instalacaoOferece: true` porque o `getWacallsClient()` acima já provou
+  // o fato e já devolveu 503 se fosse falso — a guarda não o relê pelo env.
+  const vozDesligada = await exigirVozLigada(supabase, activeOrg.orgId, {
+    requestId,
+    instalacaoOferece: true,
+  });
+  if (vozDesligada) return vozDesligada;
 
   const session = await resolveWacallsSession(supabase, activeOrg.orgId);
   if (!session) {

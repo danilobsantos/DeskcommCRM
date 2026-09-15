@@ -1,6 +1,7 @@
 "use client";
 import { AgendasConectadas } from "@/components/agenda/AgendasConectadas";
 import { PrazosDePresenca } from "@/components/agenda/PrazosDePresenca";
+import { DiasBloqueados } from "@/components/agenda/DiasBloqueados";
 
 import { useT } from "@/hooks/i18n/useT";
 
@@ -195,6 +196,7 @@ export function TiposDeAgendamentoClient({
     <div className="flex min-h-0 flex-1 flex-col gap-4" data-testid="tipos-de-agendamento-config">
       {podeConfigurarGoogle && <AgendasConectadas />}
       <PrazosDePresenca podeEditar={podeEditar}/>
+      <DiasBloqueados podeEditar={podeEditar}/>
       {podeEditar ? (
         <div>
           {criando ? (
@@ -412,7 +414,15 @@ export function TiposDeAgendamentoClient({
                       disabled={salvando}
                       onClick={() =>
                         void comErro(
-                          () => apiClient.patch("/api/v1/agenda/tipos", { id: tipo.id, is_active: true } as never),
+                          // Rota PRÓPRIA, e o `as never` que estava aqui saiu.
+                          //
+                          // Este botão nunca funcionou: mandava `is_active` num
+                          // PATCH cujo schema é `criarSchema.partial()`, onde
+                          // esse campo não existe. Zod descarta chave
+                          // desconhecida em silêncio, o corpo chegava vazio e a
+                          // resposta era 422 "Nenhum campo para alterar.". O
+                          // cast era o que impedia o typecheck de acusar.
+                          () => apiClient.post("/api/v1/agenda/tipos/reativar", { id: tipo.id }),
                           "Tipo reativado.",
                         )
                       }

@@ -312,6 +312,18 @@ export function CampoDeLogo({
                 style={{ backgroundColor: fundo }}
               >
                 {logo ? (
+                  // SEM chip claro de propósito (divergência assumida do upstream
+                  // #659, mesma da barra lateral e da tela de entrada): `logo`
+                  // já é a arte DO TEMA da caixa (claro/escuro por tenant) — a
+                  // premissa do chip ("uma arte só, pensada para fundo claro")
+                  // não vale, e a moldura branca mentiria na prévia sobre o que
+                  // o app real desenha.
+                  // <img> e não next/image pelo mesmo motivo da barra lateral e da
+                  // tela de acesso: a URL é do projeto de quem hospeda, e
+                  // `next/image` exige allowlist de domínios fechada em BUILD — a
+                  // imagem pré-buildada do self-host recusaria o domínio do
+                  // operador. Altura fixa e largura livre para não distorcer arte
+                  // de proporção desconhecida.
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={logo}

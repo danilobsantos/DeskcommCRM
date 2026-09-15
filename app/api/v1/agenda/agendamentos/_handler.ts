@@ -27,10 +27,16 @@ import { horariosLivresDaOrg } from "@/lib/agenda/consulta";
 import {
   atividadeDaTransicao,
   autorParaTimeline,
+  gatilhoDaTransicao,
   type SituacaoAnterior,
   type Transicao,
 } from "@/lib/agenda/laco";
-import { ALVO_DE_VINCULO_DO_AGENDAMENTO, VINCULO_DE_AGENDAMENTO } from "@/lib/agenda/tipos";
+import {
+  ALVO_DE_VINCULO_DO_AGENDAMENTO,
+  ENTIDADE_DO_AGENDAMENTO,
+  NOME_GENERICO_DO_TIPO,
+  VINCULO_DE_AGENDAMENTO,
+} from "@/lib/agenda/tipos";
 import { ApiError } from "@/lib/api/types";
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
@@ -233,6 +239,7 @@ export async function marcarAgendamentoHandler(
     appointmentId: criado.id,
     contactId: input.contact_id ?? null,
     atividade: atividadeDaTransicao(null, transicao),
+    gatilho: gatilhoDaTransicao(null, transicao),
     transicao,
     fusoDoCompromisso: criado.time_zone,
     nomeDoTipo: tipo.name,
@@ -395,9 +402,10 @@ export async function alterarAgendamentoHandler(
       appointmentId: atual.id as string,
       contactId: (atual.contact_id as string | null) ?? null,
       atividade: atividadeDaTransicao(atual.status as SituacaoAnterior, transicao),
+      gatilho: gatilhoDaTransicao(atual.status as SituacaoAnterior, transicao),
       transicao,
       fusoDoCompromisso: String(salvo.time_zone),
-      nomeDoTipo: "Agendamento",
+      nomeDoTipo: await nomeDoTipoDoCompromisso(supabase, ctx, atual.event_type_id as string | null),
       outcome: {revision:salvo.revision,source_kind:salvo.outcome_source_kind,message_id:salvo.outcome_message_id,recorded_at:salvo.outcome_recorded_at},
     });
 
@@ -432,6 +440,7 @@ export async function cancelarAgendamentoHandler(
     "id",
     "revision",
     "contact_id",
+    "event_type_id",
     "status",
     "time_zone",
   ]);
@@ -451,9 +460,10 @@ export async function cancelarAgendamentoHandler(
     appointmentId: atual.id as string,
     contactId: (atual.contact_id as string | null) ?? null,
     atividade: atividadeDaTransicao(atual.status as SituacaoAnterior, "cancelled"),
+    gatilho: gatilhoDaTransicao(atual.status as SituacaoAnterior, "cancelled"),
     transicao: "cancelled",
     fusoDoCompromisso: atual.time_zone as string,
-    nomeDoTipo: "Agendamento",
+    nomeDoTipo: await nomeDoTipoDoCompromisso(supabase, ctx, atual.event_type_id as string | null),
   });
 
   void audit({
@@ -470,6 +480,43 @@ export async function cancelarAgendamentoHandler(
 }
 
 /** O compromisso, ou 404 — sempre com o filtro de organização. */
+/**
+ * O NOME DO TIPO DE ATENDIMENTO — lido da linha, nunca digitado aqui.
+ *
+ * Ele viaja no payload do gatilho de automação (`event.event_type_name`) e é o
+ * ÚNICO campo por onde uma regra distingue "Limpeza" de "Avaliação": a linha do
+ * compromisso guarda `event_type_id`, um uuid que ninguém digita numa condição.
+ * O editor de regras oferece exatamente essa condição ("Tipo de atendimento
+ * contém …").
+ *
+ * ⚠️ ISTO JÁ FOI UM LITERAL, e o literal é o defeito. `alterar` e `cancelar`
+ * passavam `"Agendamento"` cravado, então três dos quatro gatilhos
+ * (`confirmed`, `rescheduled`, `cancelled`) emitiam sempre a mesma palavra —
+ * a condição aparecia na tela, o operador a salvava, e ela não casava nunca.
+ * Controle decorativo é pior que controle ausente: a pessoa acredita que
+ * configurou.
+ *
+ * Uma consulta a mais por transição, e só quando há transição. `marcar` não
+ * chama esta função porque já tem a linha do tipo em mãos.
+ */
+async function nomeDoTipoDoCompromisso(
+  supabase: SB,
+  ctx: HandlerCtx,
+  eventTypeId: string | null,
+): Promise<string> {
+  if (!eventTypeId) return NOME_GENERICO_DO_TIPO;
+  const { data } = await supabase
+    .from("calendar_event_types")
+    .select("name")
+    .eq("organization_id", ctx.organization_id)
+    .eq("id", eventTypeId)
+    .maybeSingle();
+  const nome = (data as { name?: string | null } | null)?.name;
+  // O tipo apagado depois do compromisso é o único caminho até aqui. Falhar a
+  // leitura NÃO pode desfazer um cancelamento já gravado.
+  return nome?.trim() ? nome : NOME_GENERICO_DO_TIPO;
+}
+
 async function exigeAgendamento(
   supabase: SB,
   ctx: HandlerCtx,
@@ -567,6 +614,8 @@ async function fecharOLaco(
     appointmentId: string;
     contactId: string | null;
     atividade: string | null;
+    /** Gatilho de automação, ou `null` quando a transição não é notícia para uma regra. */
+    gatilho: string | null;
     transicao: Transicao;
     fusoDoCompromisso: string;
     nomeDoTipo: string;
@@ -574,6 +623,42 @@ async function fecharOLaco(
   },
 ): Promise<void> {
   // Pendência Google é derivada da revisão publicável; não emite evento sem consumer.
+
+  // O gatilho de automação, ANTES de qualquer early-return. Ele não depende de
+  // haver negócio aberto: uma regra de "avise a cliente que confirmou" vale
+  // igual para quem não tem lead nenhum — e todo o resto desta função é sobre a
+  // timeline do lead, que é outra pergunta.
+  //
+  // Fire-and-forget, como a atividade: falhar em emitir NÃO pode desfazer um
+  // compromisso que já está gravado. O consumidor é o motor de regras
+  // (`lib/automation/engine.ts`), que casa por `trigger_event`.
+  if (args.gatilho) {
+    const { error } = await supabase.from("event_log").insert({
+      organization_id: ctx.organization_id,
+      event_type: args.gatilho,
+      entity_kind: ENTIDADE_DO_AGENDAMENTO,
+      entity_id: args.appointmentId,
+      payload: {
+        appointment_id: args.appointmentId,
+        contact_id: args.contactId,
+        event_type_name: args.nomeDoTipo,
+        time_zone: args.fusoDoCompromisso,
+        transicao: args.transicao,
+      },
+      // `request_id` sem o prefixo `rule:` de propósito: ele correlaciona com o
+      // audit log e NÃO aciona o anti-loop do motor, que só barra o que uma
+      // regra causou.
+      metadata: { request_id: ctx.requestId },
+    });
+    if (error) {
+      logger.error("[agenda] gatilho de automação não foi emitido", {
+        appointment_id: args.appointmentId,
+        organization_id: ctx.organization_id,
+        gatilho: args.gatilho,
+        error: error.message,
+      });
+    }
+  }
 
   const leadId = args.contactId ? await leadAtivoDoContato(supabase, ctx, args.contactId) : null;
 

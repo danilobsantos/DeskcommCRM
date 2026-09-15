@@ -112,6 +112,15 @@ beforeEach(() => {
   escritas = [];
   inseridas = [];
   autorizadoComo(EU);
+  // ⚠️ CONSENTIMENTO DA ORGANIZAÇÃO, e ele é PRÉ-CONDIÇÃO desde que
+  // `exigirVozLigada` ganhou chamadores. Sem esta linha, `POST /voice/calls`
+  // recusa com 422 `voice_desligada_na_organizacao` ANTES de chegar às regras
+  // de contato — e os casos abaixo mediriam a recusa errada.
+  //
+  // A recusa em si tem caso próprio no fim deste arquivo, e a varredura que
+  // garante a guarda nas rotas é
+  // `tests/unit/voz-consentimento-e-portao-de-verdade.test.ts`.
+  respostas["org_voice_calls"] = { data: { enabled: true, risco_aceito_em: null }, error: null };
   vi.mocked(createClient).mockResolvedValue(dubleSupabase() as never);
   vi.mocked(getWacallsClient).mockReturnValue(wacalls as never);
 });
@@ -186,6 +195,71 @@ describe("o discador respeita quem pediu para não ser incomodado", () => {
     const res = await discar();
     expect(res.status).toBe(422);
     expect((await corpo(res)).error).toMatchObject({ code: "contact_anonymized" });
+    expect(wacalls.startCall).not.toHaveBeenCalled();
+  });
+});
+
+describe("o discador exige o consentimento da organização", () => {
+  const SESSAO_PAREADA = {
+    data: { id: "canal-de-voz", wacalls_session_id: "sessao-up" },
+    error: null,
+  };
+
+  async function discar() {
+    const { POST } = await import("@/app/api/v1/voice/calls/route");
+    return POST(
+      new Request("http://x/api/v1/voice/calls", {
+        method: "POST",
+        body: JSON.stringify({ contactId: CONTATO }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
+
+  it("organização que nunca escolheu não liga, e nada sai para o telefone", async () => {
+    // `escolha = null` — a linha nem existe. É o estado de TODA organização
+    // antes de alguém aceitar o risco na tela de Segurança, e o mais comum.
+    respostas["org_voice_calls"] = { data: null, error: null };
+    respostas["channel_sessions"] = SESSAO_PAREADA;
+    respostas["contacts"] = {
+      data: { id: CONTATO, phone_number: "5511900000000", name: "Fulano", is_blocked: false, is_anonymized: false },
+      error: null,
+    };
+
+    const res = await discar();
+    expect(res.status).toBe(422);
+    expect((await corpo(res)).error).toMatchObject({ code: "voice_desligada_na_organizacao" });
+    expect(wacalls.startCall, "discou sem a organização ter ligado a chamada de voz").not.toHaveBeenCalled();
+    expect(inseridas).toEqual([]);
+  });
+
+  it("organização que DESLIGOU não liga", async () => {
+    respostas["org_voice_calls"] = { data: { enabled: false, risco_aceito_em: null }, error: null };
+    respostas["channel_sessions"] = SESSAO_PAREADA;
+    respostas["contacts"] = {
+      data: { id: CONTATO, phone_number: "5511900000000", name: "Fulano", is_blocked: false, is_anonymized: false },
+      error: null,
+    };
+
+    const res = await discar();
+    expect(res.status).toBe(422);
+    expect(wacalls.startCall).not.toHaveBeenCalled();
+  });
+
+  it("leitura que não volta recusa com 503, e NÃO afirma que está desligada", async () => {
+    // "não sei" disfarçado de "está desligada" faz quem opera procurar um
+    // interruptor quando o problema é o banco. Fechado na AÇÃO, honesto no
+    // código — é o racional escrito em `lib/voice/guarda.ts`.
+    respostas["org_voice_calls"] = { data: null, error: { message: "conexão caiu" } };
+    respostas["channel_sessions"] = SESSAO_PAREADA;
+    respostas["contacts"] = {
+      data: { id: CONTATO, phone_number: "5511900000000", name: "Fulano", is_blocked: false, is_anonymized: false },
+      error: null,
+    };
+
+    const res = await discar();
+    expect(res.status).toBe(503);
+    expect((await corpo(res)).error).toMatchObject({ code: "voice_estado_indeterminado" });
     expect(wacalls.startCall).not.toHaveBeenCalled();
   });
 });

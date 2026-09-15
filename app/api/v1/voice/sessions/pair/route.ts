@@ -19,6 +19,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { logger } from "@/lib/logger";
 import { createClient } from "@/lib/supabase/server";
+import { exigirVozLigada } from "@/lib/voice/guarda";
 import { getWacallsClient, wacallsFriendlyError } from "@/lib/wacalls/client";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,28 @@ export async function POST(): Promise<Response> {
   }
 
   const supabase = await createClient();
+
+  // ⚠️ O CONSENTIMENTO É EXIGIDO AQUI, e este é o lugar certo: parear é o ato
+  // que CRIA a exposição — a partir dele existe um segundo aparelho vinculado
+  // ao número da empresa, com o risco de o WhatsApp bloquear a CONTA inteira.
+  //
+  // Sem esta linha, o interruptor de Configurações › Segurança era decorativo
+  // pelo caminho de entrada: a tela pedia "eu li o aviso e aceito o risco",
+  // e quem fosse direto a Conexões pareava sem passar por ela. Desligar
+  // continuava real (o PUT do opt-in despareia de verdade), mas LIGAR nunca foi
+  // necessário — e um consentimento que dá para pular não é consentimento.
+  //
+  // O que NÃO ganha esta guarda, de propósito: `DELETE /sessions` (desparear),
+  // `reject` e `hangup`. A porta de saída nunca depende do interruptor — é a
+  // mesma razão escrita no cabeçalho da rota de DELETE.
+  // `instalacaoOferece: true` porque o `getWacallsClient()` acima já provou
+  // o fato e já devolveu 503 se fosse falso — a guarda não o relê pelo env.
+  const vozDesligada = await exigirVozLigada(supabase, activeOrg.orgId, {
+    requestId,
+    instalacaoOferece: true,
+  });
+  if (vozDesligada) return vozDesligada;
+
   const { data: existingRaw } = await supabase
     .from("channel_sessions")
     .select("id, wacalls_session_id")

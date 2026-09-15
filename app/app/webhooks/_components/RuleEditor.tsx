@@ -75,6 +75,17 @@ const TAG_ADDED_FIELD: CuratedField = {
   op: "contains",
 };
 
+/**
+ * O tipo vem do PAYLOAD, não da linha do compromisso, e é de propósito: a linha
+ * guarda `event_type_id`, um uuid que ninguém digita numa condição. O nome
+ * viajou no evento justamente para caber aqui, e `contém` resolve o caso real
+ * ("Manutenção" pega as três).
+ */
+const AGENDAMENTO_FIELDS: CuratedField[] = [
+  { value: "event.event_type_name", label: "Tipo de atendimento", op: "contains" },
+  { value: "contact.tags", label: "Tags do contato", op: "contains" },
+];
+
 // ponytail: etapa de destino usa o funil default (cobre o caso comum de 1
 // funil); se o produto ganhar múltiplos funis relevantes aqui, trocar por um
 // seletor de funil antes do de etapa.
@@ -84,6 +95,10 @@ const CURATED_FIELDS: Record<TriggerEvent, CuratedField[]> = {
   "message.received": MESSAGE_FIELDS,
   "lead.tag_added": [...LEAD_FIELDS, TAG_ADDED_FIELD],
   "contact.tag_added": [TAG_ADDED_FIELD],
+  "appointment.created": AGENDAMENTO_FIELDS,
+  "appointment.confirmed": AGENDAMENTO_FIELDS,
+  "appointment.rescheduled": AGENDAMENTO_FIELDS,
+  "appointment.cancelled": AGENDAMENTO_FIELDS,
 };
 
 const OP_LABELS: Record<Op, string> = { eq: "é", neq: "não é", contains: "contém" };

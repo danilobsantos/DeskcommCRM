@@ -1,7 +1,7 @@
 -- ============================================================================
--- 0237 — O NOME DA SESSÃO WAHA ESTOURA O TETO QUE O WAHA IMPÕE
--- (renumerada 0232→0237 no merge main→dev de 2026-09-11: 0232 já era da
--- 0232_realtime_conversation_notes; timestamp intacto)
+-- 9008 — O NOME DA SESSÃO WAHA ESTOURA O TETO QUE O WAHA IMPÕE
+-- (0232→0237 em 2026-09-11, 0237→9008 em 2026-09-14 pela regra 9xxx da dev:
+-- o upstream criou outra 0237; timestamp intacto)
 --
 -- `fn_reserve_channel_connection` (nasceu na 0228, forward-fix na 0230) gera o
 -- `waha_session_name` de canal novo como:

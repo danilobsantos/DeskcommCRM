@@ -41,6 +41,11 @@ function errMsg(err: unknown, fallback: string, t: (texto: string) => string): s
 export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boolean }) {
   const t = useT();
   const [estado, setEstado] = useState<Estado | null>(null);
+  // A escolha da ORGANIZAÇÃO, que é outra pergunta que `paired`. Ler aqui é o
+  // que evita o pior desfecho: a tela oferecer "Conectar", a pessoa escanear o
+  // QR com o celular na mão, e só então descobrir que faltava ligar noutra
+  // tela. Fazer alguém agir para descobrir que não podia é pior que dizer antes.
+  const [vozLigada, setVozLigada] = useState<boolean | null>(null);
   const [pareando, setPareando] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -51,6 +56,16 @@ export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boole
       setEstado(r.data);
     } catch {
       setEstado(null);
+    }
+    try {
+      const o = await apiClient.get<{ data: { ligada: boolean } }>("/api/v1/voice/opt-in");
+      setVozLigada(o.data.ligada);
+    } catch {
+      // `null` = não deu para saber. O aviso abaixo só aparece com `false`
+      // EXPLÍCITO: esconder o botão porque uma leitura falhou tiraria o caminho
+      // de quem está com tudo certo. Falha ABERTA na informação; quem fecha a
+      // ação é a rota, que checa de novo no servidor.
+      setVozLigada(null);
     }
   };
 
@@ -113,6 +128,19 @@ export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boole
           {t("Falta o endereço do serviço (")}
           <code>WACALLS_API_BASE_URL</code>
           {t(") nas variáveis de ambiente desta instalação.")}
+        </p>
+      </div>
+    );
+  }
+
+  if (vozLigada === false) {
+    return (
+      <div className="rounded-md border border-border bg-surface p-4 text-sm">
+        <p className="font-medium">{t("A chamada de voz está desligada nesta empresa.")}</p>
+        <p className="mt-1 text-muted-foreground">
+          {t(
+            "Conectar o aparelho exige ligá-la antes, em Configurações › Segurança — é lá que está o aviso sobre o risco de o WhatsApp bloquear a conta, e quem liga precisa ter lido.",
+          )}
         </p>
       </div>
     );

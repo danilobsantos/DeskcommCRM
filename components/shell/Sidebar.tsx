@@ -129,6 +129,11 @@ export function SidebarContent({
         )}
       >
         {logo && !collapsed ? (
+          // SEM moldura clara de propósito (divergência assumida do upstream #659):
+          // aqui há UMA ARTE POR TEMA (`logo` acima já é a do tema em vigor, com
+          // fallback em cascata) — a premissa do chip ("uma arte só, pensada
+          // para fundo claro") não vale, e a moldura branca virava moldura de
+          // sobra sobre logo já pensado para o escuro.
           // <img> em vez de next/image de propósito: a URL vem de quem hospeda
           // (banco ou .env), e next/image exige allowlist de domínios fechada em
           // build — a imagem pré-buildada rejeitaria o domínio do self-hoster.
