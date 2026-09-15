@@ -17,6 +17,7 @@ import { traduzir } from "@/lib/i18n/dicionario";
 import type { Idioma } from "@/lib/i18n/idiomas";
 import { roleAtLeast } from "@/lib/auth/types";
 import { canonicalPhoneBR, phoneLookupVariants } from "@/lib/channels/phone-variants";
+import { encontrarContatoPorTelefone } from "@/lib/channels/contato-por-telefone";
 import { hashCpf, encryptCpfSql } from "@/lib/contacts/cpf";
 import type { Contact } from "@/lib/types/contacts";
 import { ensureConversation, sessaoProntaParaEnvio } from "@/lib/automation/start-conversation";
@@ -400,6 +401,30 @@ export async function createContactHandler(
     .single();
 
   if (insErr) {
+    // 409 quando o telefone já é de um contato vivo desta organização: o índice
+    // parcial `uniq_contacts_org_phone` (organization_id, phone_number) barra o
+    // insert com 23505. E-mail e CPF também têm trava única na tabela, então o
+    // 23505 sozinho não diz qual índice bateu: só vira `contact_exists` se a
+    // releitura do telefone achar um contato vivo. A releitura repete o filtro
+    // por `organization_id` — o id devolvido no `details` nunca vem do corpo da
+    // requisição — e qualquer outro conflito continua no 500 de sempre.
+    const telefoneDoInsert = insertRow.phone_number as string | null;
+    if (insErr.code === "23505" && telefoneDoInsert) {
+      const existente = await encontrarContatoPorTelefone(
+        supabase,
+        ctx.organization_id,
+        telefoneDoInsert,
+      );
+      if (existente) {
+        throw new ApiError(
+          409,
+          "contact_exists",
+          { contact_id: existente.id },
+          ctx.requestId,
+          traduzir("Já existe um contato com este telefone.", ctx.idioma ?? "pt-BR"),
+        );
+      }
+    }
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, insErr.message);
   }
 

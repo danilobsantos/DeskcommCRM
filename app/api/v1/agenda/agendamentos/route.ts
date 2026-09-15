@@ -184,12 +184,24 @@ export async function GET(req: NextRequest): Promise<Response> {
   });
 
   if (!resultado.ok) {
-    return fail(
-      resultado.codigo === "sem_alvo" ? "agenda_listagem_sem_recorte" : "internal_error",
-      t(resultado.motivoParaOperador),
-      resultado.codigo === "sem_alvo" ? 422 : 500,
-      { requestId },
-    );
+    // ⚠️ DUAS DAS TRÊS RECUSAS SÃO ERRO DE QUEM CHAMA — e o `else` de antes
+    // chamava todas de falha do servidor.
+    //
+    // `sem_alvo` (falta recorte) e `alvo_nao_e_lead` (o `lead_id` veio com o id
+    // de um CONTATO — a confusão medida em #509) são consulta malformada: o
+    // servidor está inteiro, e 500 diz ao cliente server-to-server que a culpa é
+    // nossa. Pior: acorda o Sentry por requisição malformada, que é ruído.
+    //
+    // O mapa é explícito — mesmo desenho de `CODIGO_DA_RECUSA` em `_handler.ts`
+    // — porque status e código andam juntos, e a indexação pelo código faz o
+    // compilador reclamar se `consulta.ts` ganhar uma recusa sem desfecho aqui.
+    const recusa = {
+      sem_alvo: { status: 422, code: "agenda_listagem_sem_recorte" },
+      alvo_nao_e_lead: { status: 422, code: "agenda_listagem_alvo_nao_e_lead" },
+      erro_interno: { status: 500, code: "internal_error" },
+    } as const;
+    const { status, code } = recusa[resultado.codigo];
+    return fail(code, t(resultado.motivoParaOperador), status, { requestId });
   }
 
   // ─── A OCUPAÇÃO DO GOOGLE ENTRA AQUI, e não em `listaAgendamentos` ────────

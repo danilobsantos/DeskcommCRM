@@ -458,6 +458,23 @@ isso funcionar, e cada uma já falhou quando ausente:
 
    Isto me custou duas rodadas em 14/09: o laço reportou "OK, sem conflito" para seis PRs que o
    `pre-commit` tinha barrado, e o log lido de cima parecia sucesso.
+4. **Antes de escolher quem entra: leia o CORPO e o estado de rascunho — a ancestralidade por SHA
+   não vê empilhamento por CONTEÚDO.** Em 15/09, `git merge-base --is-ancestor` entre #861, #862 e
+   #865 respondeu "independentes", e o corpo do #865 dizia *"rascunho empilhado — contém os commits
+   do #861 e do #862"*. O autor tinha **recriado** um dos commits (SHA novo, patch idêntico). A
+   sonda que responde "está empilhado?" compara PATCH, não ponta:
+
+   ```bash
+   git log --oneline origin/main..refs/tri/<topo>                     # os commits do topo, um a um
+   git show <commit> | git patch-id --stable                           # mesmo patch-id = mesmo trabalho
+   git cherry -v refs/tri/<base> refs/tri/<topo>                       # "-" = já está na base
+   ```
+
+   Integrar base e topo no mesmo lote faz o mesmo conteúdo entrar duas vezes por caminhos
+   diferentes: conflito em todo arquivo da base ou, pior, merge limpo com bloco de apêndice
+   duplicado. **E PR em rascunho não entra no lote.** Rascunho é o autor dizendo "não terminei";
+   mede-se e comenta-se (a revisão de segurança vale como comentário antecipado), mas integrá-lo
+   tira dele o rebase que ele mesmo anunciou.
 
 ### ⚠️ O gate que o lote esconde: `build`
 
@@ -892,6 +909,35 @@ O escape existe (`DESKCOMM_GOV_INVARIANTS_EDIT=1`, `DESKCOMM_GOV_MIGRATION_EDIT=
 nesses dois casos — mas **a razão vai escrita no corpo do commit, com a medição**, nunca implícita
 no uso da variável. A linha do segundo caso é a mais importante: o hook da migration **não é rede
 para renumeração**, e quem lê a mensagem dele achando que é vai renumerar contra uma régua cega.
+
+### E há o caso oposto, que é pior: o merge LIMPO não chama hook nenhum
+
+A tabela acima trata do hook que dispara quando não devia. O furo mais caro é o hook que **não
+dispara quando devia** — e num trem de lotes ele é a regra, não a exceção.
+
+`git merge` que termina **sem conflito** cria o commit sozinho e **não roda o `pre-commit`**. Dois
+PRs que trazem migrations de nomes diferentes (`…_0241_lembrete_em_degraus.sql` e
+`…_0241_rascunho_de_agente_sem_numero.sql`) não conflitam textualmente — então o merge sai limpo, o
+commit nasce sem o hook, e o `0241` duplicado entra calado.
+
+Medido em 14/09: o #804 entrou assim no lote 6, com o `0241` que o #770 já ocupava na `main` desde
+o lote 2. Nenhuma guarda viu. Quem viu foi a sonda abaixo, rodada depois de montar o lote.
+
+**Num trem, a colisão de migration se mede na ÁRVORE montada, nunca se confia no hook:**
+
+```bash
+ls supabase/migrations/*.sql | sed -E 's/.*_([0-9]{4})_.*/\1/'   | sort | uniq -d   # NNNN
+ls supabase/migrations/*.sql | sed -E 's#.*/([0-9]+)_.*#\1#'     | sort | uniq -d   # timestamp
+```
+
+Vazio nas duas é o esperado. Rode depois de **cada** merge que traga migration, e **sempre** antes
+de abrir o PR do lote — com **linha de base** contra a `origin/main`: se ela também devolver a
+duplicata, o número é antigo e não do lote.
+
+Linha de base não é controle positivo, e a diferença importa: a `main` limpa devolvendo vazio não
+prova que a sonda enxerga — prova só que não há dívida herdada. O controle positivo é a sonda **ter
+achado** uma duplicata real alguma vez; em 14/09 foi o `0241` do #804. Sem esse registro, vazio nas
+duas é indistinguível de instrumento morto.
 
 ---
 
@@ -2357,3 +2403,128 @@ Cada um destes foi cometido de verdade nesta casa, e é por isso que estão escr
     pattern`, e dentro de um laço isso falha **no meio** enquanto o resto segue: em 14/09, 11 de 29
     vereditos não foram postados e o laço imprimiu "vereditos postados" no fim. Texto com mais de
     uma linha vai por Python, e o laço confere o `returncode` de cada envio.
+
+
+57. **Reconciliação que REMOVE um artefato e deixa o inventário que o declarava.** Tirar um
+    workflow, uma rota ou uma tela é metade do conserto: a outra metade é o mapa que a enumera
+    (`GATILHO_ESPERADO`, `vercel.ts`, `registry.ts`, `SPECS_PARTE_*`). Em 14/09 removi o workflow
+    de deploy de um fork e deixei as três entradas dele no `GATILHO_ESPERADO` — e não vi porque, no
+    worktree da reconciliação, rodei só o teste que eu sabia afetado. **Depois de reconciliar, rode
+    a suíte, não o arquivo.** O arquivo que você lembra é o que você já sabe; o que quebra é o que
+    você não pensou.
+
+58. **Duas reconciliações feitas em ordem diferente da ordem de merge.** Reconciliei o `vercel.ts`
+    do #767 antes de o #805 entrar no lote; o #805 criou um cron que aquele `vercel.ts` não
+    conhecia. Cada reconciliação estava certa contra a árvore em que foi feita. **Inventário se
+    confere na árvore do LOTE montado, depois do último merge** — nunca na branch de reconciliação
+    isolada.
+
+59. **Exit 1 com zero falhas, e as duas sondas concordando em zero.** O rodapé `Tests … 0 failed` e
+    o `grep FAIL` vazio não esgotam o que reprova uma suíte: erro não tratado sai numa terceira
+    linha, `Errors N error`. Em 15/09 a suíte de um lote saiu `exit=1` com 866 arquivos passados.
+    O exit code é a autoridade; quando ele diverge, leia `Errors` — e prove que é carga rodando o
+    arquivo apontado **isolado, mais de uma vez**, e depois a suíte de novo na árvore final.
+
+60. **Gate de merge que já estava vermelho, consertado pela metade.** Um PR chegou com `verify`
+    E `invariants` vermelhos. Consertei o `verify` e assumi que o `invariants` era a mesma causa,
+    sem abrir o log. Não era — era um invariante que o PR tinha atualizado em uma de duas linhas
+    irmãs. **Cada job vermelho tem o seu log.** Dois vermelhos não são um defeito até o segundo
+    log dizer que são.
+
+61. **O instrumento de medição mentiu em três direções no mesmo lote.** Em 15/09 o
+    `triagem/scripts/complemento.sh` entregou ao dossiê do lote 8 três números que eram dele, não
+    dos PRs — e o analista só não os herdou porque conferiu cada um:
+    - **SIGPIPE com `pipefail`.** `echo "$DIFF" | grep -q` devolve 141 em diff grande (o `grep -q`
+      fecha o pipe no primeiro acerto e o `echo` morre). A sonda lia FALSO justamente quando achava:
+      `rls_enable AUSENTE — bloqueador` no #865 com a linha duas vezes no diff, e
+      `migration_constraint`, `migration_idempotente` e `falha_em_verde` simplesmente **sumiam** —
+      o último era o achado real do PR. Conserto: here-string (`grep ... <<<"$DIFF"`), sem pipe.
+    - **Comentário casado como código.** `definer_revoke: SEM revoke` no #861, que não cria função
+      nenhuma: casou em `+-- \`security definer\` nova ⇒ ... não é acionado`. Conserto: as sondas
+      semânticas leem só linhas acrescentadas em arquivo de código, sem comentário.
+    - **`.test.tsx` fora da conta.** `muda fonte SEM teste` no #860, que trazia
+      `agenda-confirmar-pela-tela.test.tsx`. A `main` tem mais de cem `.test.tsx`.
+
+    O controle que prova o conserto tem **quatro quadrantes**, não um: definer em CÓDIGO e em
+    COMENTÁRIO, cada um em diff PEQUENO e GRANDE. O script antigo errava nos dois sentidos —
+    acusava o comentário no diff pequeno e perdia o código no grande. Um controle só com o caso
+    que motivou o conserto teria aprovado metade dele.
+
+62. **Renumerar migration de PR que trouxe invariante novo: a prosa muda, o fixture fica.** Ao
+    renumerar a `0255` do #861 para `0257`, a troca com escopo alcançou três rótulos de valor de
+    teste (`"segredo-de-app-de-teste-0255"`) dentro de `tests/invariants/` — e o `pre-commit`
+    barrou, porque invariante é congelado **mesmo quando nasceu no mesmo lote**. O rótulo de
+    fixture não cita a migration: é texto sem efeito. Troque só a frase que aponta para a
+    migration (comentário, MANIFEST, rótulo do apêndice, caminho lido por teste) e deixe o valor.
+
+63. **O PR que devia fechar sozinho continua `OPEN` logo depois do merge do lote.** Em 15/09 o #841
+    apareceu `OPEN` com o lote 7 já `MERGED`, e o head dele já era ancestral da `main`. O GitHub
+    processa o fechamento por ancestralidade com atraso de dezenas de segundos. **Meça a
+    ancestralidade antes de agir** (`git merge-base --is-ancestor <head> origin/main`); se for
+    ancestral, espere e releia — reabrir, comentar ou mergear de novo nesse intervalo produz ruído
+    no PR de quem contribuiu.
+
+64. **Prove a JORNADA DO MOTIVO, não a função que o PR mudou.** O #858 dizia no corpo "hoje isso é
+    impossível **até pela tela**: o `PainelDeMarcacao` monta as opções da lista de slots" — e mudou
+    só o servidor. Dossiê, três consertadores e o cético mediram o servidor (sabotagens, 620 casos)
+    e ficaram verdes; só a QA em tela viu que a dona do negócio continuava sem conseguir o encaixe.
+    **Antes de medir, copie a frase "Como apareceu"/"O que muda" do PR para o briefing do dossiê e
+    escreva a jornada que ela descreve.** É essa que precisa ficar verde — e, se a tela não a
+    oferece, a triagem constrói a porta (foi o que entrou no lote 8) ou declara no fragmento.
+
+65. **Fatia que promete "pela tela" e entrega a action sem chamador.** O #861 cumpria a fatia F3 da
+    issue #850 ("App Secret e verify token **pela tela**") com tabela, action e leitura na rota — e
+    `git grep updateMetaApp -- app components hooks lib` só achava a própria action. A sonda é
+    barata e vai no passe 4: **toda server action ou rota nova tem ao menos um chamador fora do
+    próprio arquivo e dos testes?** Sem chamador, a capacidade não existe para quem opera, e o
+    fragmento que a anuncia é falso.
+
+66. **Invariante de GRANT de tabela no `test:db` é verde por construção.** O prelude de
+    `scripts/test-db.sh` simula o default ACL do Supabase para FUNÇÕES e não para TABELAS; num
+    Supabase real toda tabela nova de `public` nasce com `arwdDxt` para `anon`, `authenticated` e
+    `service_role`, e o dump só ACRESCENTA grants. O #873 revogou TRUNCATE de `api_audit_log`, o
+    invariante saiu verde, e o cético mostrou `service_role: DELETE 1` com o default ACL reproduzido
+    — a frase "append-only, nem `service_role`" do `CLAUDE.md` já era falsa na `main`. **Todo PR que
+    afirme "papel X não pode Y na tabela Z" é medido com `grant all on table … to anon,
+    authenticated, service_role` na transação ANTES do bloco do PR** (issue #887 pede o prelude).
+
+67. **Dedupe por `kind` faz o aviso menos grave tampar o mais grave.** O #871 estendeu `event_dead` à
+    morte do despacho da IA; com um `event_dead` de mídia aberto, "a IA deixou de responder" não
+    abria. Ao estender um aviso deduplicado a um caso novo, **meça com outro aviso do mesmo kind já
+    aberto** — a contagem "1000 mortes → 1 aviso" sozinha aprova o defeito.
+
+68. **Número de migration prometido a PR que não entrou é dívida com o contribuidor.** Escrevi no
+    #867 "fica com `0258`" e no #865 "`0259`"; vinte minutos depois chegaram #873 e #874 com
+    migration, gates verdes e sem decisão pendente — e entraram antes. Tive de editar os dois
+    comentários. **O número é de quem ENTRA primeiro**; ao contribuidor diga "o próximo livre na hora
+    da integração".
+
+69. **`bash scripts/test-db.sh` sem o `pnpm` é gate que não rodou.** O prelúdio imprime `✓ install ok`
+    e `✓ update ok`, e depois `vitest: comando não encontrado`, exit 127 — as linhas verdes estão no
+    log, os invariantes não. O caminho é `pnpm test:db`. E `pnpm test:db -- <arquivo>` **não
+    filtra**: roda os 200 (três agentes pagaram 10 minutos por isso no mesmo dia).
+
+70. **Não mova o HEAD de um worktree com gates rodando.** Um merge de proveniência (#860, árvore
+    idêntica) entrou no worktree do lote enquanto o `test:unit` corria. Inofensivo desta vez, mas o
+    log dos gates passou a declarar um SHA que já não era o HEAD. Proveniência entra **depois** dos
+    gates, ou o resumo dos gates declara o **tree** (`git rev-parse HEAD^{tree}`), que é o que o
+    teste mediu.
+
+71. **A vigia que engole a falha do `gh` fica calada durante uma queda de rede.** O monitor de um
+    re-run tinha `gh … || { sleep 30; continue; }` e expirou em 30 minutos "sem eventos": a rede tinha
+    caído (um agente morreu com `ENOTFOUND` no mesmo intervalo) e o run já tinha terminado verde.
+    Silêncio de vigia não é "ainda rodando". **Conte as falhas seguidas do instrumento e emita aviso a
+    partir de N**, como qualquer outro estado terminal.
+
+72. **Vermelho de e2e num lote que não toca a área: meça o intermitente antes de investigar o lote.**
+    O lote 9 (#893) caiu em `logo-moldura-no-tema-escuro` nas duas tentativas, sem nenhum arquivo de
+    marca, cache ou layout no diff. O trace mostrou `POST /api/v1/marca/logo` 200 e a barra lateral
+    ainda com a marca do produto 15 s depois — o sintoma de uma corrida que o próprio
+    `lib/branding/instalacao.ts` documenta. Re-run no mesmo SHA: verde. **A ordem é: diff do lote ×
+    área da spec; trace da falha; re-run no mesmo SHA; e só então concluir.** O intermitente vira
+    issue com o trace (#895), não conserto dentro do lote.
+
+73. **`git commit … | tail; echo "rc=$?"` imprime `rc=0` com o commit BARRADO.** Reincidência do
+    "pipe mascara exit" (lote 9, título do aviso da Central): o pre-commit recusou, o `tail` saiu 0, e
+    a linha seguinte afirmava o commit. **Em commit, a sonda é o HEAD ter andado**
+    (`antes=$(git rev-parse HEAD)` … comparar), nunca um exit impresso depois de pipe.

@@ -87,6 +87,12 @@ CRONS="
 7 * * * *|60|api/v1/cron/case-stale-watcher
 */30 * * * *|60|api/v1/cron/contact-phones
 17 * * * *|60|api/v1/cron/contact-proposals-watcher
+# O ANIVERSÁRIO. De hora em hora, e não uma vez ao dia, porque quem decide o
+# momento é o relógio de parede de CADA organização: a rodada só age naquela
+# cujo fuso marca a hora de parabenizar. Uma varredura diária em UTC felicitaria
+# no dia errado metade do mundo e de madrugada boa parte do resto. Barato: quem
+# não configurou a automação não chega a ser varrido.
+7 * * * *|60|api/v1/cron/contact-birthdays
 0 12 * * *|60|api/v1/cron/lgpd-sla-watcher
 30 3 * * *|120|api/v1/cron/kb-conversations-batch
 15 4 * * *|60|api/v1/cron/sync-model-catalog

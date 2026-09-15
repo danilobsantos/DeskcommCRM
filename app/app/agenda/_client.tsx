@@ -80,6 +80,7 @@ export function AgendaClient({
   agendamentosIniciais,
   profissionaisIniciais,
   usuariosIndisponiveisIniciais,
+  podeMarcarEncaixe,
 }: {
   fusoDeApresentacao: string | null;
   googleConfigurado: boolean;
@@ -99,10 +100,16 @@ export function AgendaClient({
   }>;
   /** A semana corrente, resolvida no servidor: `GET /agendamentos` não existe. */
   agendamentosIniciais: Agendamento[];
-  /** Profissionais externos ativos (migration 9003) — viram Pessoas na grade. */
+ /** Profissionais externos ativos (migration 9003) — viram Pessoas na grade. */
   profissionaisIniciais: Array<{ id: string; nome: string }>;
   /** Atendentes com disponibilidade desabilitada (is_available = false). */
   usuariosIndisponiveisIniciais?: string[];
+  /**
+   * Quem está logado pode MARCAR — o mesmo piso da rota (`requireRole("agent")`
+   * em `app/api/v1/agenda/agendamentos/route.ts`). É ele que liga o encaixe no
+   * painel: oferecer "Outro horário" a quem só lê seria oferecer um 403.
+   */
+  podeMarcarEncaixe: boolean;
 }) {
   const localeDaData = useLocaleDeData();
   const t = useT();
@@ -307,7 +314,9 @@ export function AgendaClient({
           ? startOfWeek(ancora, { weekStartsOn: 0 })
           : startOfDay(ancora);
     const fim =
-      visao === "mes" ? addDays(endOfMonth(ancora), 1) : addDays(inicio, visao === "semana" ? 7 : 1);
+      visao === "mes"
+        ? addDays(endOfMonth(ancora), 1)
+        : addDays(inicio, visao === "semana" ? 7 : 1);
     return { de: inicio.toISOString(), ate: fim.toISOString() };
   }, [visao, ancora]);
 
@@ -407,7 +416,7 @@ export function AgendaClient({
       */}
       <React.Suspense fallback={null}>
         <AvisoDaConexaoGoogle />
-        <EntradaDaAgenda onContext={onContext}/>
+        <EntradaDaAgenda onContext={onContext} />
       </React.Suspense>
 
 
@@ -622,9 +631,17 @@ export function AgendaClient({
           className="flex w-full flex-col overflow-y-auto sm:max-w-3xl lg:max-w-[1040px] lg:overflow-hidden"
         >
           <SheetHeader>
-            <SheetTitle>{remarcandoId ? t("Remarcar agendamento") : t("Novo agendamento")}</SheetTitle>
+            <SheetTitle>
+              {remarcandoId ? t("Remarcar agendamento") : t("Novo agendamento")}
+            </SheetTitle>
           </SheetHeader>
-            {!remarcandoId?<VinculoDaMarcacao contactId={contactId} conversationId={conversationId} onChange={(contact,conversation)=>escolherVinculo({contact,conversation})}/>:null}
+          {!remarcandoId ? (
+            <VinculoDaMarcacao
+              contactId={contactId}
+              conversationId={conversationId}
+              onChange={(contact, conversation) => escolherVinculo({ contact, conversation })}
+            />
+          ) : null}
           {tiposIniciais.length > 1 && (
             <div className="mt-4" data-testid="tipos-de-agendamento">
               <p className="mb-2 text-xs font-medium text-text-muted">{t("Tipo de agendamento")}</p>
@@ -644,7 +661,7 @@ export function AgendaClient({
                     )}
                   >
                     {opcao.nome}
-                    <span className="ml-1 opacity-70 tabular-nums">{opcao.duracaoMin}min</span>
+                    <span className="ml-1 tabular-nums opacity-70">{opcao.duracaoMin}min</span>
                   </button>
                 ))}
               </div>
@@ -660,7 +677,10 @@ export function AgendaClient({
             uma lista rolável de horários é um campo que ninguém vê.
           */}
           <div className="mt-4">
-            <label className="block text-xs font-medium text-text-muted" htmlFor="email-do-convidado">
+            <label
+              className="block text-xs font-medium text-text-muted"
+              htmlFor="email-do-convidado"
+            >
               {t("E-mail do convidado")}{" "}
               <span className="font-normal opacity-70">({t("opcional")})</span>
             </label>
@@ -721,6 +741,11 @@ export function AgendaClient({
                 fontesDefasadas={horarios?.fontes_defasadas}
                 googleCoberturaParcial={horarios?.google_cobertura_parcial}
                 horarioInicial={horarioEscolhido ?? undefined}
+                // O ENCAIXE é desta tela, e só dela: aqui quem marca é uma
+                // pessoa da equipe com sessão, que é exatamente o ator a quem a
+                // rota permite sair da grade. Vale também para REMARCAR, que é
+                // este mesmo painel com PATCH — e a rota aplica a mesma regra lá.
+                permiteEncaixe={podeMarcarEncaixe}
                 // ESTE é o fio que faltava. Sem ele o "Marcado ✓" era estado
                 // local do React e nenhuma linha nascia no banco.
                 onConfirmar={(instante) => {
@@ -750,7 +775,12 @@ export function AgendaClient({
                   const convidado = emailConvidadoLimpo || undefined;
                   if (remarcandoId) {
                     return remarcar
-                      .mutateAsync({ id: remarcandoId,revision:agendamentos.find(a=>a.id===remarcandoId)?.revision, starts_at: instante, guest_email: convidado })
+                      .mutateAsync({
+                        id: remarcandoId,
+                        revision: agendamentos.find((a) => a.id === remarcandoId)?.revision,
+                        starts_at: instante,
+                        guest_email: convidado,
+                      })
                       .then((r) => {
                         setRemarcandoId(null);
                         setMarcando(false);
@@ -761,8 +791,8 @@ export function AgendaClient({
                   return marcar
                     .mutateAsync({
                       event_type_id: tipo.id,
-                      contact_id:contactId||undefined,
-                      conversation_id:conversationId||undefined,
+                      contact_id: contactId || undefined,
+                      conversation_id: conversationId || undefined,
                       starts_at: instante,
                       guest_email: convidado,
                       // Profissional externo isolado na grade: marca NA AGENDA
@@ -827,7 +857,10 @@ export function AgendaClient({
                 return `${alvo.titulo}${quem}, ${format(new Date(alvo.comeca), t("d 'de' MMMM 'às' HH:mm"), { locale: localeDaData })}.`;
               })()}
             </p>
-            <label className="block text-xs font-medium text-text-muted" htmlFor="motivo-do-cancelamento">
+            <label
+              className="block text-xs font-medium text-text-muted"
+              htmlFor="motivo-do-cancelamento"
+            >
               {t("Por que está cancelando?")}
             </label>
             <textarea
@@ -852,10 +885,16 @@ export function AgendaClient({
                 onClick={() => {
                   const id = cancelandoId;
                   if (!id) return;
-                  void cancelar.mutateAsync({ id,revision:agendamentos.find(a=>a.id===id)?.revision, reason: motivo.trim() }).then(
-                    () => setCancelandoId(null),
-                    () => undefined,
-                  );
+                  void cancelar
+                    .mutateAsync({
+                      id,
+                      revision: agendamentos.find((a) => a.id === id)?.revision,
+                      reason: motivo.trim(),
+                    })
+                    .then(
+                      () => setCancelandoId(null),
+                      () => undefined,
+                    );
                 }}
               >
                 {cancelar.isPending ? t("Cancelando…") : t("Cancelar agendamento")}
@@ -920,8 +959,30 @@ export function AgendaClient({
         // Sem cerimônia de confirmação, ao contrário de cancelar: registrar
         // desfecho não avisa ninguém e se desfaz voltando o status. Cancelar
         // exige motivo porque é o que a equipe lê ao ver o horário vago.
-        onRealizado={(id) => desfecho.mutate({ id,revision:agendamentos.find(a=>a.id===id)?.revision, status: "completed" })}
-        onFaltou={(id) => desfecho.mutate({ id,revision:agendamentos.find(a=>a.id===id)?.revision, status: "no_show" })}
+        // CONFIRMAR usa o mesmo `desfecho` que realizado/faltou: os três são o
+        // mesmo PATCH com outro `status`. Criar um hook próprio duplicaria a
+        // invalidação de cache e o tratamento de erro por nada.
+        onConfirmar={(id) =>
+          desfecho.mutate({
+            id,
+            revision: agendamentos.find((a) => a.id === id)?.revision,
+            status: "confirmed",
+          })
+        }
+        onRealizado={(id) =>
+          desfecho.mutate({
+            id,
+            revision: agendamentos.find((a) => a.id === id)?.revision,
+            status: "completed",
+          })
+        }
+        onFaltou={(id) =>
+          desfecho.mutate({
+            id,
+            revision: agendamentos.find((a) => a.id === id)?.revision,
+            status: "no_show",
+          })
+        }
       />
 
       {/* ⚠️ O VAZIO NÃO ESCONDE MAIS A GRADE, e o achado veio do CI.
@@ -976,7 +1037,6 @@ export function AgendaClient({
         onAbrirAgendamento={(id) => router.push(`/app/agenda?compromisso=${id}`)}
         className="min-h-0 flex-1"
       />
-
     </div>
   );
 }

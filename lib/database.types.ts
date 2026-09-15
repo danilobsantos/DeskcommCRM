@@ -280,6 +280,27 @@ export type Database = {
         ]
       }
 
+      platform_settings: {
+        Row: {
+          id: number
+          signup_mode: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: number
+          signup_mode?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: number
+          signup_mode?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       platform_support_sessions: {
         Row: { id: string; organization_id: string; actor_user_id: string; auth_session_id: string; access_mode: string; previous_organization_id: string | null; created_at: string; expires_at: string; ended_at: string | null }
         Insert: { id?: string; organization_id: string; actor_user_id: string; auth_session_id: string; access_mode: string; previous_organization_id?: string | null; created_at?: string; expires_at: string; ended_at?: string | null }
@@ -2243,6 +2264,7 @@ export type Database = {
           owner_user_id: string | null
           provider_id: string | null
           reminder_sent_at: string | null
+          reminder_sent_offsets_minutes: number[]
           rescheduled_from_id: string | null
           source: string
           starts_at: string
@@ -2309,6 +2331,7 @@ export type Database = {
           owner_user_id?: string | null
           provider_id?: string | null
           reminder_sent_at?: string | null
+          reminder_sent_offsets_minutes?: number[]
           rescheduled_from_id?: string | null
           source?: string
           starts_at: string
@@ -2375,6 +2398,7 @@ export type Database = {
           owner_user_id?: string | null
           provider_id?: string | null
           reminder_sent_at?: string | null
+          reminder_sent_offsets_minutes?: number[]
           rescheduled_from_id?: string | null
           source?: string
           starts_at?: string
@@ -2682,6 +2706,7 @@ export type Database = {
           position: number
           reminder_enabled: boolean
           reminder_minutes_before: number
+          reminder_extra_offsets_minutes: number[]
           reminder_template_name: string | null
           requires_confirmation: boolean
           slot_interval_minutes: number | null
@@ -2707,6 +2732,7 @@ export type Database = {
           position?: number
           reminder_enabled?: boolean
           reminder_minutes_before?: number
+          reminder_extra_offsets_minutes?: number[]
           reminder_template_name?: string | null
           requires_confirmation?: boolean
           slot_interval_minutes?: number | null
@@ -2732,6 +2758,7 @@ export type Database = {
           position?: number
           reminder_enabled?: boolean
           reminder_minutes_before?: number
+          reminder_extra_offsets_minutes?: number[]
           reminder_template_name?: string | null
           requires_confirmation?: boolean
           slot_interval_minutes?: number | null
@@ -3308,6 +3335,7 @@ export type Database = {
           avatar_storage_path: string | null
           avatar_updated_at: string | null
           birthdate: string | null
+          birthday_md: number | null
           blocked_at: string | null
           blocked_reason: string | null
           consent: Json
@@ -6384,6 +6412,38 @@ export type Database = {
           },
         ]
       }
+      org_voice_calls: {
+        Row: {
+          enabled: boolean
+          organization_id: string
+          risco_aceito_em: string | null
+          risco_aceito_por: string | null
+          updated_at: string
+        }
+        Insert: {
+          enabled?: boolean
+          organization_id: string
+          risco_aceito_em?: string | null
+          risco_aceito_por?: string | null
+          updated_at?: string
+        }
+        Update: {
+          enabled?: boolean
+          organization_id?: string
+          risco_aceito_em?: string | null
+          risco_aceito_por?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_voice_calls_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           ai_budget_cents: number | null
@@ -6645,6 +6705,33 @@ export type Database = {
           id?: number
           updated_at?: string
           updated_by?: string | null
+        }
+        Relationships: []
+      }
+      platform_meta_app: {
+        Row: {
+          app_secret_encrypted: string | null
+          id: number
+          updated_at: string
+          updated_by: string | null
+          verify_token_created_at: string | null
+          verify_token_encrypted: string | null
+        }
+        Insert: {
+          app_secret_encrypted?: string | null
+          id?: number
+          updated_at?: string
+          updated_by?: string | null
+          verify_token_created_at?: string | null
+          verify_token_encrypted?: string | null
+        }
+        Update: {
+          app_secret_encrypted?: string | null
+          id?: number
+          updated_at?: string
+          updated_by?: string | null
+          verify_token_created_at?: string | null
+          verify_token_encrypted?: string | null
         }
         Relationships: []
       }
@@ -7315,6 +7402,74 @@ export type Database = {
         }
         Relationships: []
       }
+      team_invites: {
+        Row: {
+          accepted_at: string | null
+          accepted_by: string | null
+          created_at: string
+          email: string
+          email_dispatched: boolean
+          expires_at: string
+          id: string
+          interface_settings: Json
+          invited_by: string | null
+          inviter_name: string | null
+          last_sent_at: string
+          organization_id: string
+          resend_count: number
+          revoked_at: string | null
+          revoked_by: string | null
+          role: string
+          updated_at: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string
+          email: string
+          email_dispatched?: boolean
+          expires_at: string
+          id?: string
+          interface_settings?: Json
+          invited_by?: string | null
+          inviter_name?: string | null
+          last_sent_at?: string
+          organization_id: string
+          resend_count?: number
+          revoked_at?: string | null
+          revoked_by?: string | null
+          role: string
+          updated_at?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string
+          email?: string
+          email_dispatched?: boolean
+          expires_at?: string
+          id?: string
+          interface_settings?: Json
+          invited_by?: string | null
+          inviter_name?: string | null
+          last_sent_at?: string
+          organization_id?: string
+          resend_count?: number
+          revoked_at?: string | null
+          revoked_by?: string | null
+          role?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_invites_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_integrations: {
         Row: {
           created_at: string
@@ -7897,6 +8052,17 @@ export type Database = {
         }
         Returns: Json
       }
+      fn_reply_settle: {
+        Args: {
+          p_acquired_at: string
+          p_error?: string
+          p_job: string
+          p_org: string
+          p_state: string
+          p_worker: string
+        }
+        Returns: boolean
+      }
       fn_request_channel_routing: {
         Args: { p_conversation: string; p_org: string }
         Returns: undefined
@@ -7943,6 +8109,14 @@ export type Database = {
       fn_google_resolve: { Args: { p_org: string; p_id: string; p_revision: string; p_local_revision: string; p_etag: string | null; p_choice: string }; Returns: undefined }
       fn_google_counts_for_conflicts: { Args: { p_org: string; p_connection: string; p_calendar: string }; Returns: boolean }
       fn_google_coverage: { Args: { p_org: string; p_owner: string; p_start: string; p_end: string }; Returns: boolean }
+      fn_agenda_ocupacao_google_do_dono: {
+        Args: { p_org: string; p_owner: string; p_de: string; p_ate: string }
+        Returns: { starts_at: string; ends_at: string; transparency: string; status: string; connection_status: string }[]
+      }
+      fn_agenda_conexoes_google_do_dono: {
+        Args: { p_org: string; p_owner: string }
+        Returns: { status: string; last_sync_at: string | null }[]
+      }
       fn_appointment_change_core: { Args: { p_org: string; p_id: string; p_revision: number; p_patch: Json; p_remote: boolean; p_base: Json }; Returns: Json }
 
       fn_followup_job_current: { Args: { p_org: string; p_job: string; p_enrollment: string; p_node: string }; Returns: boolean }
@@ -7978,6 +8152,10 @@ export type Database = {
           p_session?: string
         }
         Returns: Json
+      }
+      fn_degraus_de_lembrete_validos: {
+        Args: { p_degraus: number[] }
+        Returns: boolean
       }
       fn_demanda_encerrar: {
         Args: {
@@ -8310,6 +8488,10 @@ export type Database = {
         Args: { p_contact: string; p_metadata: Json; p_platform: string }
         Returns: undefined
       }
+      fn_event_log_e_registro: {
+        Args: { p_event_type: string }
+        Returns: boolean
+      }
       fn_expurgar_auditoria_vencida: {
         Args: { p_limite?: number; p_retencao_dias?: number }
         Returns: number
@@ -8353,6 +8535,14 @@ export type Database = {
         }
         Returns: undefined
       }
+      fn_meet_notice: {
+        Args: { p_id: string; p_org: string; p_reason: string }
+        Returns: undefined
+      }
+      fn_meet_observe: {
+        Args: { p_args: Json; p_id: string; p_org: string }
+        Returns: undefined
+      }
       fn_member_role_in_org: {
         Args: { p_org: string; p_user: string }
         Returns: string
@@ -8376,6 +8566,19 @@ export type Database = {
           lead_id: string
           pipeline_id: string
         }[]
+      }
+      fn_nascer_lead_da_conversa: {
+        Args: {
+          p_contact: string
+          p_org: string
+          p_pipeline: string
+          p_source: string
+          p_source_metadata?: Json
+          p_stage: string
+          p_tags?: string[]
+          p_title: string
+        }
+        Returns: string
       }
       fn_podar_fila_de_jobs: {
         Args: { p_limite?: number; p_retencao_dias?: number }
@@ -8403,6 +8606,54 @@ export type Database = {
       fn_reply_receipt_policy: {
         Args: { p_org: string; p_job: string; p_worker: string; p_acquired_at: string };
         Returns: Json;
+      }
+      fn_reply_begin: {
+        Args: {
+          p_agent: string
+          p_conversation: string
+          p_org: string
+          p_token: string
+          p_version: string
+        }
+        Returns: {
+          agent_id: string
+          agent_version_id: string
+          approved_at: string | null
+          approved_body: string | null
+          approved_by: string | null
+          approved_support_session_id: string | null
+          channel_session_id: string
+          contact_id: string
+          context_revision: number
+          conversation_id: string
+          created_at: string
+          edited_body: string | null
+          error_code: string | null
+          feedback: Json | null
+          generation_token: string
+          id: string
+          message_id: string | null
+          operation_revision: number
+          organization_id: string
+          original_body: string | null
+          proposals: Json
+          revision: number
+          send_job_id: string | null
+          service_boundary: Json
+          status: string
+          trace: Json
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "ai_reply_drafts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_reply_context_current: {
+        Args: { p_id: string; p_org: string }
+        Returns: boolean
       }
       fn_reply_delivery_policy: {
         Args: { p_org: string; p_job: string; p_worker: string; p_acquired_at: string };
@@ -8437,6 +8688,12 @@ export type Database = {
       fn_semear_tipos_de_agendamento: {
         Args: { p_organization_id: string }
         Returns: number
+      }
+      fn_tags_de_conversa_em_uso: {
+        Args: { p_org: string }
+        Returns: {
+          tag: string
+        }[]
       }
       fn_upsert_wa_contact: {
         Args: {

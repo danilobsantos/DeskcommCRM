@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { enderecoDeRetorno, faltaParaConectarOGoogle, googleEstaConfigurado } from "@/lib/agenda/google/config";
 import { PROVEDOR_GOOGLE } from "@/lib/agenda/tipos";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
+import { ROLE_RANK } from "@/lib/auth/types";
 import { createClient } from "@/lib/supabase/server";
 
 import type { Agendamento as AgendamentoDaTela } from "@/components/agenda/tipos";
@@ -225,6 +226,10 @@ export default async function AgendaPage() {
       // `/admin` e faz `notFound()` para o resto — oferecer o link a quem não
       // pode entrar seria trocar um beco por outro.
       linkDeConfiguracaoDoGoogle={(user.is_platform_admin && !user.support) ? "/admin/google" : undefined}
+      // O piso da rota de marcar é `agent`; `viewer` — e o acompanhamento só de
+      // leitura, que `resolveActiveOrg` resolve como `viewer` — levaria 403. A
+      // tela esconder é cortesia: quem decide segue sendo a rota.
+      podeMarcarEncaixe={ROLE_RANK[activeOrg.role] >= ROLE_RANK.agent}
       tiposIniciais={(tipos ?? []).map((t) => ({
         id: t.id,
         nome: t.name,
