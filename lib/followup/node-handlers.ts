@@ -63,6 +63,11 @@ export interface LeadFacts {
   lead_stage: string | null;
   tags: string[];
   steps_taken: number;
+  /**
+   * Desfecho do passo anterior — a classe que o último `ai_classify` escolheu,
+   * lida dos eventos da inscrição (`ultimoDesfechoDe`). `null` quando o fluxo
+   * ainda não classificou nada; e `null` NÃO satisfaz `neq` (ver `evaluateCheck`).
+   */
   last_outcome: string | null;
   contact_name?: string | null;
   custom_fields?: Record<string, unknown>;
@@ -286,6 +291,50 @@ export function resolveWaitPhase(events: EnrollmentEventRef[], nodeId: string, s
   return events.some((e) => e.node_id === nodeId && e.idempotency_key === priorKey);
 }
 
+/**
+ * Passos é número, mas o formulário gravou por meses o que se DIGITAVA — texto.
+ * Com `"3"`, `gte` nunca era verdadeiro e `neq` sempre era: a regra aparecia
+ * pronta no card e decidia sozinha. Lê o número que a pessoa escreveu; texto que
+ * não é número segue como está (e o publish o recusa).
+ */
+function valorDePassos(value: string | number): string | number {
+  if (typeof value === "number") return value;
+  const limpo = value.trim();
+  const n = Number(limpo);
+  return limpo !== "" && Number.isFinite(n) ? n : value;
+}
+
+/**
+ * O evento que registra a classe que o `ai_classify` escolheu — a fonte do
+ * "Desfecho do passo anterior" (é o mesmo evento que a tela de histórico lê).
+ */
+const EVENTO_DE_CLASSIFICACAO = "ai_classified";
+
+/**
+ * O desfecho do último passo que DECIDIU algo: a classe escolhida pelo
+ * `ai_classify` mais recente da inscrição. `null` quando ainda não houve
+ * classificação (fluxo que nunca passou por um `ai_classify`, ou classificação
+ * que terminou sem classe).
+ *
+ * ⚠️ Este dado existia como CONTRATO (o rótulo "Desfecho do passo anterior" está
+ * em `vocabulario.ts`, o campo está no enum do `graph-schema.ts` e a tela o
+ * oferece) e não como dado: o motor montava `LeadFacts.last_outcome` como `null`
+ * FIXO em `engine.ts`, então a condição escrita com ele era decorativa — o dono
+ * da VPS montava o filtro e o follow-up ignorava. Era pior com `neq`, porque
+ * `null !== "x"` é `true` e o fluxo mandava TODO lead pelo ramo da negativa.
+ *
+ * `events` chega na ordem do banco (`created_at` ascendente) — o ÚLTIMO evento de
+ * classificação é o desfecho vigente, não importa quantos passos atrás ele ficou.
+ */
+export function ultimoDesfechoDe(events: EnrollmentEventRef[]): string | null {
+  for (const evento of [...events].reverse()) {
+    if (evento.event_type !== EVENTO_DE_CLASSIFICACAO) continue;
+    const classe = evento.payload?.class;
+    if (typeof classe === "string" && classe.length > 0) return classe;
+  }
+  return null;
+}
+
 function evaluateCheck(
   check: { field: "lead_stage" | "tag" | "steps_taken" | "last_outcome"; op: "eq" | "neq" | "gte" | "lte" | "contains"; value: string | number },
   lead: LeadFacts,
@@ -304,17 +353,31 @@ function evaluateCheck(
     return false;
   }
 
+  // ⚠️ Desconhecido não satisfaz NEGAÇÃO.
+  //
+  // Sem esta linha, `neq` comparava `null` com o valor e respondia `true` — ou
+  // seja, "não foi X" valia para TODO lead, inclusive o que nunca foi
+  // classificado. É a segunda metade do defeito do "Desfecho do passo anterior":
+  // com o campo alimentado, o lead cujo `ai_classify` ainda não rodou (ou que
+  // terminou sem classe) passaria por qualquer condição escrita como negação, e
+  // o fluxo seguiria pelo ramo errado em silêncio.
+  //
+  // `eq` e `contains` já eram falsos com `null` — negar não pode ser a única
+  // porta que a ausência de dado abre. Ausência não prova a negativa: um lead
+  // sem classificação não é um lead "que não foi hot".
+  if (actual === null) return false;
+  const expected = check.field === "steps_taken" ? valorDePassos(check.value) : check.value;
   switch (check.op) {
     case "eq":
-      return actual === check.value;
+      return actual === expected;
     case "neq":
-      return actual !== check.value;
+      return actual !== expected;
     case "gte":
-      return typeof actual === "number" && typeof check.value === "number" && actual >= check.value;
+      return typeof actual === "number" && typeof expected === "number" && actual >= expected;
     case "lte":
-      return typeof actual === "number" && typeof check.value === "number" && actual <= check.value;
+      return typeof actual === "number" && typeof expected === "number" && actual <= expected;
     case "contains":
-      return typeof actual === "string" && typeof check.value === "string" && actual.includes(check.value);
+      return typeof actual === "string" && typeof expected === "string" && actual.includes(expected);
   }
 }
 

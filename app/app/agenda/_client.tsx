@@ -22,6 +22,7 @@ import { EmptyAgenda } from "@/components/empty";
 import { rotuloDoLocal } from "@/lib/agenda/locais";
 import { trilhaPadraoDoMembro } from "@/lib/agenda/tipos";
 import { ancoraAoFecharPainel } from "@/lib/agenda/ancora-depois-de-marcar";
+import { resolverResponsavelDoPainel } from "@/lib/agenda/responsavel-do-painel";
 import { useVinculoDaMarcacao } from "@/lib/agenda/vinculo-da-marcacao";
 import { Button } from "@/components/ui/button";
 import { PainelDeMarcacao } from "@/components/agenda/PainelDeMarcacao";
@@ -71,6 +72,7 @@ const VISOES: Array<{ id: VisaoDaAgenda; rotulo: string }> = [
  */
 export function AgendaClient({
   fusoDeApresentacao,
+  usuarioId,
   googleConfigurado,
   contaConectada,
   enderecoDeRetorno,
@@ -80,9 +82,11 @@ export function AgendaClient({
   agendamentosIniciais,
   profissionaisIniciais,
   usuariosIndisponiveisIniciais,
-  podeMarcarEncaixe,
+  podeMarcar,
 }: {
   fusoDeApresentacao: string | null;
+  /** Id de quem está logado — a única fonte para o rótulo "Você". */
+  usuarioId: string;
   googleConfigurado: boolean;
   contaConectada?: string | null;
   enderecoDeRetorno?: string;
@@ -106,10 +110,16 @@ export function AgendaClient({
   usuariosIndisponiveisIniciais?: string[];
   /**
    * Quem está logado pode MARCAR — o mesmo piso da rota (`requireRole("agent")`
-   * em `app/api/v1/agenda/agendamentos/route.ts`). É ele que liga o encaixe no
-   * painel: oferecer "Outro horário" a quem só lê seria oferecer um 403.
+   * em `app/api/v1/agenda/agendamentos/route.ts`).
+   *
+   * É a MESMA porta, com o MESMO piso, em todos os gestos de escrita desta tela:
+   * o botão "Novo agendamento", o clique num bloco livre da grade, o encaixe
+   * ("Outro horário") do painel e o "Marcar compromisso" que chega por
+   * `?contato=`. Oferecer qualquer uma delas a quem só lê é oferecer um 403 —
+   * com a recusa chegando DEPOIS do gesto, que é o defeito que este nome veio
+   * fechar. Esconder aqui é cortesia: quem decide segue sendo a rota.
    */
-  podeMarcarEncaixe: boolean;
+  podeMarcar: boolean;
 }) {
   const localeDaData = useLocaleDeData();
   const t = useT();
@@ -121,15 +131,20 @@ export function AgendaClient({
   // Os profissionais externos entram no mesmo roster, com trilha estável do id —
   // a grade já resolve a cor de um bloco pelo `responsavelId` casando a Pessoa.
   // Atendentes com disponibilidade desabilitada saem da lista de atendimento.
-  const pessoas = [
-    ...pessoasDaEquipe.filter((p) => !indisponiveisSet.has(p.id)),
-    ...profissionaisIniciais.map((p) => ({
-      id: p.id,
-      nome: p.nome,
-      trilha: trilhaPadraoDoMembro(p.id),
-      tipo: "profissional" as const,
-    })),
-  ];
+  // Memoizado: array novo por render invalidaria as memoizações manuais abaixo
+  // (o React Compiler reprova `preserve-manual-memoization`).
+  const pessoas = React.useMemo(
+    () => [
+      ...pessoasDaEquipe.filter((p) => !indisponiveisSet.has(p.id)),
+      ...profissionaisIniciais.map((p) => ({
+        id: p.id,
+        nome: p.nome,
+        trilha: trilhaPadraoDoMembro(p.id),
+        tipo: "profissional" as const,
+      })),
+    ],
+    [pessoasDaEquipe, indisponiveisSet, profissionaisIniciais],
+  );
   const router = useRouter();
   const [marcando, setMarcando] = React.useState(false);
   // O compromisso criado NESTA abertura do painel. Serve para levar a grade até
@@ -153,9 +168,15 @@ export function AgendaClient({
       // Só abre sozinho quando a rota TROUXE um cliente: a chamada sem cliente
       // é a que avisa que a página deixou de ter contexto, e ela não é um
       // pedido para marcar nada.
-      if (registrarVinculoDaRota({ contact, conversation })) setMarcando(true);
+      const trouxeCliente = registrarVinculoDaRota({ contact, conversation });
+      // TERCEIRA PORTA da mesma escrita: o "Marcar compromisso" do Inbox chega
+      // por aqui e abriria o painel. Para quem só lê, o vínculo até pode ser
+      // registrado — é estado inerte, sem superfície — mas o painel NÃO abre:
+      // abri-lo seria a mesma promessa que o botão e a grade fariam, com o 403
+      // chegando no fim do gesto.
+      if (podeMarcar && trouxeCliente) setMarcando(true);
     },
-    [registrarVinculoDaRota],
+    [podeMarcar, registrarVinculoDaRota],
   );
   /** Abrir o painel do zero: o vínculo volta a ser o da rota, nunca o da vez anterior. */
   const abrirMarcacao = React.useCallback(() => {
@@ -220,17 +241,18 @@ export function AgendaClient({
   const [isolada, setIsolada] = React.useState<string | null>(null);
   const [ancora, setAncora] = React.useState(() => new Date());
 
-  // QUEM VAI "ATENDER" NA MARCAÇÃO. Se um PROFISSIONAL externo foi isolado no
-  // filtro, é ele o responsável (a grade marcou para o dentista); senão o dono
-  // do tipo (atendente-usuário); senão a primeira pessoa. Esta variável decide
-  // tanto a cor/descrição do painel quanto se o POST manda `provider_id` ou
-  // omite o dono (a rota resolve `tipo.default_owner_user_id`).
+  // QUEM VAI "ATENDER" NA MARCAÇÃO. Se uma pessoa foi isolada no filtro
+  // (profissional externo em primeiro, senão qualquer isolada), é ela; senão
+  // resolve pelo dono do tipo via `resolverResponsavelDoPainel` (issue 896:
+  // nunca "Você" para a jornada de outra pessoa, nunca o primeiro da lista).
+  // Esta variável decide tanto a cor/descrição do painel quanto se o POST
+  // manda `provider_id` ou omite o dono (a rota resolve
+  // `tipo.default_owner_user_id`).
   const responsavelDaMarcacao =
     pessoas.find((p) => p.id === isolada && p.tipo === "profissional") ??
     pessoas.find((p) => p.id === tipo?.donoId) ??
     pessoas.find((p) => p.id === isolada) ??
-    pessoas[0] ??
-    { id: "", nome: "Você", trilha: 1, tipo: "usuario" as const };
+    resolverResponsavelDoPainel({ pessoas, donoId: tipo?.donoId ?? null, usuarioId });
 
   // AS PESSOAS SÃO REAIS: vêm de `/api/v1/team`, com a trilha de cor derivada do
   // `user_id`. Até esta linha o filtro por pessoa era invisível na tela do
@@ -443,10 +465,14 @@ export function AgendaClient({
             hover não existe para quem usa toque, que é o dono de clínica no
             celular.
           */}
-          {!tipo && (
+          {podeMarcar && !tipo && (
             // Sem NENHUM tipo de agendamento cadastrado não há o que marcar — e
             // isto é diferente de "a API não existe": a ação faz sentido, falta
             // configuração. Por isso o motivo à vista, e não um botão mudo.
+            //
+            // `podeMarcar` vem ANTES de `!tipo`, e a ordem é o ponto: para quem
+            // só lê não existe botão desabilitado a explicar, então o motivo
+            // seria conversa sobre um gesto que não está na tela dele.
             <span
               data-testid="motivo-novo-agendamento"
               className="hidden text-xs text-text-subtle sm:inline"
@@ -454,24 +480,29 @@ export function AgendaClient({
               {t("Cadastre um tipo de agendamento para começar")}
             </span>
           )}
-          <Button
-            size="sm"
-            disabled={!tipo}
-            // `data-testid` porque o RÓTULO deixou de ser estável: até este PR
-            // ele era literal, e `agenda-escopo-da-organizacao.spec.ts` o acha
-            // por `getByRole("button", { name: /Novo agendamento/i })`. Com o
-            // texto passando por `t()`, casar por rótulo passa a depender do
-            // idioma da conta de teste — hoje passa porque a conta nasce em
-            // português, mas é acoplamento que não precisa existir. O testid é
-            // o caminho estável; trocar a spec para usá-lo é decisão de quem a
-            // escreveu, e vai anotada no PR.
-            data-testid="novo-agendamento"
-            title={tipo ? undefined : t("Cadastre um tipo de agendamento para começar")}
-            onClick={abrirMarcacao}
-          >
-            <CalendarPlus size={16} weight="bold" aria-hidden />
-            <span>{t("Novo agendamento")}</span>
-          </Button>
+          {/* PRIMEIRA PORTA da escrita nesta tela. Quem só lê não vê o botão: o
+              403 da rota nunca chega a ser oferecido, e o rótulo segue igual (a
+              spec e2e o acha por papel/rótulo, e não muda). */}
+          {podeMarcar && (
+            <Button
+              size="sm"
+              disabled={!tipo}
+              // `data-testid` porque o RÓTULO deixou de ser estável: até este PR
+              // ele era literal, e `agenda-escopo-da-organizacao.spec.ts` o acha
+              // por `getByRole("button", { name: /Novo agendamento/i })`. Com o
+              // texto passando por `t()`, casar por rótulo passa a depender do
+              // idioma da conta de teste — hoje passa porque a conta nasce em
+              // português, mas é acoplamento que não precisa existir. O testid é
+              // o caminho estável; trocar a spec para usá-lo é decisão de quem a
+              // escreveu, e vai anotada no PR.
+              data-testid="novo-agendamento"
+              title={tipo ? undefined : t("Cadastre um tipo de agendamento para começar")}
+              onClick={abrirMarcacao}
+            >
+              <CalendarPlus size={16} weight="bold" aria-hidden />
+              <span>{t("Novo agendamento")}</span>
+            </Button>
+          )}
         </div>
       </header>
 
@@ -745,7 +776,7 @@ export function AgendaClient({
                 // pessoa da equipe com sessão, que é exatamente o ator a quem a
                 // rota permite sair da grade. Vale também para REMARCAR, que é
                 // este mesmo painel com PATCH — e a rota aplica a mesma regra lá.
-                permiteEncaixe={podeMarcarEncaixe}
+                permiteEncaixe={podeMarcar}
                 // ESTE é o fio que faltava. Sem ele o "Marcado ✓" era estado
                 // local do React e nenhuma linha nascia no banco.
                 onConfirmar={(instante) => {
@@ -767,7 +798,7 @@ export function AgendaClient({
                   // o 422 voltasse, e desfazer aquilo é pior do que não deixar
                   // sair. O campo já está vermelho e explicado quando isto corta.
                   if (emailConvidadoInvalido) {
-                    return Promise.reject(new Error("e-mail do convidado inválido"));
+                    return Promise.reject(new Error(t("e-mail do convidado inválido")));
                   }
                   // `|| undefined` e não a string vazia: campo em branco tem de
                   // ficar FORA do corpo, senão o PATCH leria "" como "apague o
@@ -1021,13 +1052,20 @@ export function AgendaClient({
         providerId={responsavelDaMarcacao.tipo === "profissional" ? responsavelDaMarcacao.id : undefined}
         ownerUserId={responsavelDaMarcacao.tipo === "usuario" && responsavelDaMarcacao.id ? responsavelDaMarcacao.id : undefined}
         onEscolherTipo={setTipoId}
-        onMarcarEm={(instante) => {
-          setHorarioEscolhido({ instante, rotulo: format(new Date(instante), "HH:mm") });
-          setRemarcandoId(null);
-          // `abrirMarcacao` e não `setMarcando(true)`: clicar num bloco livre
-          // abre uma marcação NOVA, e ela nasce com o vínculo da rota.
-          abrirMarcacao();
-        }}
+        // SEGUNDA PORTA: o clique num bloco livre da grade. Sem `onMarcarEm`, a
+        // `AgendaInterativa` não monta a interação, e a grade volta a ser o que
+        // ela é para quem só lê — uma leitura, sem bloco clicável.
+        onMarcarEm={
+          podeMarcar
+            ? (instante) => {
+                setHorarioEscolhido({ instante, rotulo: format(new Date(instante), "HH:mm") });
+                setRemarcandoId(null);
+                // `abrirMarcacao` e não `setMarcando(true)`: clicar num bloco
+                // livre abre uma marcação NOVA, e ela nasce com o vínculo da rota.
+                abrirMarcacao();
+              }
+            : undefined
+        }
         /* Tocar num card abre o detalhe. A prop já atravessava `AgendaInterativa`
            e `GradeDaAgenda` e chegava `undefined` aqui: o toque não fazia nada, e
            o detalhe só abria por `?compromisso=`, que apenas o Histórico e o Radar

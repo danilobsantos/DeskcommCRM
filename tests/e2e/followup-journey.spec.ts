@@ -284,14 +284,16 @@ test.describe("followup — jornada completa (Task 8.3)", () => {
     await moveNodeTo(page, endNoReplyId, ...at(260, 650));
     await moveNodeTo(page, endFallbackId, ...at(460, 650));
 
-    // Configura: classify → 1 classe "positivo" (troca o default hot/cold);
+    // Configura: classify → 1 classe "positivo" (troca o padrão Interessado/Sem interesse);
     // action → prompt_hint real; end-positivo → outcome "Convertido" (os
     // outros 2 fins ficam no default "Esgotado", coerente com no_reply/fallback).
     await page.locator(`[data-testid="node-card-${classifyId}"]`).click();
     const panel = page.getByTestId("node-config-panel");
     await panel.getByLabel("Classes (separadas por vírgula)").fill("positivo");
     await panel.getByLabel("Classes (separadas por vírgula)").blur();
-    await expect(page.locator(`[data-testid="node-card-${classifyId}"]`)).toContainText("1 classes");
+    // "1 classe", não "1 classes": o card conta em português, e esta linha fixava
+    // o plural errado que o produto mostrava.
+    await expect(page.locator(`[data-testid="node-card-${classifyId}"]`)).toContainText("1 classe · espera");
 
     await page.locator(`[data-testid="node-card-${actionId}"]`).click();
     const promptHint = "Pergunte com simpatia se ainda há interesse e ofereça ajuda para fechar.";

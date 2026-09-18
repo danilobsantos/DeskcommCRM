@@ -44,6 +44,7 @@ import {
 } from "@/lib/messaging/contact-card";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
 import { sendTemplateForSession } from "@/lib/channels/meta/send-template-for-session";
+import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/lib/types/messaging";
 
@@ -308,7 +309,7 @@ export async function sendMessageHandler(
   // envio com 42703. Sem a coluna, nada está arquivado — e a consulta sem ela é a
   // consulta certa (ver lib/channels/archived).
   const convSelect = (comArchived: boolean) =>
-    `id, organization_id, contact_id, channel_session_id, is_group, group_chat_id, bot_silenced_until, provider_conversation_id, contacts:contact_id(phone_number, wa_identity, wa_lid, is_blocked), channel_sessions:channel_session_id(${CHANNEL_SESSION_REF_COLUMNS}, status${comArchived ? `, ${ARCHIVED_AT}` : ""})`;
+    `id, organization_id, contact_id, channel_session_id, is_group, group_chat_id, bot_silenced_until, provider_conversation_id, last_inbound_at, contacts:contact_id(phone_number, wa_identity, wa_lid, is_blocked), channel_sessions:channel_session_id(${CHANNEL_SESSION_REF_COLUMNS}, status${comArchived ? `, ${ARCHIVED_AT}` : ""})`;
   //
   // O filtro por `organization_id` NÃO é redundância com a RLS — é a única
   // proteção que existe na metade dos chamadores. Este handler é a porta de
@@ -365,6 +366,12 @@ export async function sendMessageHandler(
     bot_silenced_until: string | null;
     /** Thread do provider, quando ele endereça por thread própria (migration 0132). */
     provider_conversation_id: string | null;
+    /**
+     * Quando chegou a última mensagem do cliente. É a régua da espera da Fila
+     * (issue #990): a resposta humana grava `awaiting_since = last_inbound_at`,
+     * que é o mesmo valor que `fn_reply_record_receipt` usa no caminho do banco.
+     */
+    last_inbound_at: string | null;
     contacts: {
       phone_number: string | null;
       wa_identity: string | null;
@@ -450,7 +457,7 @@ export async function sendMessageHandler(
           traduzir("Contato sem telefone para envio como cartão.", ctx.idioma ?? "pt-BR"),
         );
       }
-      const displayName = row.display_name ?? row.name ?? row.phone_number;
+      const displayName = nomeDoContato(row) ?? row.phone_number;
       outboundBody = displayName;
       outboundMetadata = {
         ...outboundMetadata,
@@ -912,6 +919,7 @@ export async function sendMessageHandler(
     last_message_preview: string;
     unread_count_for_assignee: number;
     bot_silenced_until?: string;
+    awaiting_since: string | null;
   } = {
     last_outbound_at: now,
     last_message_at: now,
@@ -924,6 +932,12 @@ export async function sendMessageHandler(
     // Resposta humana/CRM zera pendências — espelha fn_mark_conversation_message
     // outbound, que o envio pelo CRM não chama (só atualiza colunas à mão).
     unread_count_for_assignee: 0,
+    // E zera a ESPERA da Fila (issue #990): a régua é `awaiting_since`, e o valor
+    // que a resposta produz é o que `fn_reply_record_receipt` grava —
+    // `awaiting_since = last_inbound_at`, isto é, "a resposta cobre a última
+    // mensagem do cliente". Sem esta linha, o envio pelo CRM (e pelo agente) deixa
+    // a conversa contando a espera que a própria resposta acabou de encerrar.
+    awaiting_since: c.last_inbound_at,
   };
   if (ctx.actor.type === "user") {
     const silenceUntil = extendBotSilence(c.bot_silenced_until, now);

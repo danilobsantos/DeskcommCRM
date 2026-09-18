@@ -91,6 +91,7 @@ const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   timeout: 30_000,
   fullyParallel: false,
   /**

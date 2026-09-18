@@ -63,7 +63,7 @@ import {
 } from '../edge/llm/run-model-call';
 import type { ProviderRegistry } from '../edge/llm/providers';
 import { HANDOFF_REASON_ORCAMENTO } from '../edge/llm/orcamento';
-import { MIRROR_WARN_ONLY, mirrorLeadStageToCrm } from '../edge/crm/move-lead-stage';
+import { abreAvisoDoEspelhoRecusado, mirrorLeadStageToCrm } from '../edge/crm/move-lead-stage';
 import { insertInboxItem } from '../db/repository';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { moverLeadParaEtapaDeHandoff } from '@/lib/leads/handoff-stage-move';
@@ -149,12 +149,12 @@ import {
 } from './skills';
 import { readSkillReference, skillHasReferences } from './skill-references';
 import { READ_ONLY_TOOLS, wrapToolsWithBreaker, type ToolBreakerThresholds } from './tool-breaker';
-import { loadChannelProvider, runBeforeSend } from '../guardrails/before-send';
+import { loadChannelProvider, nomesDasFerramentas, runBeforeSend } from '../guardrails/before-send';
 import { isStatusSendable } from '../../channels/meta/template-binding';
 import { capabilitiesOf } from '@/lib/channels/capabilities';
 import { renderTemplateBody } from '@/lib/channels/meta/render-template';
 import { esperarComoHumano } from './atraso-humano';
-import { sendInBubbles } from './split-message';
+import { sendInBubbles, splitForSend } from './split-message';
 import type { DisclosureMode } from '../guardrails/disclosure/template';
 import { decidePromise } from '../guardrails/promise/engine';
 import { loadPromiseTable } from '../guardrails/promise/table';
@@ -801,36 +801,76 @@ const TRANSPARENCIA_SYSTEM_BLOCK =
  * pra essas outras decisões (aprovar desconto, exceção de política etc.),
  * porque este parágrafo só fala de checar/marcar horário.
  */
-const AGENDA_SYSTEM_BLOCK =
-  '## Agenda — nunca confirme sem checar\n' +
-  'Você só pode dizer a um lead que um horário/consulta/visita está confirmado DEPOIS de chamar ' +
-  'crm_book_appointment (ou crm_reschedule_appointment, para remarcação) e ver o retorno confirmando o ' +
-  'sucesso. Isso vale mesmo quando o lead já aceitou um horário que você ofereceu — aceite verbal não é ' +
-  'reserva. NUNCA diga "confirmado", "está marcado" ou equivalente baseado só no histórico da conversa. ' +
-  // ⚠️ A ressalva é obrigatória: sem ela este parágrafo ENSINA o erro. Num tipo
-  // que exige aprovação, marcar devolve `aguarda_confirmacao: true` e o
-  // compromisso nasce `pending` — dizer "confirmado" ali é afirmar o que
-  // ninguém aprovou, e o cliente aparece num horário que pode ser recusado.
-  '⚠️ EXCEÇÃO: se o retorno trouxer `aguarda_confirmacao: true`, o horário foi apenas RESERVADO e ' +
-  'ainda depende de alguém da equipe aprovar. Nesse caso NÃO diga que está confirmado: diga que ' +
-  'separou o horário e que a equipe confirma. ' +
-  'Se ainda não chamou a ferramenta neste turno, chame antes de responder; se a chamada falhar ou você não ' +
-  'tiver certeza do resultado, diga que vai verificar e NÃO afirme que está confirmado.\n' +
-  'Isso NÃO é desculpa para procrastinar: se o lead mencionou (agora ou em qualquer mensagem anterior da ' +
-  'conversa) um dia/horário específico que ainda não foi checado, chame crm_find_free_slots NESTE turno ' +
-  'antes de responder — não repita "vou verificar/confirmar e te aviso" sem ter chamado a ferramenta. Um ' +
-  '"vou verificar" só é aceitável na MESMA resposta em que você já chamou a ferramenta e ela falhou ou não ' +
-  'trouxe resultado; nunca como substituto de chamar.\n' +
-  'Se o lead escolheu um horário que VOCÊ já ofereceu nesta conversa com `crm_find_free_slots`, ele já ' +
-  'foi checado: preserve o `inicio` que a ferramenta devolveu e chame `crm_book_appointment` diretamente. ' +
-  'NÃO consulte de novo montando datas/horas em UTC; só consulte outra vez se a reserva recusar o horário.\n' +
-  'Checar e marcar horário usando crm_find_free_slots/crm_book_appointment está SEMPRE dentro da sua ' +
-  'autonomia quando essas ferramentas estão disponíveis para você — mesmo que as instruções da empresa ' +
-  'peçam para encaminhar decisões fora da sua autonomia a um gerente/responsável nomeado (ex.: "fale com o ' +
-  'Fernando"). Isso vale para OUTRAS decisões (desconto, exceção de política, algo que a ferramenta não ' +
-  'cobre) — nunca para simplesmente consultar ou marcar um horário que a ferramenta resolve sozinha. NÃO ' +
-  'diga "vou confirmar/verificar com [nome de pessoa/equipe]" para justificar não ter chamado a ferramenta: ' +
-  'chame primeiro, e só fale de encaminhar a alguém se a ferramenta genuinamente não resolver.';
+function agendaSystemBlock(toolIds: readonly string[]): string {
+  // ⚠️ Os nomes de ferramenta deste bloco saem TODOS da lista do PRÓPRIO agente —
+  // nenhum vem escrito à mão. Desde a #831 as combinações são muitas (quem tem só a
+  // conjunta, quem tem só a avulsa, quem tem as duas, com ou sem a consulta e a
+  // remarcação), e um dono aparando capacidades para caber no teto de 25 produz
+  // qualquer uma delas. Nomear ferramenta ausente é o modo de falha que o bloco
+  // irmão (`AGENDA_CONSULTA_SYSTEM_BLOCK`) existe para evitar: o modelo tenta
+  // chamá-la. Uma versão anterior nomeava "`crm_book_appointment` ou
+  // `crm_find_and_book_appointment`, a que estiver na sua lista" — e isso ainda
+  // ensina o nome de uma ferramenta que o agente não tem.
+  const tem = (nome: string): boolean => toolIds.includes(nome);
+  const marcar = nomesDasFerramentas(
+    ['crm_book_appointment', 'crm_find_and_book_appointment'].filter(tem),
+  );
+  const remarcacao = tem('crm_reschedule_appointment')
+    ? ' (ou `crm_reschedule_appointment`, para remarcação)'
+    : '';
+
+  return (
+    '## Agenda — nunca confirme sem checar\n' +
+    'Você só pode dizer a um lead que um horário/consulta/visita está confirmado DEPOIS de chamar ' +
+    `${marcar}${remarcacao} e ver o retorno confirmando o ` +
+    'sucesso. Isso vale mesmo quando o lead já aceitou um horário que você ofereceu — aceite verbal não é ' +
+    'reserva. NUNCA diga "confirmado", "está marcado" ou equivalente baseado só no histórico da conversa. ' +
+    // ⚠️ A ressalva é obrigatória: sem ela este parágrafo ENSINA o erro. Num tipo
+    // que exige aprovação, marcar devolve `aguarda_confirmacao: true` e o
+    // compromisso nasce `pending` — dizer "confirmado" ali é afirmar o que
+    // ninguém aprovou, e o cliente aparece num horário que pode ser recusado.
+    '⚠️ EXCEÇÃO: se o retorno trouxer `aguarda_confirmacao: true`, o horário foi apenas RESERVADO e ' +
+    'ainda depende de alguém da equipe aprovar. Nesse caso NÃO diga que está confirmado: diga que ' +
+    'separou o horário e que a equipe confirma. ' +
+    'Se ainda não chamou a ferramenta neste turno, chame antes de responder; se a chamada falhar ou você não ' +
+    'tiver certeza do resultado, diga que vai verificar e NÃO afirme que está confirmado.\n' +
+    // Sem a ferramenta que só CONSULTA, este parágrafo não tem o que mandar
+    // chamar: mandar chamar uma que MARCA seria mandar reservar um horário que o
+    // lead só mencionou. Quem tem a conjunta recebe o parágrafo dela, abaixo, e o
+    // gate de agenda continua armado para os dois.
+    (tem('crm_find_free_slots')
+      ? 'Isso NÃO é desculpa para procrastinar: se o lead mencionou (agora ou em qualquer mensagem anterior da ' +
+        'conversa) um dia/horário específico que ainda não foi checado, chame `crm_find_free_slots` ' +
+        'NESTE turno antes de responder — não repita "vou verificar/confirmar e te aviso" sem ter chamado a ' +
+        'ferramenta. Um "vou verificar" só é aceitável na MESMA resposta em que você já chamou a ferramenta e ' +
+        'ela falhou ou não trouxe resultado; nunca como substituto de chamar.\n'
+      : '') +
+    // Preservar o `inicio` é o contrato de `crm_book_appointment` (`starts_at`). A
+    // conjunta recebe dia e hora, não o instante — o parágrafo não se aplica a ela.
+    (tem('crm_find_free_slots') && tem('crm_book_appointment')
+      ? 'Se o lead escolheu um horário que VOCÊ já ofereceu nesta conversa com `crm_find_free_slots`, ele já ' +
+        'foi checado: preserve o `inicio` que a ferramenta devolveu e chame `crm_book_appointment` ' +
+        'diretamente. ' +
+        'NÃO consulte de novo montando datas/horas em UTC; só consulte outra vez se a reserva recusar o horário.\n'
+      : '') +
+    // Issue #831: consultar e encerrar o turno é o meio-caminho que deixa o lead sem
+    // agendamento. Quando a ferramenta conjunta existe, ela é o caminho PREFERIDO —
+    // confirmar o horário e gravar deixa de ser decisão de duas etapas do modelo.
+    (tem('crm_find_and_book_appointment')
+      ? 'Se o lead já disse DIA e HORA, use `crm_find_and_book_appointment`: ela ' +
+        'confere a disponibilidade e grava o compromisso na MESMA chamada. Ela é o caminho preferido nesse caso ' +
+        '— não consulte e pare por aí, deixando o lead sem horário marcado. Se o horário ' +
+        'pedido não estiver livre, ela devolve os horários do dia; ofereça um deles ao lead.\n'
+      : '') +
+    'Checar e marcar horário com as ferramentas de agenda está SEMPRE dentro da sua ' +
+    'autonomia quando essas ferramentas estão disponíveis para você — mesmo que as instruções da empresa ' +
+    'peçam para encaminhar decisões fora da sua autonomia a um gerente/responsável nomeado (ex.: "fale com o ' +
+    'Fernando"). Isso vale para OUTRAS decisões (desconto, exceção de política, algo que a ferramenta não ' +
+    'cobre) — nunca para simplesmente consultar ou marcar um horário que a ferramenta resolve sozinha. NÃO ' +
+    'diga "vou confirmar/verificar com [nome de pessoa/equipe]" para justificar não ter chamado a ferramenta: ' +
+    'chame primeiro, e só fale de encaminhar a alguém se a ferramenta genuinamente não resolver.'
+  );
+}
 
 /**
  * O mesmo ensino para quem CONSULTA a agenda e não marca.
@@ -875,7 +915,41 @@ const AGENDA_TOOL_NAMES = new Set([
   'crm_find_free_slots',
   'crm_book_appointment',
   'crm_reschedule_appointment',
+  // Issue #831: a ferramenta que consulta E marca numa chamada só. Ela EXECUTA
+  // marcação, então precisa armar o mesmo gate: sem isto, o turno em que a IA
+  // marcou passaria sem o `agendaStallGate` — o gate que existe justamente para
+  // detectar "falou de agenda e nada foi gravado".
+  'crm_find_and_book_appointment',
 ]);
+
+/**
+ * O agente consegue GRAVAR um horário sozinho (marcar ou remarcar)?
+ *
+ * Duas ferramentas MARCAM um horário novo: `crm_book_appointment` e, desde a issue
+ * #831, a que consulta e marca numa chamada só (`crm_find_and_book_appointment`).
+ * Ela decide QUAL bloco residente o agente recebe (`blocoResidenteDaAgenda`): o de
+ * quem marca ou o de quem só consulta — divergindo, o bloco diria "você NÃO tem
+ * ferramenta para marcar" a um agente que tem.
+ *
+ * O veto do gate NÃO lê esta função, e já leu: ele recebia um booleano
+ * `podeMarcar` e escrevia uma lista fixa de ferramentas para todo agente que
+ * marca — inclusive as que o agente não tem. Hoje ele recebe a lista exata
+ * (`ferramentasDeAgendaDoAgente`).
+ *
+ * ⚠️ `crm_reschedule_appointment` está FORA, de propósito. Ela grava na agenda,
+ * mas só MOVE um compromisso que já existe — não cria um. Incluí-la alargava o
+ * portão além do que a #831 pede: o agente que tem só a remarcação (e que antes
+ * caía no bloco de só-consulta) passava a receber o `agendaSystemBlock`, que
+ * nomeia ferramentas de marcar que ele não tem — exatamente o modo de falha que
+ * o bloco irmão existe para evitar, e que um dono aparando capacidades para caber
+ * no teto de 25 tende a produzir.
+ */
+export function temFerramentaDeMarcacao(toolIds: readonly string[]): boolean {
+  return (
+    toolIds.includes('crm_book_appointment') ||
+    toolIds.includes('crm_find_and_book_appointment')
+  );
+}
 
 /**
  * O agente tem alguma ferramenta de agenda? É o que ARMA o `agendaStallGate`.
@@ -887,6 +961,37 @@ const AGENDA_TOOL_NAMES = new Set([
  */
 export function temFerramentaDeAgenda(toolIds: readonly string[]): boolean {
   return toolIds.some((t) => AGENDA_TOOL_NAMES.has(t));
+}
+
+/**
+ * As ferramentas de agenda que ESTE agente tem — a lista que o veto do
+ * `agendaStallGate` nomeia.
+ *
+ * ⚠️ É a lista, e não um booleano, porque o texto do veto é ENSINO: ele diz ao
+ * modelo o que chamar. Com `podeMarcar: boolean` o gate só sabia que o agente
+ * marca, e nomeava a família inteira — `crm_book_appointment` para quem tem só a
+ * conjunta, `crm_reschedule_appointment` para quem não remarca. Nomear ferramenta
+ * ausente faz o modelo tentar chamá-la, e a correção vira um segundo defeito.
+ */
+export function ferramentasDeAgendaDoAgente(toolIds: readonly string[]): string[] {
+  return [...AGENDA_TOOL_NAMES].filter((t) => toolIds.includes(t));
+}
+
+/**
+ * QUAL bloco residente de Agenda este agente recebe — ou nenhum.
+ *
+ * A escolha vivia inline dentro de `executarTurnoDoAgente`, inalcançável sem o
+ * runtime inteiro: nenhum teste chegava nela, e o portão que a #831 alargou
+ * (`temFerramentaDeMarcacao`) só era exercitado pela própria função, nunca pelo
+ * ponto de uso. Aqui ela é chamável — e o que se prende é o par
+ * "quem recebe o bloco de marcar" × "quem recebe o de só consultar", que é
+ * exatamente onde o texto ensina, ou não, uma ferramenta que o agente não tem.
+ */
+export function blocoResidenteDaAgenda(toolIds: readonly string[]): string | null {
+  if (temFerramentaDeMarcacao(toolIds)) return agendaSystemBlock(toolIds);
+  // Só consulta: o bloco de cima nomeia ferramentas de marcar que ele não tem.
+  if (toolIds.includes('crm_find_free_slots')) return AGENDA_CONSULTA_SYSTEM_BLOCK;
+  return null;
 }
 
 export interface InboundTurnKnobs {
@@ -1612,6 +1717,7 @@ async function executarTurnoDoAgente(
   // suíte de invariantes ficava vermelha das 22h às 7h (fuso do tenant) — nove
   // horas por dia em que um PR reprova por causa do relógio de parede.
   const clock = deps.clock ?? ((): Date => new Date());
+  const inicioDoProcessamento = performance.now();
   const contextKnobs = {
     historyLimit: deps.knobs.historyLimit,
     maxTokens: deps.knobs.maxContextTokens,
@@ -1947,16 +2053,12 @@ async function executarTurnoDoAgente(
   // Spec 15 §5.2: bloco das tools de caso SEMPRE residente (não invalida o prefixo
   // cacheável — mesmo espírito do índice de skills) quando a tela habilita. O bloco da
   // Agenda segue o mesmo padrão, condicionado a `crm_book_appointment` estar entre as
-  // tools publicadas — ver comentário de `AGENDA_SYSTEM_BLOCK`. `TRANSPARENCIA_SYSTEM_BLOCK`
+  // tools publicadas — ver comentário de `agendaSystemBlock`. `TRANSPARENCIA_SYSTEM_BLOCK`
   // não depende de nenhuma feature — todo agente publicado o recebe.
   const blocosResidentes = [systemWithMemory, TRANSPARENCIA_SYSTEM_BLOCK];
   if (agentConfig !== null && agentConfig.casesEnabled) blocosResidentes.push(CASES_SYSTEM_BLOCK);
-  if (agentConfig !== null && agentConfig.toolIds.includes('crm_book_appointment')) {
-    blocosResidentes.push(AGENDA_SYSTEM_BLOCK);
-  } else if (agentConfig !== null && agentConfig.toolIds.includes('crm_find_free_slots')) {
-    // Só consulta: o bloco de cima nomeia uma ferramenta que ele não tem.
-    blocosResidentes.push(AGENDA_CONSULTA_SYSTEM_BLOCK);
-  }
+  const blocoDaAgenda = agentConfig === null ? null : blocoResidenteDaAgenda(agentConfig.toolIds);
+  if (blocoDaAgenda !== null) blocosResidentes.push(blocoDaAgenda);
   if (preview)
     blocosResidentes.push(
       'MODO PRÉVIA: proponha a resposta com send_message. Operações são propostas separadas; nunca diga que executou uma proposta. Nenhum envio real acontece.',
@@ -2703,7 +2805,7 @@ async function executarTurnoDoAgente(
             // ferramenta de agenda nenhuma segue desarmado — vetá-lo não teria cura.
             agenda: {
               active: agentConfig !== null && temFerramentaDeAgenda(agentConfig.toolIds),
-              podeMarcar: agentConfig !== null && agentConfig.toolIds.includes('crm_book_appointment'),
+              ferramentas: agentConfig === null ? [] : ferramentasDeAgendaDoAgente(agentConfig.toolIds),
               toolCalledThisTurn: agendaToolCalledThisTurn,
             },
             ...(deps.knobs.disclosureMode !== undefined
@@ -2714,6 +2816,54 @@ async function executarTurnoDoAgente(
             ...(semanticClassifier !== undefined
               ? { classifyPromiseSemantic: semanticClassifier }
               : {}),
+            // Pausa humana do turno, paga FORA do lock do número (issue #654). Antes ela
+            // era paga dentro do `send` logo abaixo (via `antesDaPrimeira`), e o `send`
+            // só acontece com o `pg_advisory_xact_lock` do canal na mão — cada turno
+            // segurava a fila do NÚMERO por 1,2s–7,5s além do necessário. Agora o
+            // guardrail a paga antes de tomar conexão: sem transação aberta durante a espera.
+            //
+            // O texto que dimensiona a pausa é a 1ª bolha do MESMO fatiamento que o
+            // `sendInBubbles` usa (`splitForSend` é a fonte única da decisão) — a pausa
+            // segue proporcional ao que o cliente lê primeiro, não ao corpo todo.
+            //
+            // Diferença declarada: aqui o texto é o `body` PRÉ-cadeia; o `finalBody`
+            // pós-disclosure só existe do lado de dentro do guardrail. Um disclosure
+            // prependado pelo gate F4-05 não entra na conta da espera (antes entrava,
+            // porque o gancho recebia `finalBody`).
+            esperaForaDoLock: async (): Promise<void> => {
+              // Uma vez por TURNO — o flag impede que um re-run do fail-safe (veto de
+              // promessa/vocabulário) cobre a espera de novo do mesmo cliente.
+              if (jaEsperouComoHumano) return;
+              jaEsperouComoHumano = true;
+              // `liveChannel()`, não `channel`: o transporte é anulável (preview não tem
+              // canal) e este é o MESMO acessor que o `send` logo abaixo usa. Resolver
+              // antes da espera mantém o desfecho de preview idêntico ao de antes —
+              // `preview_transport_forbidden` na hora, e não depois da pausa.
+              const canal = liveChannel();
+              const ms = await esperarComoHumano({
+                texto:
+                  splitForSend(
+                    body,
+                    agentConfig?.splitMessages ?? false,
+                    agentConfig?.splitMaxChars ?? 600,
+                  )[0] ?? body,
+                // `processamentoMs` é a contribuição do #849 (@Teowfb): a pausa humana desconta o
+                // tempo que o turno JÁ gastou pensando, em vez de somar em cima dele. Sem este
+                // argumento o `gasto` de `atraso-humano.ts` cai no `?? 0` e o desconto não acontece —
+                // o cliente espera duas vezes. O ponto de chamada mudou de lugar com a #654 (a pausa
+                // saiu de `antesDaPrimeira`, dentro do lock, para cá), e o desconto veio junto.
+                processamentoMs: performance.now() - inicioDoProcessamento,
+                sleep: deps.sleep ?? ((s) => new Promise((resolve) => setTimeout(resolve, s))),
+                log: runLog,
+                ...(canal.signalTyping
+                  ? {
+                      sinalizarDigitando: (): Promise<void> =>
+                        canal.signalTyping!({ tenantId, conversationId: input.conversationId }),
+                    }
+                  : {}),
+              });
+              runLog.info('atraso humano antes da 1ª bolha', { atraso_ms: ms, fora_do_lock: true });
+            },
             // `finalBody` = corpo após a cadeia (o disclosureGate F4-05 pode prependar o
             // disclosure via inject); é ELE que vai ao canal, não o `body` capturado da tool.
             send: (finalBody: string) =>
@@ -2722,34 +2872,9 @@ async function executarTurnoDoAgente(
                 maxChars: agentConfig?.splitMaxChars ?? 600,
                 sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
                 jitter: () => 1200 + Math.floor(Math.random() * 800), // piso no throttle anti-ban (1.2s) — bolhas são mensagens físicas
-                // ANTES da 1ª bolha: "digitando…" + espera proporcional ao texto.
-                // É o conserto do "responde rápido demais" (ver atraso-humano.ts).
-                // NÃO substitui o jitter acima: aquele é throttle anti-ban entre
-                // mensagens físicas, este é a pausa humana do turno. Só uma vez
-                // por TURNO — o flag impede que um re-run do fail-safe (veto de
-                // promessa/vocabulário) cobre a espera de novo do mesmo cliente.
-                antesDaPrimeira: async (primeiraBolha: string): Promise<void> => {
-                  if (jaEsperouComoHumano) return;
-                  jaEsperouComoHumano = true;
-                  // `liveChannel()`, não `channel`: o transporte é anulável (preview
-                  // não tem canal) e este é o MESMO acessor que o `send` logo abaixo
-                  // usa. Resolver aqui, antes da espera, mantém o desfecho de preview
-                  // idêntico ao de antes deste recurso — `preview_transport_forbidden`
-                  // na hora, e não depois de segurar o turno por vários segundos.
-                  const canal = liveChannel();
-                  const ms = await esperarComoHumano({
-                    texto: primeiraBolha,
-                    sleep: deps.sleep ?? ((s) => new Promise((resolve) => setTimeout(resolve, s))),
-                    log: runLog,
-                    ...(canal.signalTyping
-                      ? {
-                          sinalizarDigitando: (): Promise<void> =>
-                            canal.signalTyping!({ tenantId, conversationId: input.conversationId }),
-                        }
-                      : {}),
-                  });
-                  runLog.info('atraso humano antes da 1ª bolha', { atraso_ms: ms });
-                },
+                // A pausa humana do turno NÃO mora mais aqui: ela subiu para
+                // `esperaForaDoLock` (paga antes de o guardrail tomar o lock do número) —
+                // issue #654. Neste ponto fica só o jitter anti-ban entre bolhas.
                 send: (bubble): Promise<ChannelSendResult> => {
                   seq += 1;
                   return liveChannel().send({
@@ -2953,7 +3078,10 @@ async function executarTurnoDoAgente(
             // Espelho no CRM. Falha NUNCA reverte o harness (fonte da verdade do
             // funil) nem falha o job: humano resolve via inbox_items. Os motivos
             // de MIRROR_WARN_ONLY (tenant sem mapa; humano moveu o card antes) são
-            // só warn — estado legítimo do produto não é incidente.
+            // só warn — estado legítimo do produto não é incidente. Os outros dois
+            // merecem aviso PRÓPRIO, cada um no seu: `fora_do_escopo` (nada quebrou,
+            // o dono decide se libera o funil) e `perda_sem_motivo` (#917 — o card
+            // não anda porque a perda exige um motivo que só o humano pode dar).
             const mirror = await mirrorLeadStageToCrm(pool, deps.crmCfg, {
               tenantId,
               leadId,
@@ -2967,32 +3095,17 @@ async function executarTurnoDoAgente(
                 to_stage: update.transition.to,
                 reason: mirror.reason,
               });
-              if (mirror.reason === 'fora_do_escopo') {
-                // Aviso PRÓPRIO, e não o de falha: nada quebrou — a regra
-                // funcionou. Dizer "falhou" aqui mandaria o dono procurar um
-                // defeito que não existe, e "reconcilie manualmente" seria
-                // instrução errada: ele não deve mover o card, deve decidir se
-                // libera o funil para este assistente.
-                await insertInboxItem(pool, tenantId, {
-                  kind: 'other',
-                  title: 'O assistente quis organizar um negócio de um funil que não é dele',
-                  body:
-                    `O assistente concluiu que este negócio deveria ir para "${update.transition.to}", ` +
-                    `mas ele não cuida do funil onde o negócio está (${mirror.detail}). ` +
-                    `Ninguém mexeu no card. Se ele deveria cuidar desse funil, marque isso na ` +
-                    `configuração do assistente; se não, não há nada a fazer.`,
-                  refKind: 'lead',
-                  refId: leadId,
-                });
-              } else if (!MIRROR_WARN_ONLY.has(mirror.reason)) {
-                await insertInboxItem(pool, tenantId, {
-                  kind: 'other',
-                  title: 'Espelho de stage no CRM falhou — funil possivelmente inconsistente',
-                  body: `lead_state avançou para "${update.transition.to}" no harness, mas crm_move_lead_stage falhou (${mirror.reason}: ${mirror.detail}). Reconcilie o stage no CRM manualmente.`,
-                  refKind: 'lead',
-                  refId: leadId,
-                });
-              }
+              // QUAL aviso cada recusa produz, e como ele deixa de se repetir, é
+              // decisão de `move-lead-stage` — aqui só se passa o motivo e o
+              // lead. Ver `abreAvisoDoEspelhoRecusado`: escrever o
+              // `insertInboxItem` à mão neste ponto é o que deixava o `dedupe`
+              // sem guarda.
+              await abreAvisoDoEspelhoRecusado(pool, tenantId, {
+                leadId,
+                motivo: mirror.reason,
+                detalhe: mirror.detail,
+                etapaDeDestino: update.transition.to,
+              });
             }
           }
           // F3-11: o estágio que o modelo confirmou (a máquina F2-10 gravou) — base da
@@ -3462,7 +3575,7 @@ async function executarTurnoDoAgente(
             () => ({
               agenda: {
                 active: previewContext.agenda?.active ?? false,
-                podeMarcar: previewContext.agenda?.podeMarcar ?? false,
+                ferramentas: previewContext.agenda?.ferramentas ?? [],
                 toolCalledThisTurn: agendaToolCalledThisTurn,
               },
             }),
@@ -3481,47 +3594,66 @@ async function executarTurnoDoAgente(
     const currentStage: LeadStage = leadState?.stage ?? 'new';
     let stageSuggestion: LeadStage | null = null;
     let stageHintBlock = '';
-    if (deps.knobs.stageClassifier !== undefined) {
-      stageSuggestion = await classifyStage(
-        pool,
-        deps.llmCfg,
-        { tenantId, leadId: leadId || null, jobId: job?.id },
-        {
-          context: effectiveContext,
-          currentStage,
-          ...argsAux(deps.knobs.stageClassifier.model),
-        },
-        { registry: deps.registry, log: runLog },
-      );
-      if (stageSuggestion !== null) {
-        stageHintBlock = renderStageHint(stageSuggestion, currentStage);
-      }
+    let jailbreakLevel: JailbreakLevel = 'none';
+
+    // Os dois classificadores auxiliares rodam EM PARALELO, e não em série.
+    //
+    // Eles são ADVISÓRIOS, leem sinais diferentes (o contexto e o estágio atual
+    // vs. a última mensagem do lead) e nenhum consome o resultado do outro — em
+    // série o turno pagava duas idas-e-voltas de LLM uma atrás da outra, e o
+    // cliente esperava a soma. `Promise.all` paga só a mais lenta das duas.
+    //
+    // O que NÃO muda por rodar junto: o orçamento mensal da organização é
+    // checado dentro de cada `runModelCall` (a mesma checagem que já corre
+    // concorrente entre turnos de leads diferentes), nenhuma decisão de
+    // guardrail depende de ordem entre os dois, e o `jailbreak` segue sem vetar
+    // o inbound — só flagra o turno no trace.
+    const [stageResultado, jailbreakVerdict] = await Promise.all([
+      deps.knobs.stageClassifier !== undefined
+        ? classifyStage(
+            pool,
+            deps.llmCfg,
+            { tenantId, leadId: leadId || null, jobId: job?.id },
+            {
+              context: effectiveContext,
+              currentStage,
+              ...argsAux(deps.knobs.stageClassifier.model),
+            },
+            { registry: deps.registry, log: runLog },
+          )
+        : Promise.resolve(null),
+      // F4-04: classifier ADVISÓRIO anti-jailbreak sobre a mensagem INBOUND do lead (o
+      // skillSignal já é a última inbound). Roda pelo seam agnóstico (modelo BARATO, budget
+      // checado nele). NÃO veta o inbound — só FLAGRA o turno no trace; flag/level não são PII
+      // (a mensagem/reason nunca vão a log). A correlação com promessa fora de tabela escala no fim.
+      camadaLigada(camadas.jailbreak, deps.knobs.jailbreak !== undefined)
+        ? classifyJailbreak(
+            pool,
+            deps.llmCfg,
+            { tenantId, leadId: leadId || null, jobId: job?.id },
+            {
+              message: skillSignal,
+              // Knob ausente + organização ligando = roda com o modelo padrão dela,
+              // que é a convenção já usada pelo stageClassifier.
+              ...argsAux(deps.knobs.jailbreak?.model),
+            },
+            { registry: deps.registry, log: runLog },
+          )
+        : Promise.resolve(null),
+    ]);
+
+    stageSuggestion = stageResultado;
+    if (stageSuggestion !== null) {
+      stageHintBlock = renderStageHint(stageSuggestion, currentStage);
     }
 
-    // F4-04: classifier ADVISÓRIO anti-jailbreak sobre a mensagem INBOUND do lead (o
-    // skillSignal já é a última inbound). Roda pelo seam agnóstico (modelo BARATO, budget
-    // checado nele). NÃO veta o inbound — só FLAGRA o turno no trace; flag/level não são PII
-    // (a mensagem/reason nunca vão a log). A correlação com promessa fora de tabela escala no fim.
-    let jailbreakLevel: JailbreakLevel = 'none';
-    if (camadaLigada(camadas.jailbreak, deps.knobs.jailbreak !== undefined)) {
-      const verdict = await classifyJailbreak(
-        pool,
-        deps.llmCfg,
-        { tenantId, leadId: leadId || null, jobId: job?.id },
-        {
-          message: skillSignal,
-          // Knob ausente + organização ligando = roda com o modelo padrão dela,
-          // que é a convenção já usada pelo stageClassifier.
-          ...argsAux(deps.knobs.jailbreak?.model),
-        },
-        { registry: deps.registry, log: runLog },
-      );
-      jailbreakLevel = verdict.level;
-      if (verdict.flag) {
+    if (jailbreakVerdict !== null) {
+      jailbreakLevel = jailbreakVerdict.level;
+      if (jailbreakVerdict.flag) {
         // trace do turno: só flag/level (não PII) — a mensagem e o reason nunca são logados.
         runLog.warn('jailbreak: sinal detectado na mensagem do lead', {
           jailbreak_flag: true,
-          jailbreak_level: verdict.level,
+          jailbreak_level: jailbreakVerdict.level,
         });
       }
     }

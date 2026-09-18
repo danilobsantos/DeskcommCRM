@@ -40,6 +40,7 @@ import {
   MOTIVO_LEGIVEL,
 } from "@/lib/conversoes/estado-da-conexao";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { montarCodigoDeOrigemDoSite, TAMANHO_MAXIMO_DO_CODIGO } from "@/lib/leads/origem-do-site";
 import { formatCentsBRL } from "@/lib/money";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -64,6 +65,20 @@ export default async function ConversoesPage() {
   ]);
   const idioma = user.idioma;
   const t = (texto: string) => traduzir(texto, idioma);
+
+  /**
+   * O exemplo do link é GERADO aqui, e não escrito à mão.
+   *
+   * Um exemplo fixo envelhece: no dia em que o contrato mudar, a tela passa a
+   * ensinar um link que a ingestão não reconhece — e o defeito só apareceria na
+   * atribuição de quem seguiu a instrução, meses depois. Gerando pelo mesmo
+   * módulo que a ingestão lê, o exemplo é verdadeiro por construção.
+   */
+  const codigoDeExemplo =
+    montarCodigoDeOrigemDoSite({ utm_source: "instagram", utm_campaign: "promo-junina" }) ?? "";
+  const linkDeExemplo = `https://wa.me/5511999999999?text=${encodeURIComponent(
+    `${t("Olá! Vim pelo site.")} ${codigoDeExemplo}`.trim(),
+  )}`;
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto p-6">
@@ -145,6 +160,73 @@ export default async function ConversoesPage() {
             </table>
           </div>
         )}
+      </section>
+
+      {/*
+        Condição 3 da decisão da #924: "quem opera encontra a explicação de como
+        montar o link do WhatsApp com o código".
+
+        Mora nesta tela porque esta é a tela da atribuição — a mesma que já
+        responde "a Meta recebeu minhas vendas?". O mecanismo do site não tem
+        outra superfície: sem este texto, o contrato do link existiria só no
+        código, e quem monta o botão da landing page não teria onde descobrir o
+        formato nem os limites.
+      */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">{t("Quem chegou pelo site")}</h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          {t(
+            "Quando a pessoa vê a campanha numa página sua e toca num botão que abre o WhatsApp, o link desse botão pode levar a origem junto. O código abaixo vai no texto da mensagem, e a conversa entra no CRM já com a origem do site.",
+          )}
+        </p>
+
+        <div className="rounded-md border p-4 text-sm">
+          <p className="font-medium">{t("Como montar o link do botão")}</p>
+          <ol className="mt-2 flex list-decimal flex-col gap-2 pl-5">
+            <li>
+              {t(
+                "Monte o texto que a pessoa vai enviar — uma saudação basta — e termine com o código.",
+              )}
+            </li>
+            <li>
+              {t(
+                "Troque o número pelo WhatsApp da empresa e o texto pelo seu, mantendo o código no fim:",
+              )}
+            </li>
+          </ol>
+          <code className="mt-3 block overflow-x-auto rounded-md bg-muted/50 p-2 text-xs break-all">
+            {linkDeExemplo}
+          </code>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {t(
+              "Este exemplo foi gerado por esta tela. Os campos que o código aceita são utm_source, utm_medium, utm_campaign, utm_term, utm_content, gclid e fbclid.",
+            )}
+          </p>
+        </div>
+
+        <ul className="flex max-w-2xl list-disc flex-col gap-2 pl-5 text-sm text-muted-foreground">
+          <li>
+            {t(
+              "O código vale só na primeira mensagem do contato: quem recebe um link encaminhado não ganha a origem de quem encaminhou.",
+            )}
+          </li>
+          <li>
+            {t(
+              "Ele nunca sobrescreve uma origem já gravada, inclusive a de anúncio: quem chegou do Meta ou do Google antes mantém o anúncio.",
+            )}
+          </li>
+          <li>
+            {t(
+              "Só campos de campanha viajam no código, e nenhum dado pessoal: nome, telefone, e-mail e documento ficam de fora.",
+            )}{" "}
+            {t("O código inteiro tem um teto de")} {TAMANHO_MAXIMO_DO_CODIGO} {t("caracteres.")}
+          </li>
+          <li>
+            {t(
+              'A origem aparece na ficha do contato e no filtro "Site (landing page)" da lista de contatos.',
+            )}
+          </li>
+        </ul>
       </section>
     </div>
   );

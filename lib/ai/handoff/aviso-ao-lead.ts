@@ -125,8 +125,8 @@ async function quemPodeAssumir(
   organizationId: string,
 ): Promise<QuemPodeAssumir | null> {
   try {
-    const roster = await carregarRosterDeAtendimento(admin, organizationId);
     const agora = new Date();
+    const roster = await carregarRosterDeAtendimento(admin, organizationId, agora);
     return {
       total: roster.length,
       disponiveis: roster.filter((a) => podeAssumirAgora(a, agora)).length,

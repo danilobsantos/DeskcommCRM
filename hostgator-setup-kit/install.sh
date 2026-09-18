@@ -1806,16 +1806,15 @@ if [ -f supabase/baseline.sql ]; then
 
   if [ "$has_schema" = "1" ]; then
     c_ylw "• schema já existe — re-aplicando em modo update (erros 'já existe' são esperados e ficam no log)"
-    raw="$(docker run --rm -i -v "$PROJECT_DIR/supabase/baseline.sql:/baseline.sql:ro" \
-          postgres:17-alpine psql "$(url_do_schema)" -q -f /baseline.sql 2>&1 || true)"
-    printf '%s\n' "$raw" > "$SCHEMA_LOG"
-    benign='already exists|multiple primary keys|multiple default values|is already a member|already a partition'
-    unexpected="$(printf '%s\n' "$raw" | grep -iE 'ERROR|FATAL' | grep -viE "$benign" || true)"
-    if [ -n "$unexpected" ]; then
-      c_ylw "⚠ Erros no banco que NÃO são os esperados (log completo: $SCHEMA_LOG):"
-      printf '%s\n' "$unexpected" | head -20
-    else
+    # Mesmo contrato do update.sh, inclusive a nova passada quando o banco está
+    # em disputa: `reaplicar_baseline` em _common.sh.
+    if reaplicar_baseline "$PROJECT_DIR/supabase/baseline.sql" "$SCHEMA_LOG"; then
       c_grn "✓ schema re-aplicado (apêndice de migrations incluído)"
+    else
+      c_ylw "⚠ Erros no banco que NÃO são os esperados (log completo: $SCHEMA_LOG):"
+      # Sem `| head`: com pipefail, o head que fecha cedo mata o printf com SIGPIPE
+      # numa lista grande, e o set -e derrubava o instalador aqui.
+      listar_erros_do_banco "$BASELINE_INESPERADO" 20
     fi
   else
     if docker run --rm -i -v "$PROJECT_DIR/supabase/baseline.sql:/baseline.sql:ro" \
@@ -2101,8 +2100,24 @@ if ! dc pull; then
   c_ylw "⚠ Não consegui puxar todas as imagens do registro."
   c_ylw "  Sigo assim mesmo: o que faltar é construído aqui (mais lento, mesmo resultado)."
 fi
-dc up -d
+# O "sigo assim mesmo" acima vale para o worker e o scheduler, que têm `build:`
+# ao lado do `image:` — mas NÃO para o app, que não tem: se a imagem dele não
+# veio do registro (arquitetura da VPS diferente da das imagens publicadas, tag
+# ainda publicando, pacote privado), o `up -d` morre e a instalação acabava sem
+# CRM no ar. A promessa da frase acima só se sustenta com esta guarda.
+CONSTRUIU_AQUI=""
+if ! dc up -d; then
+  if construir_aqui_e_subir "$VERSAO_ALVO"; then
+    CONSTRUIU_AQUI=1
+  else
+    die "Não coloquei o CRM no ar: nem as imagens prontas desta versão nem a construção aqui funcionaram. O erro está logo acima; para reproduzir só a construção: docker compose $(dc_files) -f ${COMPOSE_BUILD} build"
+  fi
+fi
 c_grn "✓ containers no ar"
+if [ -n "$CONSTRUIU_AQUI" ]; then
+  c_ylw "  (as três imagens desta versão foram construídas aqui nesta VPS: as prontas"
+  c_ylw "   não servem para a arquitetura dela. É mais lento e não precisa de nada manual.)"
+fi
 
 # ── 10. Healthcheck ─────────────────────────────────────────────────────────
 step "Aguardando o app ficar saudável"

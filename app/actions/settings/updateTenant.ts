@@ -10,6 +10,7 @@ import { audit } from "@/lib/audit";
 import { tenantSchema, type TenantInput } from "@/lib/schemas/settings";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { paisesOferecidos } from "@/lib/legal/perfil-do-pais";
 
 export type UpdateTenantResult =
   | { ok: true }
@@ -69,12 +70,23 @@ export async function updateTenant(input: TenantInput): Promise<UpdateTenantResu
     lost_reasons_extra: parsed.data.lost_reasons_extra,
   };
 
+  // O país só entra se tiver PERFIL REVISADO (issue #1033): `paisesOferecidos()`
+  // é a lista que o seletor mostra, e é ela que a gravação confere. Sem esta
+  // guarda, um PATCH à mão gravaria um país cujo documento legal ninguém
+  // revisou, e o PDF de acesso passaria a não citar lei nenhuma — ou, pior,
+  // citaria a brasileira para um titular de outro país.
+  const pais = parsed.data.country ?? null;
+  if (pais !== null && !paisesOferecidos().some((p) => p.codigo === pais)) {
+    return { ok: false, error: `País sem perfil revisado: ${pais}` };
+  }
+
   const { error } = await supabase
     .from("organizations")
     .update({
       display_name: parsed.data.display_name,
       legal_name: parsed.data.legal_name,
       cnpj: parsed.data.cnpj ?? null,
+      country: pais,
       timezone: parsed.data.timezone,
       locale: parsed.data.locale,
       currency: parsed.data.currency,

@@ -7,6 +7,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { citacaoDaLei, perfilDoPais } from "@/lib/legal/perfil-do-pais";
 import { logger } from "@/lib/logger";
 import type { Json } from "@/lib/database.types";
 
@@ -30,6 +31,8 @@ export interface ContactSnapshot {
   source_metadata: Record<string, unknown> | null;
   created_at: string;
   last_activity_at: string | null;
+  /** Primeiro atendimento marcado. Sobrevive à anonimização: é registro de operação. */
+  first_service_at: string | null;
 }
 
 export interface ConsentRow {
@@ -223,6 +226,17 @@ export interface ExportPayload {
   organization_display_name: string;
   /** Encarregado da organização. `null` cai em `env.LGPD_DPO_EMAIL`. */
   dpo_email: string | null;
+  /**
+   * A lei que o documento de acesso cita, pronta (`LGPD Art. 18, II (Lei nº
+   * 13.709/2018)`), ou `null` quando o país da organização ainda não tem
+   * citação revisada (issue #1033). `null` NÃO cai para a lei brasileira: o
+   * documento responde a um direito legal do titular, e afirmar a lei de outro
+   * país é pior do que não citar artigo nenhum — o rodapé diz que não há
+   * citação revisada em vez de inventar uma.
+   */
+  lei_citada: string | null;
+  /** O rótulo do documento do titular no país ("CPF", "Documento"). */
+  documento_rotulo: string;
   generated_at: string;
   no_local_footprint: boolean;
   contact: ContactSnapshot | null;
@@ -280,6 +294,14 @@ interface Controlador {
   legal_name: string;
   display_name: string;
   dpo_email: string | null;
+  /**
+   * O país da organização (issue #1033). Lido JUNTO do controlador, na mesma
+   * consulta, porque é dele que saem a lei citada e o rótulo do documento: dois
+   * `select` na mesma linha divergem no dia em que um ganhar fallback e o outro
+   * não — e aqui a divergência sairia impressa num documento entregue a um
+   * titular, afirmando a lei de um país com o rótulo de outro.
+   */
+  country: string | null;
 }
 
 /**
@@ -293,10 +315,10 @@ async function lerControlador(
   organizationId: string,
   requestId: string,
 ): Promise<Controlador> {
-  const vazio: Controlador = { legal_name: "", display_name: "", dpo_email: null };
+  const vazio: Controlador = { legal_name: "", display_name: "", dpo_email: null, country: null };
   const { data, error } = await admin
     .from("organizations")
-    .select("legal_name, display_name, dpo_email")
+    .select("legal_name, display_name, dpo_email, country")
     .eq("id", organizationId)
     .maybeSingle();
   if (error || !data) {
@@ -310,6 +332,7 @@ async function lerControlador(
     legal_name: data.legal_name ?? "",
     display_name: data.display_name ?? "",
     dpo_email: data.dpo_email ?? null,
+    country: (data as { country?: string | null }).country ?? null,
   };
 }
 
@@ -351,7 +374,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     const { data, error } = await admin
       .from("contacts")
       .select(
-        "id, name, display_name, email, phone_number, cpf_encrypted, birthdate, is_blocked, is_anonymized, consent, tags, source, source_metadata, custom_fields, created_at, last_activity_at",
+        "id, name, display_name, email, phone_number, cpf_encrypted, birthdate, is_blocked, is_anonymized, consent, tags, source, source_metadata, custom_fields, created_at, last_activity_at, first_service_at",
       )
       .eq("organization_id", organizationId)
       .eq("id", contactId)
@@ -379,6 +402,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
         source_metadata: (data.source_metadata as Record<string, unknown> | null) ?? null,
         created_at: data.created_at,
         last_activity_at: data.last_activity_at ?? null,
+        first_service_at: data.first_service_at ?? null,
       };
     }
   }
@@ -783,12 +807,16 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  const perfil = perfilDoPais(controlador.country);
+
   return {
     request_id: requestId,
     organization_id: organizationId,
     organization_legal_name: controlador.legal_name,
     organization_display_name: controlador.display_name,
     dpo_email: controlador.dpo_email,
+    lei_citada: citacaoDaLei(perfil),
+    documento_rotulo: perfil.documento.rotulo,
     generated_at: new Date().toISOString(),
     no_local_footprint: !contact && conversations.length === 0 && orders.length === 0,
     contact,
@@ -821,6 +849,8 @@ function emptyPayload(
     organization_legal_name: controlador.legal_name,
     organization_display_name: controlador.display_name,
     dpo_email: controlador.dpo_email,
+    lei_citada: citacaoDaLei(perfilDoPais(controlador.country)),
+    documento_rotulo: perfilDoPais(controlador.country).documento.rotulo,
     generated_at: new Date().toISOString(),
     no_local_footprint: true,
     contact: null,

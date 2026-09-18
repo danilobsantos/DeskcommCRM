@@ -1,3 +1,4 @@
+import { perfilDoPais, type DocumentoDoTitular } from "@/lib/legal/perfil-do-pais";
 import { normalizePhoneBR } from "@/lib/webhooks/inbound";
 /**
  * Parser de CSV para importação de contatos — RFC 4180, zero dependências.
@@ -267,17 +268,29 @@ function normalizaHeader(h: string): string {
  * Retorna null com o motivo quando o cabeçalho não traz NENHUM identificador
  * (telefone/e-mail) — sem isso nada importável existe, e falhar aberto é
  * melhor que criar 300 contatos vazios.
+ *
+ * `documento` é o documento do TITULAR no país da organização
+ * (`lib/legal/perfil-do-pais.ts`): quem importa no Brasil tem "CPF" no Excel, e
+ * no país do perfil tem o nome local ("Bilhete de Identidade", "Documento"). A
+ * coluna do banco continua `cpf` em todos os casos — o vocabulário de TELA
+ * muda, o schema não. Ausente, vale o perfil brasileiro (o de antes).
  */
 export function mapHeader(
   header: string[],
   t?: (text: string) => string,
+  documento?: DocumentoDoTitular,
 ): { indices: Record<string, number>; motivo: string | null } {
   const _t = t || ((x) => x);
+  const doc = documento ?? perfilDoPais(null).documento;
+  const aliases: Record<string, readonly string[]> = {
+    ...HEADER_ALIASES,
+    cpf: [...(HEADER_ALIASES.cpf ?? []), ...doc.apelidosDoCabecalho],
+  };
   const indices: Record<string, number> = {};
   header.forEach((rawCell, idx) => {
     const cell = normalizaHeader(rawCell);
-    for (const [campo, aliases] of Object.entries(HEADER_ALIASES)) {
-      if (aliases.includes(cell) && indices[campo] === undefined) {
+    for (const [campo, lista] of Object.entries(aliases)) {
+      if (lista.includes(cell) && indices[campo] === undefined) {
         indices[campo] = idx;
         break;
       }
@@ -361,8 +374,10 @@ export function mapLinha(
   cells: string[],
   indices: Record<string, number>,
   t?: (text: string) => string,
+  documento?: DocumentoDoTitular,
 ): { contato: LinhaNormalizada; motivo: string | null } {
   const _t = t || ((x) => x);
+  const doc = documento ?? perfilDoPais(null).documento;
   const get = (campo: string): string => {
     const idx = indices[campo];
     return idx === undefined ? "" : (cells[idx] ?? "").trim();
@@ -402,7 +417,12 @@ export function mapLinha(
     return { contato: {}, motivo: _t("linha sem telefone nem e-mail") };
   }
 
-  const cpf = get("cpf").replace(/\D/g, "");
+  // O documento é normalizado pelo PERFIL do país, e não por `replace(/\D/g,"")`:
+  // no Brasil a regra é manter os 11 dígitos (o mod-11 confere depois), mas o
+  // documento de outro país pode ter LETRA no meio — o `\D` apagava a letra e
+  // gravava um valor que não é o documento de ninguém (medido na issue #1033:
+  // `003862011LA042` virava `003862011042`). O perfil sabe o que preservar.
+  const cpf = doc.normaliza(get("cpf"));
   if (cpf !== "") contato.cpf = cpf;
 
   const birthdateRaw = get("birthdate");

@@ -17,6 +17,7 @@ import type {
 } from "@/lib/schemas";
 import type { Conversation } from "@/lib/types/messaging";
 import { normalizarTermoDeBusca } from "@/lib/inbox/termo-de-busca";
+import { ORDEM_DA_ESPERA, ehAFila } from "@/lib/inbox/comando-da-conversa";
 
 /**
  * Prepara o termo digitado para viajar dentro de um `or=` do PostgREST.
@@ -83,7 +84,7 @@ function idsQueCabemNaURL(ids: string[]): string[] {
 
 const SELECT_COLS = `
   id, organization_id, contact_id, channel_session_id, channel, status,
-  status_changed_at, service_revision, service_closed_at, service_started_at, current_demanda_id, assigned_to_user_id, assigned_to_user_name, assignee_kind, assigned_at, last_inbound_at,
+  status_changed_at, service_revision, service_closed_at, service_started_at, current_demanda_id, assigned_to_user_id, assigned_to_user_name, assignee_kind, assigned_at, last_inbound_at, awaiting_since,
   last_outbound_at, last_message_at, last_message_preview,
   unread_count_for_assignee, is_group, group_chat_id, tags, metadata,
   snooze_until, created_at, updated_at,
@@ -149,24 +150,31 @@ export async function listConversationsHandler(
   ctx: HandlerCtx,
   q: ListConversationsQuery,
 ): Promise<ListConversationsResult> {
-  // Fila (assigned_to=unassigned): ordena por TEMPO DE ESPERA — quem espera há
-  // mais tempo primeiro. `last_inbound_at` = última mensagem do cliente = "há
-  // quanto tempo aguarda resposta" (não `created_at`, que pode ser uma conversa
-  // antiga reaberta). Demais visões: por atividade recente (last_message_at desc).
+  // Fila: ordena por TEMPO DE ESPERA — quem espera há mais tempo primeiro. A
+  // régua é `awaiting_since` = a mensagem do cliente MAIS ANTIGA sem resposta
+  // (não `last_inbound_at`, que é reescrito a cada mensagem dele e fazia quem
+  // insiste descer para o fim da fila — #990; e não `created_at`, que pode ser uma
+  // conversa antiga reaberta). Demais visões: por atividade recente.
   // A Fila deixou de se identificar por `assigned_to=unassigned` — ela agora pede
   // `comando`. Sem esta linha o `isQueue` ficaria PARA SEMPRE falso na aba Fila e
   // a ordenação por tempo de espera sumiria **sem nenhum sintoma na tela**: a
   // lista continuaria populada, só que ordenada por atividade recente, e quem
   // espera desde ontem afundaria embaixo de quem escreveu agora.
-  const isQueue = q.comando?.includes("aguardando") ?? q.assigned_to === "unassigned";
-  const sortCol = isQueue ? "last_inbound_at" : "last_message_at";
+  const isQueue = ehAFila(q);
+  // A régua da Fila não se escreve aqui: vem de `ORDEM_DA_ESPERA`, a mesma que
+  // numera a posição da linha na tela e o número que o cliente ouve. Enquanto
+  // cada lugar tinha a sua cópia, trocar uma só fazia a lista ordenar por uma
+  // pergunta e a posição responder outra — sem sintoma nenhum, porque as duas
+  // telas continuam populadas e plausíveis.
+  const sortCol = isQueue ? ORDEM_DA_ESPERA.coluna : "last_message_at";
+  const ordem = isQueue ? ORDEM_DA_ESPERA.opcoes : ({ ascending: false, nullsFirst: false } as const);
   const asc = isQueue;
 
   let query = supabase
     .from("conversations")
     .select(SELECT_COLS)
     .eq("organization_id", ctx.organization_id)
-    .order(sortCol, { ascending: asc, nullsFirst: false })
+    .order(sortCol, ordem)
     .order("id", { ascending: asc })
     .limit(q.limit + 1);
 
@@ -491,7 +499,9 @@ export async function patchConversationHandler(
         ? "conversation.claimed"
         : input.status === "closed"
           ? "conversation.closed"
-          : "conversation.released";
+          : input.status === "archived"
+            ? "conversation.archived"
+            : "conversation.released";
     await audit({
       action,
       actorUserId: a.actorUserId,

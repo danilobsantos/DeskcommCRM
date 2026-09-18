@@ -113,49 +113,66 @@ describe("rollbackFoiSuperado", () => {
 describe("sucessoJaInstalado", () => {
   const FIM = "2026-09-11T14:00:00.000Z";
   const RUN = { status: "success", to_version: "1.1.0" };
+  /**
+   * O relógio da rota, passado de fora. Fixo de propósito: a assunção desta
+   * função TEM PRAZO, e prazo só se mede contra um relógio declarado — com o
+   * relógio de parede, estes casos passariam a mentir sozinhos, aos poucos.
+   */
+  const DENTRO = new Date("2026-09-11T14:01:00.000Z");
 
   it("run bem-sucedido e host ainda calado: o run manda", () => {
-    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, RUN)).toBe(true);
+    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, RUN, DENTRO)).toBe(true);
   });
 
   it("host bateu DEPOIS do fim: quem manda volta a ser o host", () => {
     // É o fim de validade desta função — e ele chega sozinho, em minutos.
-    expect(sucessoJaInstalado("2026-09-11T14:05:00.000Z", FIM, RUN)).toBe(false);
+    expect(sucessoJaInstalado("2026-09-11T14:05:00.000Z", FIM, RUN, DENTRO)).toBe(false);
   });
 
   it("empate de segundo conta como host calado — o degrau que não reoferece", () => {
     // As duas escritas vêm de relógios diferentes. Errar aqui para o lado de
     // "já atualizou" custa alguns minutos de rótulo otimista; errar para o
     // outro lado devolve o botão que manda instalar de novo o que já está lá.
-    expect(sucessoJaInstalado(FIM, FIM, RUN)).toBe(true);
+    expect(sucessoJaInstalado(FIM, FIM, RUN, DENTRO)).toBe(true);
   });
 
   it("host nunca reportou nada: o run é a única notícia que existe", () => {
-    expect(sucessoJaInstalado(null, FIM, RUN)).toBe(true);
-    expect(sucessoJaInstalado(undefined, FIM, RUN)).toBe(true);
-    expect(sucessoJaInstalado("isso não é data", FIM, RUN)).toBe(true);
+    expect(sucessoJaInstalado(null, FIM, RUN, DENTRO)).toBe(true);
+    expect(sucessoJaInstalado(undefined, FIM, RUN, DENTRO)).toBe(true);
+    expect(sucessoJaInstalado("isso não é data", FIM, RUN, DENTRO)).toBe(true);
+  });
+
+  it("passado o prazo, o host calado vence — a assunção não é eterna", () => {
+    // O outro fim desta função, e o defeito que ele fecha: com o host mudo por
+    // tempo demais, o run bem-sucedido deixa de falar pela versão em execução.
+    // Os dois lados desta regra, com os números medidos em produção, estão em
+    // `tests/unit/versao-na-tela-exige-confirmacao-do-host.test.ts`.
+    const vencida = new Date(Date.parse(FIM) + RUN_STALE_AFTER_MS + 60_000);
+    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, RUN, vencida)).toBe(false);
   });
 
   it("só vale para SUCESSO — falha e rollback têm dono próprio nesta tela", () => {
     for (const status of ["dispatched", "failed", "failed_rolled_back"]) {
-      expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, { status, to_version: "1.1.0" })).toBe(
-        false,
-      );
+      expect(
+        sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, { status, to_version: "1.1.0" }, DENTRO),
+      ).toBe(false);
     }
   });
 
   it("sem `to_version` não há o que afirmar", () => {
-    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, { status: "success" })).toBe(false);
-    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, { status: "success", to_version: "" })).toBe(
+    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, { status: "success" }, DENTRO)).toBe(
       false,
     );
-    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, null)).toBe(false);
+    expect(
+      sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, { status: "success", to_version: "" }, DENTRO),
+    ).toBe(false);
+    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", FIM, null, DENTRO)).toBe(false);
   });
 
   it("sem `finished_at` (run de agente antigo) não afirma nada", () => {
     // Sem a data não dá para saber se o host já falou depois — e o degrau
     // conservador é o comportamento de antes desta função existir.
-    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", null, RUN)).toBe(false);
-    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", "isso não é data", RUN)).toBe(false);
+    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", null, RUN, DENTRO)).toBe(false);
+    expect(sucessoJaInstalado("2026-09-11T13:55:00.000Z", "isso não é data", RUN, DENTRO)).toBe(false);
   });
 });

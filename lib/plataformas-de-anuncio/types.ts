@@ -193,7 +193,22 @@ export type FalhaDeLeitura =
   | "transitorio";
 
 export type ResultadoDeLeitura<T> =
-  | { ok: true; dados: T }
+  | {
+      ok: true;
+      dados: T;
+      /**
+       * Ressalva da leitura que quem olha a TELA precisa saber, mesmo tendo dado.
+       *
+       * Hoje é uma só, e vem da repetição sem os campos do Connect rate (ver
+       * `lerInsights`): o dado chegou, mas uma coluna ficou vazia porque a
+       * plataforma recusou o campo. Coluna vazia sem explicação é
+       * indistinguível de "esta campanha não mediu" — e trocar um erro visível
+       * (a tela caindo) por um erro invisível (número ausente com cara de zero)
+       * é pior. O motivo CRU do provedor fica no log do servidor; aqui vai a
+       * frase que a tela consegue mostrar.
+       */
+      aviso?: string;
+    }
   | { ok: false; falha: FalhaDeLeitura; detalhe: string };
 
 /**
@@ -236,6 +251,11 @@ export interface LinhaDeCampanha {
   alcance: number | null;
   cpm: number | null;
   ctr: number | null;
+  /**
+   * Percentual já calculado (visualizações da página ÷ cliques no link × 100).
+   * Nulo em campanha sem clique no link ou cujo objetivo não leva a uma página.
+   */
+  connectRate: number | null;
   frequencia: number | null;
   cpc: number | null;
   /** Percentual já calculado (reproduções ÷ impressões × 100). Nulo em campanha sem vídeo. */

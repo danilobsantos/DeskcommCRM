@@ -52,6 +52,8 @@ function payload(patch: Partial<ExportPayload> = {}): ExportPayload {
     organization_id: "8c1d4e20-0000-4000-8000-000000000002",
     organization_legal_name: "Bem Viver Serviços Médicos LTDA",
     organization_display_name: "Clínica Bem Viver",
+    lei_citada: "LGPD Art. 18, II (Lei nº 13.709/2018)",
+    documento_rotulo: "CPF",
     dpo_email: "encarregado@bemviver.com.br",
     generated_at: "2026-08-13T12:00:00.000Z",
     no_local_footprint: true,
@@ -95,7 +97,7 @@ describe("rodapé do relatório LGPD", () => {
       }),
     );
     const nomeDoControlador = texto
-      .slice("Controlador:".length, texto.indexOf("· Relatório LGPD"))
+      .slice("Controlador:".length, texto.indexOf("· Relatório de Acesso aos Dados"))
       .trim();
 
     expect(nomeDoControlador).toBe("Bem Viver Serviços Médicos LTDA");

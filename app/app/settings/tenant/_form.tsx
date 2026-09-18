@@ -15,7 +15,9 @@ import {
 } from "@/components/ui/select";
 import { updateTenant } from "@/app/actions/settings/updateTenant";
 import { useT } from "@/hooks/i18n/useT";
+import { IDIOMAS_VISIVEIS } from "@/lib/i18n/registro";
 import { MOEDAS_SERVIDAS, simboloDaMoeda, type MoedaServida } from "@/lib/money";
+import { paisesOferecidos } from "@/lib/legal/perfil-do-pais";
 import { tenantSchema, type Locale, type TenantInput } from "@/lib/schemas/settings";
 
 interface Props {
@@ -126,8 +128,11 @@ export function TenantForm({ initial }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="pt-BR">Português (BR)</SelectItem>
-                <SelectItem value="es">Español</SelectItem>
+                {IDIOMAS_VISIVEIS.map(({ codigo, nomeNativo }) => (
+                  <SelectItem key={codigo} value={codigo}>
+                    {nomeNativo}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -150,6 +155,26 @@ export function TenantForm({ initial }: Props) {
             </Select>
             <p className="text-xs text-muted-foreground">
               {t("Vale para todo preço do catálogo. Produto já cadastrado guarda a moeda com que nasceu.")}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="country">{t("País")}</Label>
+            <Select value={form.country ?? "BR"} onValueChange={(v) => set("country", v)}>
+              <SelectTrigger id="country">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {paisesOferecidos().map((pais) => (
+                  <SelectItem key={pais.codigo} value={pais.codigo}>
+                    {pais.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "De onde saem o documento do contato, a lei citada no documento de acesso e o prazo em dias úteis. Só aparecem países com a lei revisada — a lista é curta de propósito.",
+              )}
             </p>
           </div>
           <div className="space-y-2">

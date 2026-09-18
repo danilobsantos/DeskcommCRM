@@ -146,9 +146,13 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
       <Page size="A4" style={styles.page}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Relatório LGPD — Solicitação de Acesso aos Dados</Text>
+          <Text style={styles.title}>Relatório de Acesso aos Dados</Text>
           <Text style={styles.subtitle}>
-            Base legal: LGPD Art. 18, II (Lei nº 13.709/2018) · Solicitação #{shortId}
+            {/* A lei vem do PERFIL do país da organização (issue #1033): país
+                sem citação revisada não cita lei nenhuma — citar a errada é
+                pior do que não citar artigo nenhum. */}
+            Base legal: {data.lei_citada ?? "não declarada (país sem citação revisada)"} ·
+            Solicitação #{shortId}
           </Text>
         </View>
 
@@ -202,7 +206,7 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
               <Text style={styles.value}>{data.contact.phone_number ?? "—"}</Text>
             </View>
             <View style={styles.row}>
-              <Text style={styles.label}>CPF:</Text>
+              <Text style={styles.label}>{data.documento_rotulo}:</Text>
               <Text style={styles.value}>
                 {data.contact.cpf_present ? "Armazenado (criptografado)" : "—"}
               </Text>
@@ -444,9 +448,9 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
         {/* CONTROLADOR, nunca marca — ver o cabeçalho deste arquivo. */}
         <View style={styles.footer} fixed>
           <Text>
-            Controlador: {data.organization_legal_name || "—"} · Relatório LGPD Art. 18 II
-            (Lei nº 13.709/2018) · Encarregado (DPO): {encarregado(data)} · Validade do
-            link de download conforme e-mail recebido
+            Controlador: {data.organization_legal_name || "—"} · Relatório de Acesso aos
+            Dados{data.lei_citada ? ` — ${data.lei_citada}` : ""} · Encarregado (DPO):{" "}
+            {encarregado(data)} · Validade do link de download conforme e-mail recebido
           </Text>
         </View>
       </Page>

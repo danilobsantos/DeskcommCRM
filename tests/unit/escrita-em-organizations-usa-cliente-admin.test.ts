@@ -31,13 +31,41 @@
  * cliente admin passa por cima da RLS, e o filtro de tenant vira
  * responsabilidade do arquivo (anti-pattern 10 do `CLAUDE.md`). Isso é matéria
  * de revisão humana. Aqui a pergunta é só: a escrita tem chance de acontecer?
+ *
+ * ═══ AS DUAS FORMAS DE TER O CLIENTE ADMIN ═══
+ *
+ * A cerca aceita duas, e as duas são prova de ORIGEM ou de TIPO, nunca de nome:
+ *
+ *   1. **criado aqui** — `const admin = createAdminClient()`, que
+ *      `nomesDoClienteAdmin` lê pela origem;
+ *   2. **recebido por parâmetro e TIPADO** — `p.admin` com
+ *      `admin: ReturnType<typeof createAdminClient>`, que
+ *      `caminhosDoClienteAdmin` lê pela anotação resolvida no arquivo.
+ *
+ * A (2) entrou porque a cerca acusava escrita irregular num arquivo CORRETO
+ * (PR #1017, `lib/ai/pontos/padrao-da-organizacao.ts`): `raizDaCadeia` devolve a
+ * raiz `"p"` de `p.admin.from(...)` e a propriedade se perdia, e a lista de
+ * origem só cobre cliente criado no mesmo arquivo. Não era furo antigo, era caso
+ * novo chegando: 21 arquivos já recebem o cliente por parâmetro e quatro deles
+ * tocam `organizations`, mas todos os quatro só `.select()` — o #1017 foi o
+ * primeiro a MUTAR assim, e `MUTACOES` é o que esta cerca olha.
+ *
+ * **Aceitar qualquer `x.admin` seria trocar a prova por uma senha**: bastaria
+ * batizar de `admin` um parâmetro com o cliente de SESSÃO para escrever por
+ * baixo da cerca. É por isso que o (2) é medido pelo tipo, e é por isso que o
+ * CONTROLE abaixo sabota a si mesmo nas três formas que separam tipo de nome.
  */
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import { arquivosDeCodigo, caminhoRelativo } from "./helpers/varrer-codigo";
-import { nomesDoClienteAdmin, raizDaCadeia } from "./helpers/cliente-admin";
+import {
+  caminhoDaCadeia,
+  caminhosDoClienteAdmin,
+  nomesDoClienteAdmin,
+  raizDaCadeia,
+} from "./helpers/cliente-admin";
 
 const RAIZES = ["app", "lib", "workers"] as const;
 const MUTACOES = new Set(["update", "insert", "upsert", "delete"]);
@@ -73,7 +101,19 @@ function escritasEmOrganizations(caminho: string): Achado[] {
   if (!texto.includes('from("organizations")')) return [];
 
   const fonte = ts.createSourceFile(caminho, texto, ts.ScriptTarget.Latest, true);
+  const achados = achadosNaFonte(fonte, caminhoRelativo(caminho));
+  return achados;
+}
+
+/**
+ * Os achados de uma fonte já lida — separado de `escritasEmOrganizations` para
+ * que o CONTROLE possa alimentar a varredura com fonte sintética, sem gravar
+ * arquivo. É a única forma de sabotar as três variantes de "parâmetro chamado
+ * `admin`" num teste que roda em todo CI.
+ */
+function achadosNaFonte(fonte: ts.SourceFile, arquivo: string): Achado[] {
   const admins = nomesDoClienteAdmin(fonte);
+  const caminhosAdmin = caminhosDoClienteAdmin(fonte);
   const achados: Achado[] = [];
 
   const visitar = (no: ts.Node): void => {
@@ -97,12 +137,19 @@ function escritasEmOrganizations(caminho: string): Achado[] {
         ts.isStringLiteral(argumentoDoFrom) &&
         argumentoDoFrom.text === "organizations"
       ) {
-        const raiz = raizDaCadeia(alvo.expression.expression);
-        if (raiz !== null && !admins.has(raiz)) {
+        const receptor = alvo.expression.expression;
+        const raiz = raizDaCadeia(receptor);
+        // Duas formas de ter o cliente admin, e nenhuma delas é o nome (ver o
+        // cabeçalho): criado aqui (origem) ou recebido tipado (anotação).
+        const caminho = caminhoDaCadeia(receptor);
+        const deServico =
+          (raiz !== null && admins.has(raiz)) ||
+          (caminho !== null && caminhosAdmin.has(caminho));
+        if (raiz !== null && !deServico) {
           achados.push({
-            arquivo: caminhoRelativo(caminho),
+            arquivo,
             linha: fonte.getLineAndCharacterOfPosition(no.getStart()).line + 1,
-            cliente: raiz,
+            cliente: caminho ?? raiz,
             metodo: no.expression.name.text,
           });
         }
@@ -115,6 +162,14 @@ function escritasEmOrganizations(caminho: string): Achado[] {
 }
 
 const ARQUIVOS = arquivosDeCodigo(RAIZES);
+
+/** Fonte sintética para os controles — nome de arquivo só para a mensagem. */
+const fonteDe = (codigo: string): ts.SourceFile =>
+  ts.createSourceFile("sintetico.ts", codigo, ts.ScriptTarget.Latest, true);
+
+const IMPORTA_A_FABRICA = 'import type { createAdminClient } from "@/lib/supabase/admin";\n';
+const IMPORTA_A_SESSAO = 'import type { createClient } from "@/lib/supabase/server";\n';
+const MUTA = 'await p.admin.from("organizations").update({ settings }).eq("id", p.orgId);';
 
 describe("toda escrita em `organizations` passa pelo cliente admin", () => {
   it("CONTROLE: a varredura enxerga os arquivos que tocam a tabela", () => {
@@ -130,6 +185,100 @@ describe("toda escrita em `organizations` passa pelo cliente admin", () => {
     const gemeo = ARQUIVOS.find((a) => caminhoRelativo(a) === "app/actions/auth/politicaDeMfa.ts");
     expect(gemeo, "o gêmeo que escreve o MESMO jsonb sumiu — a sonda perdeu a referência").toBeDefined();
     expect(escritasEmOrganizations(gemeo as string)).toEqual([]);
+  });
+
+  it("CONTROLE: o cliente admin recebido por parâmetro e TIPADO é aceito", () => {
+    const aceitos: readonly { forma: string; codigo: string }[] = [
+      {
+        forma: "propriedade de `interface` (a forma de `lib/ai/pontos/padrao-da-organizacao.ts`)",
+        codigo:
+          IMPORTA_A_FABRICA +
+          "interface Pedido { admin: ReturnType<typeof createAdminClient>; orgId: string }\n" +
+          `export async function gravar(p: Pedido, settings: unknown) { ${MUTA} }`,
+      },
+      {
+        forma: "propriedade de tipo de objeto inline",
+        codigo:
+          IMPORTA_A_FABRICA +
+          "export async function gravar(p: { admin: ReturnType<typeof createAdminClient>; orgId: string }, settings: unknown) " +
+          `{ ${MUTA} }`,
+      },
+      {
+        forma: "parâmetro direto",
+        codigo:
+          IMPORTA_A_FABRICA +
+          "export async function gravar(admin: ReturnType<typeof createAdminClient>, orgId: string, settings: unknown) " +
+          '{ await admin.from("organizations").update({ settings }).eq("id", orgId); }',
+      },
+      {
+        forma: "parâmetro por `type` local (a forma de `lib/channels/pos-entrada.ts`)",
+        codigo:
+          IMPORTA_A_FABRICA +
+          "type Admin = ReturnType<typeof createAdminClient>;\n" +
+          "export async function gravar(admin: Admin, orgId: string, settings: unknown) " +
+          '{ await admin.from("organizations").update({ settings }).eq("id", orgId); }',
+      },
+      {
+        forma: "parâmetro desestruturado",
+        codigo:
+          IMPORTA_A_FABRICA +
+          "export async function gravar({ admin, orgId }: { admin: ReturnType<typeof createAdminClient>; orgId: string }, settings: unknown) " +
+          '{ await admin.from("organizations").update({ settings }).eq("id", orgId); }',
+      },
+    ];
+    for (const { forma, codigo } of aceitos) {
+      expect(
+        achadosNaFonte(fonteDe(codigo), "sintetico.ts"),
+        `${forma}: o cliente admin chegou TIPADO e a cerca acusou escrita irregular — ` +
+          "é o falso vermelho que o PR #1017 pagou",
+      ).toEqual([]);
+    }
+  });
+
+  it("CONTROLE: `admin` que não é ADMIN pelo TIPO continua reprovado", () => {
+    // Sabotagem permanente, e não uma rodada da minha sessão: cada caso abaixo
+    // é uma forma de chamar um cliente de `admin` sem que o tipo o sustente. Se
+    // um deles ficar verde, o reconhecimento do parâmetro virou senha.
+    const reprovados: readonly { forma: string; codigo: string }[] = [
+      {
+        forma: "cliente de SESSÃO criado no próprio arquivo",
+        codigo:
+          IMPORTA_A_SESSAO +
+          "export async function gravar(orgId: string, settings: unknown) " +
+          '{ const p = { admin: await createClient() }; await p.admin.from("organizations").update({ settings }).eq("id", orgId); }',
+      },
+      {
+        forma: "parâmetro `admin` tipado como cliente de SESSÃO, num arquivo que importa a fábrica admin",
+        codigo:
+          IMPORTA_A_FABRICA +
+          IMPORTA_A_SESSAO +
+          "interface DoServico { admin: ReturnType<typeof createAdminClient> }\n" +
+          "interface DaSessao { admin: Awaited<ReturnType<typeof createClient>>; orgId: string }\n" +
+          "export function naoUsada(_p: DoServico): void {}\n" +
+          `export async function gravar(p: DaSessao, settings: unknown) { ${MUTA} }`,
+      },
+      {
+        forma: "parâmetro `admin` tipado `any`",
+        codigo:
+          IMPORTA_A_FABRICA +
+          "export async function gravar(p: { admin: any; orgId: string }, settings: unknown) " +
+          `{ ${MUTA} }`,
+      },
+      {
+        forma: "parâmetro `admin` SEM anotação de tipo",
+        codigo:
+          IMPORTA_A_FABRICA +
+          `export async function gravar(p, settings) { ${MUTA} }`,
+      },
+    ];
+    for (const { forma, codigo } of reprovados) {
+      expect(
+        achadosNaFonte(fonteDe(codigo), "sintetico.ts").map((a) => `${a.cliente}.${a.metodo}`),
+        `${forma}: a cerca deixou passar. O reconhecimento do parâmetro tem de ser ` +
+          "prova de TIPO — se o nome basta, escrever em `organizations` por baixo da " +
+          "cerca custa renomear uma variável, e a falha devolve SUCESSO com zero linhas.",
+      ).toEqual(["p.admin.update"]);
+    }
   });
 
   it("nenhum arquivo escreve com o cliente de sessão", () => {

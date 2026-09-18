@@ -657,7 +657,8 @@ test.describe("followup flow builder — editor de condição de aresta / ai_cla
   /**
    * Clicks an edge's own condition-label background rect (always present —
    * every edge renders a label from Task 6.3's `edgesForRender`, defaulting to
-   * "Sempre") — a precise, always-solid hit target, instead of guessing where
+   * "Sempre" num nó de saída única e "Outros casos" num nó ramificado) — a
+   * precise, always-solid hit target, instead of guessing where
    * on the curved path the bounding-box center lands.
    */
   async function clickEdge(page: Page, edgeId: string): Promise<void> {
@@ -741,7 +742,7 @@ test.describe("followup flow builder — editor de condição de aresta / ai_cla
     await moveNodeTo(page, end1Id, ...at(225, 620));
     await moveNodeTo(page, end2Id, ...at(650, 220));
 
-    // 2. Configure ai_classify classes = positivo, objecao (replacing the hot/cold default).
+    // 2. Configure ai_classify classes = positivo, objecao (no lugar do padrão Interessado/Sem interesse).
     await page.locator(`[data-testid="node-card-${classifyId}"]`).click();
     const panel = page.getByTestId("node-config-panel");
     await panel.getByLabel("Classes (separadas por vírgula)").fill("positivo, objecao");
@@ -807,8 +808,10 @@ test.describe("followup flow builder — editor de condição de aresta / ai_cla
     // edge-5 is already the "always" fallback by default — open it and confirm rather
     // than change it, proving the option is genuinely selected, not just left untouched.
     await clickEdge(page, "edge-5");
+    // "Outros casos", não "Sempre": a origem é o classificador, que já tem saída
+    // por classe — o motor só usa esta aresta quando nenhuma das outras serve.
     await expect(page.getByTestId("edge-config-panel").getByRole("combobox")).toContainText(
-      "Sempre",
+      "Outros casos",
     );
 
     await page.locator(".react-flow__pane").click({ position: { x: 20, y: 20 } });
@@ -829,7 +832,7 @@ test.describe("followup flow builder — editor de condição de aresta / ai_cla
     await expect(page.getByTestId("rf__edge-edge-2")).toContainText("positivo");
     await expect(page.getByTestId("rf__edge-edge-3")).toContainText("objecao");
     await expect(page.getByTestId("rf__edge-edge-4")).toContainText("Sem resposta");
-    await expect(page.getByTestId("rf__edge-edge-5")).toContainText("Sempre");
+    await expect(page.getByTestId("rf__edge-edge-5")).toContainText("Outros casos");
     await page.locator(".react-flow__controls-fitview").click();
     await page.waitForTimeout(400);
     await page.screenshot({

@@ -33,6 +33,40 @@ import type { HorarioLivre, Pessoa } from "./tipos";
  */
 export type TempoDaMarcacao = "escolhendo-dia" | "escolhendo-horario" | "confirmando" | "marcado";
 
+/**
+ * O bloco de "não há jornada publicada" — na pessoa certa.
+ *
+ * A frase antiga ("Você ainda não publicou seus horários de atendimento") era
+ * dita a QUALQUER leitor, e mente quando quem lê não é o dono da jornada: o
+ * Atendente abre a agenda da dona, e "Você" ali é o Atendente (issue #896,
+ * item 1). O rótulo "Você" vem de `lib/agenda/responsavel-do-painel.ts` — a
+ * fonte única —, e a frase volta à segunda pessoa exatamente quando ele
+ * aparece: é o caso do dono abrindo a própria agenda, e é o que o kit visual
+ * (`tests/e2e/agenda-kit-visual.spec.ts`) assere.
+ *
+ * Quando quem lê NÃO é o dono, a tela não deve deduzir quem falhou em
+ * publicar: ela constata que A JORNADA (de quem a agenda é) não foi publicada,
+ * sem apontar o dedo para quem está logado.
+ */
+function AvisoDeJornadaNaoPublicada({ quemLeEhODono }: { quemLeEhODono: boolean }) {
+  const t = useT();
+
+  return (
+    <>
+      <p className="text-sm font-semibold text-text">
+        {quemLeEhODono
+          ? t("Você ainda não publicou seus horários de atendimento")
+          : t("A jornada de atendimento ainda não foi publicada")}
+      </p>
+      <p className="mt-1 text-xs leading-4 text-text-muted">
+        {quemLeEhODono
+          ? t("Sem eles ninguém consegue marcar — nem você, nem o agente.")
+          : t("Sem eles ninguém consegue marcar — nem quem atende, nem o agente.")}
+      </p>
+    </>
+  );
+}
+
 export function PainelDeMarcacao({
   ancora,
   agora,
@@ -344,7 +378,29 @@ export function PainelDeMarcacao({
     encaixeLigado && dia ? (
       <div data-testid="encaixe" className={cn("shrink-0", doDia.length > 0 && "mt-2")}>
         {doDia.length === 0 && (
-          <p className="mb-2 text-xs text-text-muted">{t("Nenhum horário publicado neste dia.")}</p>
+          /*
+            DOIS casos diferentes, e a tela dizia um só.
+
+            `publicouHorarios === false` é "esta pessoa NUNCA publicou jornada":
+            nenhum dia abre, e o que falta é configurar os horários. Com jornada
+            publicada, um dia sem janela é FOLGA (ou dia sem expediente) — a
+            pessoa tem jornada, este dia é que não abre. Dizer "nenhum horário
+            publicado neste dia" nos dois casos lê-se como "a pessoa não tem
+            jornada", que é falso no segundo.
+          */
+          <p className="mb-2 text-xs text-text-muted">
+            {/*
+              LITERAL, e não `t(mensagemDoDiaSemJanela(publicouHorarios))`: o
+              guarda de espanhol (`tests/unit/i18n-espanhol-cobre-a-tela.test.ts`)
+              varre `t("literal")`, então `t(variável)` ESCAPA da cobrança — a
+              frase ficaria sem tradução com o guarda verde sobre a ausência
+              (achado da triagem do #1107, item 5). Aqui só a folga alcança (a
+              porta do encaixe exige jornada publicada) e o texto do outro caso
+              tem bloco próprio; o literal e `mensagemDoDiaSemJanela(true)` ficam
+              amarrados por teste em `agenda-do-atendente-diz-por-que.test.tsx`.
+            */}
+            {t("Este dia está fora da jornada publicada (folga ou dia sem expediente).")}
+          </p>
         )}
         {/*
           Recolhido quando o dia TEM horários — a grade continua sendo o
@@ -603,12 +659,7 @@ export function PainelDeMarcacao({
             data-testid="sem-jornada-publicada"
             className="mb-3 rounded-sm border border-warning/40 bg-warning-bg p-3"
           >
-            <p className="text-sm font-semibold text-text">
-              {t("Você ainda não publicou seus horários de atendimento")}
-            </p>
-            <p className="mt-1 text-xs leading-4 text-text-muted">
-              {t("Sem eles ninguém consegue marcar — nem você, nem o agente.")}
-            </p>
+            <AvisoDeJornadaNaoPublicada quemLeEhODono={responsavel.nome === "Você"} />
             {/*
               O AVISO VIRA PORTA.
 

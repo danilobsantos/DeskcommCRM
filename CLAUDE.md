@@ -54,7 +54,21 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - Wrapper sucesso: `{ data, meta?: { cursor, has_more, total } }`
 - Wrapper erro: `{ error: { code, message, details? } }` — usar helpers `ok()` / `fail()` de `lib/api/wrappers.ts`
 - Paginação: cursor opaco base64+HMAC por default
-- Auth dual: cookie session (frontend) OU `Authorization: Bearer tok_...` (server-to-server)
+- **Auth dual é a direção do produto, e ela se cumpre rota por rota.** Cookie de sessão para o
+  frontend; `Authorization: Bearer dsk_...` (linha de `api_tokens`, resolvida no servidor) para
+  chamada de servidor. O prefixo é **`dsk_`**, e quem o exige é `lib/mcp/auth.ts` — `tok_` nunca
+  existiu no código e estava escrito aqui, em `AGENTS.md` e na Spec 09 até 17/09/2026
+  - O helper é `lib/api/auth-dual.ts`, e habilitar uma rota é **por rota**: não há chave geral.
+    Para saber quais já aceitam bearer — o número muda, o comando não:
+    `git grep -ln "auth-dual" -- app/api/v1` (mais `app/api/v1/contacts/route.ts`, que implementou
+    o padrão inline e deu origem ao helper)
+  - **Chamar o helper na rota não basta:** o `proxy.ts` global roda antes de qualquer handler e só
+    reconhece cookie. Sem uma entrada em `lib/auth/public-paths.ts` para o caminho, todo bearer
+    recebe 401 do proxy antes de chegar ao handler. "Público" ali quer dizer "o proxy não decide",
+    nunca "sem autenticação"
+  - Decisão do dono do produto em 17/09/2026: **converter as rotas que cada integração precisar**,
+    conforme aparecerem, em vez de namespace paralelo por cliente. Uma rota convertida serve a todo
+    integrador. Contexto: PR #1008, que escreveu 26 rotas paralelas porque não achou por onde entrar
 - **API key NUNCA em query string** (vaza em logs Vercel/CF). Sempre header
 - Plaintext de bearer token mostrado **uma vez** na criação; depois apenas hash SHA256 no DB
 - Rate limit headers: `X-RateLimit-*` + `Retry-After` em 429
@@ -72,7 +86,7 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 
 ### Audit log
 - Toda mutação POST/PATCH/DELETE bem-sucedida → 1 entrada em `api_audit_log` (fire-and-forget, p99 ≤500ms)
-- **Rodada de cron que não fez nada NÃO é mutação e não audita** — e a que fez, audita. `routing-worker` (1×/min) e `attendant-heartbeat` (1×/5min) auditavam incondicionalmente: ~51.840 linhas/mês numa instalação que não atende ninguém, e numa VPS real **95% do audit log** era batida de cron vazia (`docs/testing/user-journey-map.md`, achado 17). A guarda certa é *auditar quando houve efeito*, nunca *parar de auditar* — as duas direções são medidas por `tests/unit/cron-audita-so-quando-ha-efeito.test.ts`, que varre o AST de **toda** rota de `app/api/v1/cron/`
+- **Rodada de cron que não fez nada NÃO é mutação e não audita** — e a que fez, audita. `routing-worker` (1×/min) e o extinto `attendant-heartbeat` (1×/5min, removido no #720) auditavam incondicionalmente: ~51.840 linhas/mês numa instalação que não atende ninguém, e numa VPS real **95% do audit log** era batida de cron vazia (`docs/testing/user-journey-map.md`, achado 17). A guarda certa é *auditar quando houve efeito*, nunca *parar de auditar* — as duas direções são medidas por `tests/unit/cron-audita-so-quando-ha-efeito.test.ts`, que varre o AST de **toda** rota de `app/api/v1/cron/`
 - Audit é append-only para os papéis do PostgREST, e isso é do SCHEMA e não da prosa: `anon`, `authenticated` e `service_role` não têm GRANT de UPDATE, DELETE **nem TRUNCATE** em `api_audit_log` — **nem `service_role`** (migration 0258). O dono (`postgres`) pode tudo, como em qualquer tabela: a garantia é sobre os papéis que o PostgREST assume, nunca absoluta. Para conferir na fonte em vez de acreditar nesta linha:
 
   ```bash
@@ -98,9 +112,10 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
   sonda de `tests/invariants/retencao-poda-e-expurgo.test.ts` ficou verde duas
   vezes medindo o universo errado: primeiro perguntando só por DELETE/UPDATE com
   TRUNCATE concedido ao lado; depois perguntando pelos três num Postgres onde o
-  prelude de `scripts/test-db.sh` reproduz o default ACL do Supabase para
-  FUNÇÕES e não para TABELAS — um banco onde o defeito não pode existir. Quem
-  mede o Supabase real é
+  prelude de `scripts/test-db.sh` reproduzia o default ACL do Supabase só para
+  FUNÇÕES — um banco onde o defeito não podia existir. Desde a issue #887 o
+  prelude reproduz também o de TABELAS, e aquela sonda passou a medir o Supabase.
+  A prova com controle próprio segue sendo
   `tests/invariants/audit-log-sob-o-default-acl-do-supabase.test.ts`: concede o
   default ACL à tabela, reaplica o bloco da 0258 extraído do baseline e só então
   sonda. **Enumerar privilégios no dump não protege tabela nenhuma no Supabase
@@ -279,6 +294,36 @@ ou qualquer arquivo à mão. Se exigir, não entra: vira issue com plano de
 migração e vai para uma major.
 ---
 
+## Extensões — DOUTRINA (NÃO NEGOCIÁVEL)
+
+Lei completa em [`docs/doctrine/extensoes.md`](docs/doctrine/extensoes.md); o
+contrato que existe hoje em
+[`docs/specs/extensoes-declarativas-v1.md`](docs/specs/extensoes-declarativas-v1.md).
+A pergunta que decide o destino de uma mudança não é "isto serve a muita gente?",
+e sim **"se nenhuma organização ativar isto, a operação comum continua inteira?"**.
+O não-negociável:
+
+1. **O núcleo continua útil com zero extensões.** Identidade, autorização,
+   isolamento, auditoria, contratos e cadeia de envio são núcleo; jornada de nicho,
+   aparência e integração com dados e manutenção próprios podem ser extensão.
+2. **Extensão pede capacidade nomeada; não importa código interno nem lê o banco.**
+   Instalar não concede autoridade: toda escrita revalida ator, organização e papel
+   atuais no banco.
+3. **A instância decide o pacote; a organização decide o uso.** Instalar, atualizar,
+   desfazer e remover são do administrador da instalação; ativar e configurar, do
+   administrador da organização. A plataforma não reativa decisão da organização.
+4. **Toda operação é recibo idempotente com saída pela tela, e toda troca de
+   ponteiro exige a revisão que a tela viu.** Tirar é lógico e preserva dados.
+5. **Não anunciar o que não existe** (SDK, código isolado, marketplace público), e
+   não extrair do núcleo recurso já distribuído sem equivalência e migração.
+6. **Módulo oficial com dados não põe tabela no baseline para todos**
+   ([ADR-0002](docs/adr/0002-tabelas-de-modulo-num-banco-so.md), aceita em 17/09/2026). Um banco
+   só, schema `public`; as tabelas nascem por função provisionadora fixa do módulo, quando ele é
+   **instalado na instância**. Ninguém opera segundo banco — é decisão do dono, e seria impossível
+   com chave estrangeira para o núcleo.
+
+---
+
 ## Como rodar local
 
 ```bash
@@ -296,7 +341,7 @@ Ver `README.md` pra detalhes de setup.
 ## Testes
 
 ```bash
-pnpm typecheck   # tsc --noEmit (estrito)
+pnpm typecheck   # tsc --noEmit -p tsconfig.typecheck.json (inclui tests/)
 pnpm lint        # eslint next/core-web-vitals
 pnpm test:unit   # Vitest (NÃO inclui tests/invariants/** — ver abaixo)
 pnpm test:db     # Postgres efêmero + baseline install/update + 364 invariantes
@@ -381,7 +426,7 @@ No CI não há `UPSTASH` nenhum, então lá o caminho é o contador em memória 
 Checks **obrigatórios** na branch protection da `main` (verificado na configuração, não só no papel):
 
 - **`verify`** (`ci.yml`) — typecheck + lint + test:unit.
-- **`invariants`** (`ci.yml`) — `pnpm test:db`: sobe `pgvector/pgvector:pg15` — o PISO que dizemos suportar, não a versão mais rica que temos à mão —, aplica `supabase/baseline.sql` em modo install (`ON_ERROR_STOP=1`) e update (idempotência), e roda os testes de invariante, incluindo o de isolamento RLS entre 2 organizações.
+- **`invariants`** (`ci.yml`) — **job de fachada**: ele não roda suíte nenhuma; reprova quando a matriz `invariants-majors` não fecha em `success`. Quem roda é a matriz, uma perna por major do Postgres que o produto diz suportar, e cada perna faz duas passadas: `pnpm test:db` (baseline em modo install com `ON_ERROR_STOP=1` e update, mais os invariantes, incluindo o isolamento RLS entre 2 organizações) e `pnpm test:db:update` (atualização de um banco COM dados). Para saber quais majors hoje, pergunte ao arquivo em vez de a esta linha: `awk '/^  invariants-majors:/,/^  [a-z-]+:/' .github/workflows/ci.yml | grep -A6 'matrix:'`.
 - **`build-and-size`** (`perf.yml`) — `pnpm build` em Node 22.
 - **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **todas as specs Playwright menos as que `FORA_DO_CI` declara**. O número saiu daqui de propósito: ele apodreceu **cinco** vezes (a quinta em 2026-08-24, quando `inbox-quem-manda.spec.ts` entrou), e a condição que o PR #242 pôs para parar de recontar já tinha vencido na quarta. Quem precisa do número roda o comando abaixo — comando não envelhece. Quais ficam de fora, e por quê, é o que a própria variável diz — **não confie nesta linha, leia-a**:
 
@@ -501,7 +546,9 @@ Processo padrão (siga sempre):
 ## Skills relevantes a usar (Claude Code)
 
 **Guias embutidos neste repositório** (`.claude/skills/`, espelho gerado de `.agents/skills/` — a
-mesma tabela vale para Codex, Cursor, OpenCode e Antigravity; ver `AGENTS.md`):
+mesma tabela vale para Codex, Cursor, OpenCode e Antigravity; ver `AGENTS.md`). Para tê-los em
+qualquer pasta, `bash scripts/instalar-guias.sh`; editando um guia numa branch, rode com `--fonte .`
+naquele clone — no Claude Code a skill GLOBAL vence a do projeto com o mesmo nome:
 
 - `deskcomm-instalar` — instalar, atualizar ou consertar a instalação numa VPS
 - `deskcomm-cliente-novo` — configurar o CRM para um cliente ou nicho (agentes, roteadores, follow-ups, conhecimento)
@@ -509,6 +556,12 @@ mesma tabela vale para Codex, Cursor, OpenCode e Antigravity; ver `AGENTS.md`):
 - `deskcomm-prompt` — afinar o prompt de um agente que não performa
 - `deskcomm-contribuir` — o espelho da triagem, antes do PR; fica quieto para o mantenedor
 - `deskcomm-doutrina` — as três regras que mais custam, antes de escrever código
+
+Os guias têm página pública em [deskcomm.com.br/guias](https://www.deskcomm.com.br/guias), escrita
+à mão em `deskcomm-site/conteudo/guias.ts`: guia criado, renomeado ou com comando novo pede a mesma
+mudança lá — senão a página ensina um guia que não existe. Ela e a de changelog saem do mesmo PR do
+`deskcomm-site`; enquanto as duas não responderem 200, vale o `curl` que abre a seção "A vitrine" de
+[`docs/doctrine/versionamento.md`](docs/doctrine/versionamento.md), não a frase acima.
 
 - `superpowers:brainstorming` — antes de implementar feature não-trivial
 - `superpowers:writing-plans` — pra task com mais de 1 etapa de DB/API
@@ -569,5 +622,17 @@ Antes de declarar uma task pronta:
     presença num check obrigatório reprovaria PR de Dependabot, PR de fork, e o próprio PR
     de release, que consome os fragmentos e deixa o diretório vazio. A presença é cobrada
     aqui, e por quem revisa.
+    **Toda versão publicada aparece na página de changelog da LP** (deskcomm.com.br/changelog,
+    pt-BR/en/es). Ninguém escreve no site: a LP lê o `CHANGELOG.md` da `main`, e o último passo
+    do corte (`release.yml`, job `cortar-tag`) reprova quando a versão não chegou. O texto do
+    fragmento é, portanto, nota pública. Enquanto as três páginas não responderem 200 esse passo
+    reprova TODO corte — a vitrine vem de um PR do `deskcomm-site`, e o `curl` que diz em que
+    estado ela está abre a seção. Lei: seção "A vitrine" de `versionamento.md`.
+
+18. **Se o PR muda comportamento, ele declara o destino: núcleo, extensão, ambos ou
+    infraestrutura** (lei em [`docs/doctrine/extensoes.md`](docs/doctrine/extensoes.md)), com a razão
+    medida pela pergunta "se nenhuma organização ativar isto, a operação comum continua inteira?".
+    "Ambos" traz o consumidor real do ponto novo do núcleo e a prova dos dois lados. Classificar como
+    extensão não autoriza remover nem desligar o que já foi distribuído.
 
 Um staff engineer aprovaria? Se não, itera.
