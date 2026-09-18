@@ -27730,6 +27730,89 @@ grant execute on function public.fn_mark_conversation_message(uuid,text,text,tim
 notify pgrst, 'reload schema';
 
 
+
+-- ---- Google Ads: landing page de captura de gclid (migration 0306) ----
+-- `lib/plataformas-de-anuncio/registry.ts` (0213) já declarava por que `google_ads`
+-- não tem transporte de conversão: sem extrator de gclid não há o que reportar.
+-- Faltava a LANDING PAGE que captura o clique e o carrega para dentro da
+-- conversa do WhatsApp (o Google Ads, ao contrário da Meta, não tem um
+-- "Clique para o WhatsApp" nativo). Duas tabelas: para onde a landing
+-- redireciona, e o par token-curto↔gclid criado no clique e consultado quando
+-- a mensagem chega. Mesmo desenho server-side-only de `ad_platform_connections`
+-- (0213): RLS ligada sem policies, grants de anon/authenticated revogados.
+
+create table if not exists public.google_ads_landing_pages (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  whatsapp_e164 text not null,
+  message_template text not null default 'Olá! Vim pelo anúncio e quero saber mais. [ref:{token}]',
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  updated_by uuid,
+  constraint google_ads_landing_pages_template_tem_placeholder
+    check (message_template like '%{token}%')
+);
+
+comment on table public.google_ads_landing_pages is
+  'Configuração da landing page de captura de gclid, por organização: para qual WhatsApp e com qual texto pré-preenchido ela redireciona. Server-side only.';
+comment on column public.google_ads_landing_pages.message_template is
+  'Precisa conter o literal {token}: é onde o código do clique é injetado antes do redirect para o wa.me.';
+
+alter table public.google_ads_landing_pages enable row level security;
+revoke all on public.google_ads_landing_pages from anon, authenticated;
+grant select, insert, update, delete on public.google_ads_landing_pages to service_role;
+
+drop trigger if exists trg_google_ads_landing_pages_updated_at on public.google_ads_landing_pages;
+create trigger trg_google_ads_landing_pages_updated_at
+  before update on public.google_ads_landing_pages
+  for each row execute function public.fn_set_updated_at();
+
+create table if not exists public.google_ads_click_refs (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  token text not null,
+  gclid text not null,
+  query_raw jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  matched_at timestamptz,
+  contact_id uuid references public.contacts(id) on delete set null
+);
+
+create unique index if not exists google_ads_click_refs_org_token_uk
+  on public.google_ads_click_refs (organization_id, token);
+
+comment on table public.google_ads_click_refs is
+  'Par token curto ↔ gclid, criado quando a landing page recebe um clique de anúncio e consultado quando a mensagem do WhatsApp chega com o token no texto. Server-side only.';
+comment on column public.google_ads_click_refs.token is
+  'Código opaco no texto pré-preenchido do wa.me — não o gclid cru, que fica só nesta linha.';
+comment on column public.google_ads_click_refs.matched_at is
+  'Carimbado no match com a mensagem recebida. Um clique só casa uma vez: a UPDATE que o faz é condicional a matched_at is null.';
+
+alter table public.google_ads_click_refs enable row level security;
+revoke all on public.google_ads_click_refs from anon, authenticated;
+grant select, insert, update, delete on public.google_ads_click_refs to service_role;
+
+-- ---- Google Ads: credencial de conversão (migration 0307) ----
+-- Refresh token OAuth (não access token longo-vivo) + os três identificadores
+-- que dizem para onde reportar dentro da conta. Mesmo desenho server-side-only
+-- de ad_platform_connections (0213); ver o cabeçalho da migration 0307 para o
+-- racional completo.
+
+alter table public.ad_platform_connections
+  add column if not exists google_refresh_token_encrypted bytea,
+  add column if not exists google_customer_id text,
+  add column if not exists google_login_customer_id text,
+  add column if not exists google_conversion_action_id text;
+
+comment on column public.ad_platform_connections.google_refresh_token_encrypted is
+  'Refresh token OAuth do Google Ads, cifrado por fn_encrypt_oauth. Só platform=google_ads usa esta coluna — o access token derivado dele expira em ~1h e nunca é persistido.';
+comment on column public.ad_platform_connections.google_customer_id is
+  'A conta de anúncios do Google Ads (10 dígitos, sem hífen) para onde a organização reporta conversões.';
+comment on column public.ad_platform_connections.google_login_customer_id is
+  'A conta de GERENTE (MCC) através da qual google_customer_id é acessada, quando aplicável. NULL = acesso direto, sem MCC.';
+comment on column public.ad_platform_connections.google_conversion_action_id is
+  'Qual ação de conversão, dentro de google_customer_id, recebe os envios de venda. Formato: só o id numérico, o resource name completo é montado no transporte.';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
