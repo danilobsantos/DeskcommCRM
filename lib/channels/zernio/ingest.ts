@@ -31,6 +31,10 @@ import { extrairAtribuicaoMeta } from "@/lib/channels/atribuicao-de-anuncio-ofic
 import { estamparAtribuicaoDoContato } from "@/lib/leads/atribuicao-de-anuncio";
 import { extrairEEstamparAtribuicaoGoogle } from "@/lib/plataformas-de-anuncio/google/atribuicao";
 import { pausarIaPorAtendimentoManual } from "@/lib/escalacao/atendimento-manual";
+import {
+  ehNumeroInternoDeAviso,
+  registrarMensagemIgnorada,
+} from "@/lib/escalacao/numero-interno-de-aviso";
 
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 
@@ -95,6 +99,28 @@ export async function ingestZernioInbound(
     return afetadas > 0
       ? { status: "ingested", reason: `status_${msg.status}` }
       : { status: "ignored", reason: "mensagem_desconhecida" };
+  }
+
+  // ── O NÚMERO INTERNO DE AVISOS NÃO VIRA ATENDIMENTO ─────────────────────
+  //
+  // Antes da resolução pela thread E do upsert do contato — os DOIS caminhos
+  // criam conversa, e é o nascimento dela que dispara o pedido de rodízio pelo
+  // banco. Só o ramo do telefone é alcançável aqui: a âncora opaca deste canal
+  // é do provedor, não o identificador de privacidade do WhatsApp, e casar por
+  // ela exigiria um segundo campo na configuração sem consumidor nenhum hoje.
+  if (
+    msg.identity.phone &&
+    (await ehNumeroInternoDeAviso(admin, input.organizationId, {
+      kind: "phone",
+      phone: msg.identity.phone,
+      lid: null,
+    }))
+  ) {
+    await registrarMensagemIgnorada(admin, input.organizationId, {
+      direction: "inbound",
+      sessionId: input.channelSessionId,
+    });
+    return { status: "ignored", reason: "numero_interno_de_aviso" };
   }
 
   // ─── A THREAD é a prova de identidade, e vem ANTES da âncora ─────────────
@@ -222,7 +248,7 @@ async function efeitosDaEntrada(
   // regra de primeiro-toque: `estamparAtribuicaoDoContato` só grava se o
   // contato ainda não tem `ad_platform`.
   const atribuicao = extrairAtribuicaoMeta(msg.referral);
-  if (atribuicao) await estamparAtribuicaoDoContato(admin, contactId, atribuicao);
+  if (atribuicao) await estamparAtribuicaoDoContato(admin, input.organizationId, contactId, atribuicao);
 
   // Irmão do bloco acima, para o Google: o dado não vem no `referral` (que é
   // exclusivo da Meta), vem no PRÓPRIO texto da mensagem — ver o cabeçalho de

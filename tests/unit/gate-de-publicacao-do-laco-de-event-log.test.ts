@@ -138,16 +138,22 @@ describe("o gate de publicação das imagens de fundo (#604)", () => {
   it("entra por baixo da fachada `imagens-ok` — sem criar check obrigatório novo", () => {
     const fachada = blocoDoJob("imagens-ok");
     expect(fachada).toMatch(new RegExp(`needs: \\[[^\\]]*${JOB_DE_FUNDO}`));
+    // O resultado entra por env (FUNDO) e é exigido `success` — a única porta
+    // para `skipped` é PR que não alcança imagem nenhuma, e quem mede a matriz
+    // inteira de desfechos é imagens-ok-so-aceita-pulo-declarado.test.ts.
     // Concatenação, e não template literal: dentro de um template, `${{` é
     // sintaxe de expressão e o arquivo não compila.
-    expect(fachada).toContain('[ "${{ needs.' + JOB_DE_FUNDO + '.result }}" = "success" ]');
+    expect(fachada).toContain("FUNDO: ${{ needs." + JOB_DE_FUNDO + ".result }}");
+    expect(fachada).toContain('[ "$FUNDO" = "success" ]');
     // `always()` na fachada é o que faz um job pulado reprovar em vez de sumir.
     expect(fachada).toContain("if: always()");
   });
 
-  it("não pode ser pulado: sem `if:`, o job roda em PR e em tag", () => {
+  // O fork não pula build em PR (sem economia de alcance): nenhum `if:` na
+  // altura do job — ele roda em todo evento.
+  it("sem pulo: em tag, main, production e PR ele roda", () => {
     const job = blocoDoJob(JOB_DE_FUNDO);
-    expect(job).not.toMatch(/^\s{4}if:/m);
+    expect(job.match(/^\s{4}if:.*$/gm)).toBeNull();
     expect(job).toMatch(/^\s{4}permissions:\n\s{6}contents: read$/m);
   });
 

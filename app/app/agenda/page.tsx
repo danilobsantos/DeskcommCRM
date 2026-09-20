@@ -1,5 +1,6 @@
-import { addDays, startOfWeek } from "date-fns";
 import { redirect } from "next/navigation";
+
+import { addDays } from "date-fns";
 
 import {
   enderecoDeRetorno,
@@ -10,6 +11,8 @@ import { donosDaAgenda } from "@/lib/agenda/donos-da-agenda";
 import { lerOcupacaoExterna } from "@/lib/agenda/ocupacao-externa";
 import { PROVEDOR_GOOGLE } from "@/lib/agenda/tipos";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
+import { semanaSemente } from "@/lib/agenda/semana-semente";
+import { fusoUtilizavel } from "@/lib/tempo/fusos";
 import { nomeDoContato, type ContatoNomeavel } from "@/lib/contacts/rotulo-do-contato";
 import { logger } from "@/lib/logger";
 import { ROLE_RANK } from "@/lib/auth/types";
@@ -87,9 +90,26 @@ export default async function AgendaPage() {
    */
   const supabase = await createClient();
 
-  // A semana da âncora, que é o que a grade abre por padrão.
-  const inicio = startOfWeek(new Date(), { weekStartsOn: 0 });
-  const fim = addDays(inicio, 7);
+  /**
+   * A semana da âncora, que é o que a grade abre por padrão — calculada no fuso
+   * de QUEM OLHA, não no do processo.
+   *
+   * `startOfWeek(new Date())` usava o fuso do contêiner (UTC), e o cliente
+   * recalcula no fuso do navegador: das 21h de sábado à meia-noite em São Paulo,
+   * UTC já virou domingo e o servidor mandava a SEMANA SEGUINTE. Quem abre a
+   * Agenda nessa janela vê a semana errada até a página hidratar, e a consulta
+   * que este arquivo adianta logo abaixo foi feita para o período errado — o
+   * dado chega e é descartado.
+   *
+   * A ordem do fuso é a mesma que a tela já usa para apresentar: a escolha da
+   * PESSOA primeiro (`user.timezone`, de Configurações › Perfil), a da
+   * ORGANIZAÇÃO depois (`organizations.timezone`, do wizard e de Configurações
+   * › Empresa), e o padrão do produto por último. Nenhum escritor valida essas
+   * colunas, então `fusoUtilizavel` recusa o que o `Intl` não aceita em vez de
+   * deixar a página estourar por causa de um acento no campo de configuração.
+   */
+  const fusoDaSemana = fusoUtilizavel(fusoDeApresentacao, activeOrg.timezone);
+  const { de: inicio, ate: fim } = semanaSemente(new Date(), fusoDaSemana);
   // Semente ampla para o histórico ("Próximos") e navegação imediata sem refetch.
   const fimSemente = addDays(inicio, 35);
 
@@ -237,9 +257,10 @@ export default async function AgendaPage() {
     <AgendaClient
       fusoDeApresentacao={fusoDeApresentacao}
       // QUEM ESTÁ LOGADO, do servidor. É o único jeito de a tela saber se o
-      // dono da agenda é ela mesma: sem isto, sem lista da equipe (papel sem
-      // leitura de `/api/v1/team`) a agenda inventava uma pessoa chamada "Você"
-      // para a jornada de OUTRA pessoa — ver o painel em `_client.tsx`.
+      // dono da agenda é ela mesma: sem isto, sem lista da equipe (papel abaixo
+      // de `agent`, que é o piso de `/api/v1/agenda/pessoas`) a agenda inventava
+      // uma pessoa chamada "Você" para a jornada de OUTRA pessoa — ver o painel
+      // em `_client.tsx`.
       usuarioId={user.id}
       googleConfigurado={googleConfigurado}
       contaConectada={conexoes?.map((c) => c.account_email).join(", ") || null}

@@ -4,12 +4,19 @@ name: Publicar imagem Docker (GHCR)
 # Container Registry. O leigo puxa no VPS (não builda lá). Roda nos runners do
 # GitHub, então o build pesado nunca cai no VPS do usuário.
 #
-# São TRÊS imagens, e a razão de o worker e o scheduler estarem aqui é um defeito
-# real: o serviço `worker` não tinha `image:` no compose de produção, só `build:`.
-# Serviço build-only é pulado por `docker compose pull` e imune a `up -d` sem
-# `--build` — ele era construído na VPS de cada cliente, no install, e NENHUM
-# update.sh jamais o reconstruiu. O runtime do agente de IA congelava no código
-# do dia da instalação. Doutrina: docs/doctrine/packaging.md, invariante 1.
+# São QUATRO imagens. As primeiras três (worker e scheduler inclusos) entraram
+# por um defeito real: esses serviços não tinham `image:` no compose de
+# produção, só `build:`. Serviço build-only é pulado por `docker compose pull`
+# e imune a `up -d` sem `--build` — ele era construído na VPS de cada cliente,
+# no install, e NENHUM update.sh jamais o reconstruiu. O runtime do agente de
+# IA congelava no código do dia da instalação. Doutrina: docs/doctrine/packaging.md,
+# invariante 1.
+#
+# `deskcomm-voice-agent` (módulo de voz SIP, #677) entrou pelo MESMO motivo,
+# antes mesmo de existir produção: o compose de voz nasceu com o mesmo
+# `build:` sozinho que o worker teve (hoje ele é o serviço `voice-agent`, profile
+# `telefonia`, em docker-compose.prod.yml) — publicar a imagem aqui evita repetir o
+# defeito no dia em que o módulo for instalado por um self-hoster de verdade.
 
 on:
   push:
@@ -48,6 +55,23 @@ on:
 
 env:
   REGISTRY: ghcr.io
+
+# Cancelamento da rodada superada: por JOB (os pesados), nunca no workflow nem
+# no agregador — razão medida e a tabela por evento no cabeçalho do ci.yml.
+#
+# NESTE workflow o push na `main` também cancela, e é a exceção deliberada à
+# tabela do ci.yml: o que o push na main produz aqui é `latest` (e `main`, e o
+# SHA-tag), e `latest` = topo da main. Medido em 18/09/2026: 38 das 86 runs na
+# fila eram deste workflow, 21 delas da main, ~14,6 min cada — e cada commit
+# novo da main contém o anterior. Build de 3 imagens para um ponteiro que a
+# rodada seguinte sobrescreve é vaga jogada fora.
+#
+# Tag fica FORA do alcance por duas travas independentes: (1) o grupo de uma tag
+# é `…-refs/tags/vX.Y.Z`, único por versão, nunca o da main; (2) a condição exige
+# `push` em `refs/heads/main` — push de tag tem `github.ref` `refs/tags/…` e dá
+# `false`. `workflow_dispatch` também dá `false`. `promover-stable` (só tag) e
+# `imagens-ok` (agregador) não têm grupo. Vigiado por
+# tests/unit/publicacao-cancela-so-o-que-se-supera.test.ts.
 
 jobs:
   # Nenhuma tag publica sem estar CONTIDA na `main`.
@@ -94,9 +118,17 @@ jobs:
               ;;
           esac
 
+  # Em pull_request este job NÃO roda: lá ele só construía e descartava, e as
+  # MESMAS três imagens já são construídas — com o mesmo Dockerfile e o mesmo
+  # contexto — por `imagem-do-app-sobe` e `imagens-de-fundo-sobem`, que ainda
+  # as sobem. Eram 3 builds Docker por push de PR sem medir nada a mais. O
+  # `imagens-ok` aceita o `skipped` dele SÓ em pull_request.
   build-and-push:
     needs: [a-tag-veio-da-production]
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-build-and-push-${{ matrix.name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/production') }}
     permissions:
       contents: read
       packages: write
@@ -117,6 +149,9 @@ jobs:
           - name: conecta-scheduler
             dockerfile: Dockerfile.scheduler
             title: Conecta Scheduler
+          - name: conecta-voice-agent
+            dockerfile: Dockerfile.voice-agent
+            title: Conecta Voice Agent
 
     steps:
       - uses: actions/checkout@v7
@@ -220,6 +255,9 @@ jobs:
   imagem-do-app-sobe:
     needs: [a-tag-veio-da-production]
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-imagem-do-app-sobe-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/production') }}
     permissions:
       contents: read
     steps:
@@ -242,6 +280,10 @@ jobs:
           # Mesmo escopo de cache do build-and-push: as camadas são idênticas,
           # então na prática este job reaproveita aquele build em vez de repeti-lo.
           cache-from: type=gha,scope=conecta-app
+          # Em PR o build-and-push não roda, então quem grava o cache do PR é
+          # este job — sem isto o segundo push do mesmo PR reconstruiria do
+          # zero. Fora de PR continua só lendo: quem grava é o build-and-push.
+          cache-to: ${{ github.event_name == 'pull_request' && 'type=gha,mode=max,scope=conecta-app' || '' }}
 
       - name: O container chega a servir?
         run: |
@@ -368,7 +410,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Apontar `stable` para esta versão, nas três imagens
+      - name: Apontar `stable` para esta versão, nas quatro imagens
         env:
           VERSAO: ${{ github.ref_name }}
         run: |
@@ -379,7 +421,7 @@ jobs:
           # canal deixaria de ser o mesmo manifesto que a versão.
           dono=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           numero="${VERSAO#v}"
-          for img in conecta-app conecta-worker conecta-scheduler; do
+          for img in conecta-app conecta-worker conecta-scheduler conecta-voice-agent; do
             echo "::group::${img}"
             docker buildx imagetools create \
               --tag "${REGISTRY}/${dono}/${img}:stable" \
@@ -413,17 +455,19 @@ jobs:
   #      instalada no crontab — a segunda via do mesmo drain, que a produção usa
   #      quando o laço do worker não carregou.
   #
-  # Sem `if:` neste job, de propósito, como nos irmãos: job pulado vira
-  # `skipped`, e `imagens-ok` (que roda com `always()`) lê `skipped` como
-  # reprovação. Em PR ele roda e constrói as duas imagens de fundo com o mesmo
-  # escopo de cache do `build-and-push`; na tag, roda igual.
+  # Roda sempre (o fork não pula build em PR): constrói as duas imagens de
+  # fundo com o mesmo escopo de cache do `build-and-push`; na tag, roda sempre.
   #
   # Ele entra POR BAIXO de `imagens-ok`, que é a fachada que a branch protection
   # já exige: nenhum check obrigatório novo — a proteção da main não passa a
   # esperar um nome que ninguém produz.
   imagens-de-fundo-sobem:
-    needs: [a-tag-veio-da-main]
+    needs: [a-tag-veio-da-production]
+    # Fork: sem executor próprio — ubuntu-latest sempre.
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-imagens-de-fundo-sobem-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/production') }}
     # Só leitura, explícita: sem o bloco o GITHUB_TOKEN herda o default do
     # REPOSITÓRIO — configuração que vive fora do repo, muda num clique e não
     # passa por PR. Mesma razão do `permissions:` dos outros jobs.
@@ -450,6 +494,8 @@ jobs:
           # vale a partir do segundo. Medido em 16/09/2026 no primeiro run deste
           # gate: manifesto importado, camadas reconstruídas.
           cache-from: type=gha,scope=deskcommcrm-worker
+          # Mesma razão do job do app: em PR, quem grava o cache é este job.
+          cache-to: ${{ github.event_name == 'pull_request' && 'type=gha,mode=max,scope=deskcommcrm-worker' || '' }}
 
       - name: Build local da imagem do scheduler (sem push)
         uses: docker/build-push-action@v7
@@ -461,6 +507,27 @@ jobs:
           load: true
           tags: deskcomm-scheduler:pr
           cache-from: type=gha,scope=deskcommcrm-scheduler
+          cache-to: ${{ github.event_name == 'pull_request' && 'type=gha,mode=max,scope=deskcommcrm-scheduler' || '' }}
+
+      # A QUARTA imagem (módulo opcional de telefonia, #677). Ela entrou na
+      # `main` sem nunca ter sido construída: `build-and-push` tem a matriz com
+      # as quatro, mas não roda em PR, e este job nomeava só worker e scheduler.
+      # O `imagens-ok` ficou verde e o defeito — a receita não copiava
+      # `patches/`, e o `pnpm install` morria com ENOENT — só apareceu no
+      # primeiro build de verdade, já na `main`, com a esteira de publicação
+      # travada. `tests/unit/toda-imagem-publicada-constroi-em-pr.test.ts`
+      # compara a matriz com os builds de PR e reprova quem esquecer a próxima.
+      - name: Build local da imagem do agente de voz (sem push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.voice-agent
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: deskcomm-voice-agent:pr
+          cache-from: type=gha,scope=deskcommcrm-voice-agent
+          cache-to: ${{ github.event_name == 'pull_request' && 'type=gha,mode=max,scope=deskcommcrm-voice-agent' || '' }}
 
       - name: O laço do event_log CARREGA dentro da imagem do worker?
         run: |
@@ -683,20 +750,33 @@ jobs:
     # justificativa do teste antecipa — "um job novo nasce sem bloco e herda o
     # default de novo".
     permissions: {}
-    needs: [build-and-push, imagem-do-app-sobe, imagens-de-fundo-sobem]
+    needs: [a-tag-veio-da-production, build-and-push, imagem-do-app-sobe, imagens-de-fundo-sobem]
     steps:
       - name: Falhar se qualquer imagem não construiu — ou se o app não sobe
+        env:
+          PORTAO: ${{ needs.a-tag-veio-da-production.result }}
+          BUILD: ${{ needs.build-and-push.result }}
+          APP: ${{ needs.imagem-do-app-sobe.result }}
+          FUNDO: ${{ needs.imagens-de-fundo-sobem.result }}
         run: |
           set -euo pipefail
-          echo "build-and-push:         ${{ needs.build-and-push.result }}"
-          echo "imagem-do-app-sobe:     ${{ needs.imagem-do-app-sobe.result }}"
-          echo "imagens-de-fundo-sobem: ${{ needs.imagens-de-fundo-sobem.result }}"
+          echo "portao=a-tag-veio-da-production=${PORTAO}"
+          echo "build-and-push:         ${BUILD}"
+          echo "imagem-do-app-sobe:     ${APP}"
+          echo "imagens-de-fundo-sobem: ${FUNDO}"
+          # O portão reprova antes de tudo: tag fora da production deixa os
+          # builds `skipped`, e nenhum `skipped` abaixo pode ler isso como
+          # aceitável.
+          [ "$PORTAO" = "success" ]
+          [ "$BUILD" = "success" ]
+          [ "$APP" = "success" ]
+          [ "$FUNDO" = "success" ]
           # As imagens de fundo entram na mesma exigência: worker ou scheduler que
           # não sobe (ou que sobe com o laço do event_log morto, #604) reprova o
           # check que a branch protection já espera — sem check novo obrigatório.
-          [ "${{ needs.build-and-push.result }}" = "success" ]
-          [ "${{ needs.imagem-do-app-sobe.result }}" = "success" ]
-          [ "${{ needs.imagens-de-fundo-sobem.result }}" = "success" ]
+          [ "$BUILD" = "success" ]
+          [ "$APP" = "success" ]
+          [ "$FUNDO" = "success" ]
 
   deploy-dokploy:
     needs: [build-and-push, imagem-do-app-sobe, promover-stable, imagens-ok]
@@ -731,6 +811,6 @@ jobs:
           if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
             echo "Deploy iniciado com sucesso no Dokploy!"
           else
-            echo "::error::Falha ao disparar webhook do Dokploy (HTTP $status)"
-            exit 1
+            [ "$APP" = "success" ]
+            [ "$FUNDO" = "success" ]
           fi

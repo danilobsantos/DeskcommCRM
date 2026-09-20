@@ -127,6 +127,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "requested_human",
+      origem: "legado_pedido",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g1_regex" },
     });
@@ -139,6 +140,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "legal_mention",
+      origem: "legado_juridico",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g4_legal_regex" },
     });
@@ -152,6 +154,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       serviceBoundary: ctx.serviceBoundary,
       organizationId: ctx.organization_id,
       reason: "critical_stage",
+      origem: "legado_etapa",
       leadId,
       metadata: { message_id: ctx.message_id, source: "g4_stage_requires_human" },
     });
@@ -263,6 +266,7 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
         serviceBoundary: ctx.serviceBoundary,
         organizationId: ctx.organization_id,
         reason: "low_confidence",
+        origem: "legado_confianca",
         leadId,
         metadata: {
           message_id: ctx.message_id,
@@ -502,6 +506,7 @@ async function vetoPorTetoDeGasto(alvo: {
     serviceBoundary: alvo.serviceBoundary,
     organizationId: orgId,
     reason: HANDOFF_REASON_ORCAMENTO,
+    origem: "legado_teto",
     leadId: alvo.leadId,
     metadata: {
       source: "teto_de_gasto",

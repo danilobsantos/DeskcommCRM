@@ -86,12 +86,18 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "Ela é SEM `if:` de propósito — pulada, ela deixaria `build-and-push` pulado junto " +
       "e o `imagens-ok` leria `skipped` como reprovação.",
   },
+  // Em pull_request ele só construía e descartava as MESMAS imagens que os
+  // dois jobs `*-sobe` já constroem — builds Docker por push de PR sem medir
+  // nada a mais. No fork, sem `if:` (condição nula): o `imagens-ok` exige
+  // `success` dele em todo evento.
   "publish-image.yml::build-and-push": {
     condicao: null,
     efeito:
       "Este job PUBLICA as três imagens no GHCR — é o artefato que o self-hoster instala. " +
       "Desligá-lo faz a tag existir sem imagem por trás dela.",
   },
+  // O fork não pula build em PR: sem `if:`, a condição é nula e o `imagens-ok`
+  // exige `success` sempre.
   "publish-image.yml::imagem-do-app-sobe": {
     condicao: null,
     efeito:
@@ -146,9 +152,18 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
   // --- os outros checks obrigatórios ------------------------------------------
   // Mesmo mecanismo, mesmo desfecho: `skipped` conta como check satisfeito.
   // Desligar qualquer um destes faz o PR entrar sem ter sido testado.
-  "ci.yml::verify": {
+  "ci.yml::verify-parte": {
     condicao: null,
-    efeito: "Este é o check obrigatório `verify` (typecheck + lint + test:unit).",
+    efeito: "São as duas partes da suíte (typecheck + lint + test:unit); sem elas o `verify` não tem o que ler.",
+  },
+  // A suíte foi dividida em partes (tempo medido, ver ci.yml); o nome que a
+  // branch protection exige continua sendo `verify`, agora o agregado.
+  "ci.yml::verify": {
+    condicao: "always()",
+    efeito:
+      "Este é o check obrigatório `verify` — o agregado que LÊ `verify-parte` e reprova " +
+      "qualquer desfecho que não seja `success`. Precisa de `always()` para ler `skipped`; " +
+      "desligá-lo (`always() && false`) o torna `skipped`, que a branch protection lê como satisfeito.",
   },
   // A matriz das duas majors roda no job `invariants-majors`; quem a branch
   // protection exige continua sendo ESTE nome — a lista dos cinco checks
@@ -179,9 +194,33 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "workflow chamava desde 2026-08-27, e `test:db` sozinho mede um banco VAZIO — constraint " +
       "que só quebra com linha existente passava verde.",
   },
-  "e2e.yml::e2e-parte": {
+  "vigia-de-colisao.yml::vigia": {
     condicao: null,
-    efeito: "São as partes da matriz Playwright; sem elas o `e2e` fica sem nada para ler.",
+    efeito:
+      "Este job remede os PRs de schema abertos contra a `main` de agora e avisa quem teve o " +
+      "número tomado depois de ficar verde. Desligá-lo devolve a classe inteira: PR verde de " +
+      "três dias atrás mergeado com número duplicado, e a descoberta vira o `db push` de um " +
+      "self-hoster.",
+  },
+  "ci.yml::invariants-alcance": {
+    condicao: null,
+    efeito:
+      "Este job decide a matriz de majors do `invariants-majors`. Sem ele a matriz fica " +
+      "vazia, nenhuma major roda e o agregador `invariants` reprova — o PORTAO dele exige " +
+      "`success` aqui.",
+  },
+  "e2e.yml::e2e-alcance": {
+    condicao: null,
+    efeito:
+      "Este job responde se o PR alcança algo que o e2e mede. Sem ele as partes nunca " +
+      "rodam e o agregador `e2e` reprova — o PORTAO dele exige `success` aqui.",
+  },
+  "e2e.yml::e2e-parte": {
+    condicao: "needs.e2e-alcance.outputs.e2e == 'sim'",
+    efeito:
+      "São as partes da matriz Playwright. Só pulam em PR que não alcança nada que o " +
+      "e2e mede (scripts/pr-alcanca-o-e2e.sh), e o agregador `e2e` só aceita o pulo com " +
+      "`e2e=nao` — vigiado por e2e-so-aceita-pulo-declarado.test.ts.",
   },
   "e2e.yml::e2e": {
     condicao: "always()",

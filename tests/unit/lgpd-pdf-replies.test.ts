@@ -27,6 +27,7 @@ function payload(): ExportPayload {
     orders: [],
     activities: [],
     appointments: [],
+    sales: [],
     tasks: [],
     webhook_captures: [],
     audit_log_extract: [],
@@ -47,6 +48,12 @@ function payload(): ExportPayload {
       },
     ],
     voice_calls: [],
+    cases: [],
+    case_events: [],
+    case_chat_messages: [],
+    passagens: [],
+    avisos_de_caso: [],
+    demandas: [],
   appointment_notices: [
       {
         id: "aviso-aberto",

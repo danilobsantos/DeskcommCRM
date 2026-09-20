@@ -541,7 +541,21 @@ const marcarShape = {
     .optional()
     .describe("o PROFISSIONAL externo dono da consulta. Use com exclusividade: não mande junto com owner_user_id."),
   title: z.string().min(1).max(200).optional(),
-  notes: z.string().max(2000).optional(),
+  notes: z
+    .string()
+    .max(2000)
+    .optional()
+    .describe("anotação INTERNA da equipe. Não aparece no calendário do cliente."),
+  description: z
+    .string()
+    .max(2000)
+    .optional()
+    .describe("observação visível no calendário (descrição do compromisso)"),
+  location_details: z
+    .string()
+    .max(300)
+    .optional()
+    .describe("endereço ou local DESTE compromisso. Vazio apaga o que o tipo sugeriu."),
 };
 
 export const crmBookAppointment: McpToolDefinition<typeof marcarShape> = {
@@ -583,6 +597,10 @@ export const crmBookAppointment: McpToolDefinition<typeof marcarShape> = {
           ...(input.provider_id ? { provider_id: input.provider_id } : {}),
           ...(input.title ? { title: input.title } : {}),
           ...(input.notes ? { notes: input.notes } : {}),
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.location_details !== undefined
+            ? { location_details: input.location_details }
+            : {}),
         },
       );
       /**
