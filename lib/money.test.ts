@@ -6,6 +6,8 @@ import {
   formatCents,
   MOEDAS_SERVIDAS,
   MOEDA_PADRAO,
+  simboloDaMoeda,
+  formatValorDoNegocio,
 } from "./money";
 
 describe("parseReaisToCents", () => {
@@ -78,6 +80,11 @@ describe("formatCents", () => {
     // Angola — `formatadorDa` maximiza `und-AO` para `pt-AO` e é o ICU que
     // decide, não uma tabela nossa.
     expect(semNbsp(formatCents(24990, "AOA"))).toBe("249,90 Kz");
+    // Euro: moeda sem país. A maximização de `und-EU` daria `€249.90`, a
+    // convenção irlandesa; Portugal, Espanha, França, Alemanha e Itália
+    // escrevem assim.
+    expect(semNbsp(formatCents(24990, "EUR"))).toBe("249,90 €");
+    expect(semNbsp(formatCents(149700, "EUR"))).toBe("1497,00 €");
   });
 
   /**
@@ -151,7 +158,30 @@ describe("MOEDAS_SERVIDAS — a lista que a tela oferece", () => {
     expect(MOEDAS_SERVIDAS).toContain("USD");
   });
 
+  it("serve o euro, com o símbolo que o seletor mostra", () => {
+    expect(MOEDAS_SERVIDAS).toContain("EUR");
+    expect(simboloDaMoeda("EUR")).toBe("€");
+  });
+
   it("e o padrão de quem não escolheu segue sendo o real", () => {
     expect(MOEDA_PADRAO).toBe("BRL");
+  });
+});
+
+describe("formatValorDoNegocio — a régua do negócio é ×100 em qualquer moeda", () => {
+  const semNbsp = (t: string) => t.replace(/[\u00a0\u202f]/g, " ");
+
+  it("⭐ guarani: 12.500.000 no negócio é ₲125.000, não cem vezes mais", () => {
+    expect(semNbsp(formatValorDoNegocio(12_500_000, "PYG"))).toBe("Gs. 125.000");
+    expect(semNbsp(formatValorDoNegocio(25_000_000, "PYG"))).toBe("Gs. 250.000");
+  });
+
+  it("em moeda de duas casas coincide com formatCents", () => {
+    expect(semNbsp(formatValorDoNegocio(24990, "BRL"))).toBe(semNbsp(formatCents(24990, "BRL")));
+  });
+
+  it("sem centavos é o formato do card: real continua como sempre foi", () => {
+    expect(semNbsp(formatValorDoNegocio(125_000, "BRL", { semCentavos: true }))).toBe("R$ 1.250");
+    expect(semNbsp(formatValorDoNegocio(12_500_000, "PYG", { semCentavos: true }))).toBe("Gs. 125.000");
   });
 });

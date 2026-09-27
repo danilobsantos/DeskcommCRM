@@ -93,7 +93,7 @@ vi.mock("@/hooks/auth/AuthProvider", () => ({
 const MARCA_DO_BANCO = {
   name: "Sistema do Revendedor",
   logoUrl: "https://cdn.exemplo.test/revendedor.png",
-  logoUrlDark: null,
+  logoDarkUrl: null,
   initial: "S",
 } as const;
 
@@ -101,7 +101,7 @@ const MARCA_DO_BANCO = {
 const PUBLIC_ENV_DO_NAVEGADOR = {
   APP_NAME: MARCA_DO_BANCO.name,
   APP_LOGO_URL: MARCA_DO_BANCO.logoUrl,
-  APP_LOGO_URL_DARK: MARCA_DO_BANCO.logoUrlDark ?? "",
+  APP_LOGO_URL_DARK: MARCA_DO_BANCO.logoDarkUrl ?? "",
 };
 
 type PublicEnv = Record<string, string> | undefined;

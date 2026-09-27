@@ -30,7 +30,12 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cssDaMarca, ESCOPO_DA_ORGANIZACAO } from "@/lib/branding/css";
-import { avisosDaMarca, type Aviso, type DistanciaAteSuaCor, type Tom } from "@/lib/branding/linguagem";
+import {
+  avisosDaMarca,
+  type Aviso,
+  type DistanciaAteSuaCor,
+  type Tom,
+} from "@/lib/branding/linguagem";
 import { ehHexValido, K, normalizarHex } from "@/lib/branding/rampa";
 import { REGUA_DO_PRODUTO } from "@/lib/branding/regua-do-produto";
 import {
@@ -57,7 +62,7 @@ interface Props {
     readonly app_name: string | null;
     readonly accent_hex: string | null;
     readonly logo_path: string | null;
-    readonly logo_path_dark: string | null;
+    readonly logo_dark_path: string | null;
   };
   /** A linha da marca da INSTALAÇÃO — a camada logo abaixo desta. */
   readonly instalacao: LinhaDaInstalacao;
@@ -153,13 +158,13 @@ export function FormularioDaMarcaDaOrganizacao({ gravada, instalacao, ambiente }
             app_name: nomeLimpo.length > 0 ? nomeLimpo : null,
             accent_hex: hexLimpo.length > 0 ? hexLimpo : null,
             logo_path: gravada.logo_path,
-            logo_path_dark: gravada.logo_path_dark,
+            logo_dark_path: gravada.logo_dark_path,
           }),
           ...abaixo,
         ],
         REGUA_DO_PRODUTO,
       ),
-    [nomeLimpo, hexLimpo, gravada.logo_path, gravada.logo_path_dark, abaixo],
+    [nomeLimpo, hexLimpo, gravada.logo_path, gravada.logo_dark_path, abaixo],
   );
 
   // A MESMA serialização, com o MESMO escopo, que o layout de `/app` roda no
@@ -347,12 +352,13 @@ export function FormularioDaMarcaDaOrganizacao({ gravada, instalacao, ambiente }
           escopo="organizacao"
           logoDaCamada={{
             url: resolvida.origens.logoUrl === "organizacao" ? resolvida.logoUrl : null,
-          }}
-          logoDaCamadaDark={{
-            url: resolvida.origens.logoUrlDark === "organizacao" ? resolvida.logoUrlDark : null,
+            escuraUrl:
+              resolvida.origens.logoDarkUrl === "organizacao" ? resolvida.logoDarkUrl : null,
           }}
           logoHerdado={semAOrganizacao.logoUrl}
-          logoHerdadoDark={semAOrganizacao.logoUrlDark}
+          logoEscuroHerdado={semAOrganizacao.logoDarkUrl}
+          // Texto-fonte cru, não traduzido aqui: CampoDeLogo já chama t()
+          // internamente sobre esta prop (ver componente compartilhado).
           origemDoHerdado="de quem instalou o sistema"
           nomeEmVigor={resolvida.name}
         />
@@ -378,10 +384,7 @@ export function FormularioDaMarcaDaOrganizacao({ gravada, instalacao, ambiente }
         </div>
 
         <div>
-          <LinhaDeOrigem
-            campo={t("Nome")}
-            valor={origemEmPortugues(resolvida.origens.nome, t)}
-          />
+          <LinhaDeOrigem campo={t("Nome")} valor={origemEmPortugues(resolvida.origens.nome, t)} />
           <LinhaDeOrigem campo={t("Cor")} valor={origemEmPortugues(resolvida.origens.cor, t)} />
           <LinhaDeOrigem
             campo={t("Logo")}

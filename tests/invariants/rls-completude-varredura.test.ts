@@ -75,6 +75,12 @@ interface Excecao {
  * linhas da OUTRA organização, não uma leitura como superusuário.
  */
 const PROVA_PROPRIA: readonly Excecao[] = [
+  { tabela: "golden_candidates", razao: "tests/invariants/golden-candidates.test.ts — dois tenants reais por JWT (agent): leitura positiva local e ZERO do vizinho nos dois sentidos, a tabela inteira sem filtro igual à própria, anon recusado, e insert/update/delete de authenticated sem efeito (só o servidor grava)." },
+  { tabela: "jev_observacoes", razao: "tests/invariants/jev-observacoes.test.ts — dois tenants reais por JWT (agent): leitura positiva local e ZERO do vizinho nos dois sentidos, a tabela inteira sem filtro igual à própria, anon recusado, e insert/update/delete de authenticated sem efeito (só o servidor grava)." },
+  { tabela: "prospecting_settings", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
+  { tabela: "prospecting_campaigns", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
+  { tabela: "prospecting_candidates", razao: "tests/invariants/prospecting.test.ts — tabela exclusiva do servidor, ACL e RLS verificadas; FK composta e comandos autenticados cercam a organização." },
+  { tabela: "channel_integrations", razao: "tests/invariants/social-native.test.ts — credencial exclusiva do servidor: SELECT com JWT authenticated recusado para as duas organizações, além de ACL e RLS habilitada." },
   { tabela: "config_aviso_de_caso", razao: "tests/invariants/aviso-de-caso-escrita.test.ts — dois tenants reais por JWT: admin lê só a própria organização, agent e viewer não leem nada, e a escrita direta por authenticated é negada (a única porta é fn_definir_aviso_de_caso, que revalida papel, suporte e MFA)" },
   { tabela: "entregas_de_aviso_de_caso", razao: "tests/invariants/aviso-de-caso-escrita.test.ts — manager lê o histórico da própria organização e zero do vizinho; viewer lê zero; escrita direta por authenticated negada nos três verbos, e apagar a channel_sessions apontada não falha e deixa a configuração desligada" },
   { tabela: "organization_extensions", razao: "tests/invariants/extensoes-declarativas.test.ts — dois tenants com vínculos reais: leitura positiva local/negativa cruzada por JWT, revogação de membership e escrita direta negada" },
@@ -228,20 +234,61 @@ const PROVA_PROPRIA: readonly Excecao[] = [
       "filtrando organization_id à mão (a tela `/app/settings/conversoes`).",
   },
   {
+    tabela: "ad_hierarchy_cache",
+    razao:
+      "tests/invariants/credencial-de-anuncios-e-server-side.test.ts — mesmo " +
+      "`describe.each` das três acima. Guarda o nome da campanha, do conjunto e " +
+      "do anúncio de quem anuncia: a estratégia de mídia, não um segredo de " +
+      "autenticação. Quem a lê é o servidor com o admin client filtrando " +
+      "organization_id à mão.",
+  },
+  {
     tabela: "google_ads_landing_pages",
     razao:
-      "tests/invariants/google-ads-captura-e-server-side.test.ts — mesmo desenho " +
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo desenho " +
       "deny-all de ad_platform_connections (0213): RLS ligada, zero policies, " +
       "grants revogados de anon/authenticated, organization_id NOT NULL com FK " +
       "em cascata. Guarda para qual WhatsApp e com qual texto a landing page " +
       "de captura de gclid redireciona.",
   },
   {
+    tabela: "google_ads_conversion_rules",
+    razao:
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — RLS ligada, " +
+      "zero policies, privilégios revogados e permission denied sob set role " +
+      "anon/authenticated. O servidor aplica organization_id às regras por etapa. " +
+      "tests/invariants/google-regras-etapa-isoladas.test.ts também prova a FK " +
+      "composta que recusa etapa de outra organização.",
+  },
+  {
+    tabela: "ad_tracking_links",
+    razao:
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo teste " +
+      "comportamental deny-all, com controle positivo de service_role. " +
+      "tests/invariants/links-rastreaveis-isolados.test.ts prova as FKs compostas " +
+      "e o isolamento das métricas por organização.",
+  },
+  {
     tabela: "google_ads_click_refs",
     razao:
-      "tests/invariants/google-ads-captura-e-server-side.test.ts — mesmo " +
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo " +
       "`describe.each` da linha acima. Guarda o `gclid` de cada clique de " +
       "anúncio e o token que o liga à mensagem do WhatsApp.",
+  },
+  {
+    tabela: "meta_ads_landing_pages",
+    razao:
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo " +
+      "`describe.each` das duas linhas acima. É o par da migration 0381: " +
+      "guarda para qual WhatsApp e com qual texto a rota pública de captura " +
+      "de UTM redireciona.",
+  },
+  {
+    tabela: "meta_ads_click_refs",
+    razao:
+      "tests/invariants/captura-de-clique-e-server-side.test.ts — mesmo " +
+      "`describe.each`. Guarda as UTMs de cada clique no botão da landing " +
+      "page e o ref curto que as liga à mensagem do WhatsApp.",
   },
 ];
 

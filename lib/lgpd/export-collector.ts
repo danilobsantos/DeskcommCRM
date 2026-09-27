@@ -9,6 +9,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { citacaoDaLei, perfilDoPais } from "@/lib/legal/perfil-do-pais";
 import { logger } from "@/lib/logger";
+import { camposLegiveis, perguntasDosGrafos, type CampoLegivel } from "@/lib/lgpd/campos-personalizados";
 import { maskPhone } from "@/lib/lgpd/mask";
 import type { Json } from "@/lib/database.types";
 
@@ -34,6 +35,16 @@ export interface ContactSnapshot {
   last_activity_at: string | null;
   /** Primeiro atendimento marcado. Sobrevive à anonimização: é registro de operação. */
   first_service_at: string | null;
+  /**
+   * Campos personalizados — onde os roteiros de atendimento gravam o que o
+   * cliente respondeu (CPF inclusive). A anonimização já os zera; sem esta
+   * linha o titular pedia acesso e não recebia o que o roteiro coletou.
+   */
+  custom_fields: Record<string, unknown>;
+  /** Para o PDF: rótulo da pergunta + valor, sem o CPF (ver `campos-personalizados.ts`). */
+  campos_legiveis: CampoLegivel[];
+  /** Um roteiro guardou o CPF nos campos (texto, não a coluna cifrada). */
+  cpf_informado_na_conversa: boolean;
 }
 
 export interface ConsentRow {
@@ -92,6 +103,22 @@ export interface ActivityRow {
   type: string;
   source_module: string | null;
   performed_at: string;
+}
+
+/**
+ * O resumo que o agente guarda sobre o titular (`lead_checkpoints`).
+ *
+ * Entra porque a anonimização o REDIGE (migration 0391): o resumo corrido, os
+ * compromissos e a próxima ação são texto que o modelo escreveu SOBRE a pessoa,
+ * e o que se apaga a pedido do titular é o que se entrega a pedido dele.
+ */
+export interface CheckpointRow {
+  id: string;
+  rolling_summary: string;
+  commitments: unknown;
+  objections: unknown;
+  next_action: string | null;
+  created_at: string;
 }
 
 /**
@@ -359,6 +386,59 @@ export interface VoiceCallRow {
   duration_ms: number | null;
 }
 
+/** Pesquisa e resultado da abordagem ligados ao titular (redação: migration 0370). */
+export interface ProspectingCandidateRow {
+  id: string;
+  campaign_id: string;
+  place_id: string;
+  phone: string | null;
+  data: Json;
+  status: string;
+  lead_id: string | null;
+  conversation_id: string | null;
+  attempted_at: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Uma campanha que falou com este titular (migration 0374).
+ *
+ * O texto vai junto porque é o que foi DITO a ele; o telefone não, porque ele já
+ * está no bloco do contato e repeti-lo só multiplica PII no arquivo entregue.
+ */
+export interface CampaignRecipientRow {
+  id: string;
+  campaign_id: string;
+  status: string;
+  eligibility_status: string;
+  exclusion_reason: string | null;
+  rendered_body: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  replied_at: string | null;
+  opted_out_at: string | null;
+}
+
+/**
+ * Uma linha da lista de exclusão de campanhas que aponta para este titular
+ * (migration 0375).
+ *
+ * O hash do telefone NÃO entra: ele não diz nada a quem lê e não é dado que o
+ * titular reconheça. O que entra é o fato — "este número está fora das
+ * campanhas desde tal dia, por tal motivo" —, que é exatamente a informação
+ * dele que a organização guarda.
+ */
+export interface CampaignSuppressionRow {
+  id: string;
+  address_tail: string | null;
+  reason: string | null;
+  source: string;
+  created_at: string;
+}
+
 export interface ExportPayload {
   request_id: string;
   organization_id: string;
@@ -393,6 +473,7 @@ export interface ExportPayload {
   leads: LeadRow[];
   orders: OrderRow[];
   activities: ActivityRow[];
+  checkpoints: CheckpointRow[];
   appointments: AppointmentRow[];
   sales: SaleRow[];
   tasks: TaskRow[];
@@ -410,6 +491,7 @@ export interface ExportPayload {
    * próprio cascade.
    */
   voice_calls: VoiceCallRow[];
+  prospecting_candidates: ProspectingCandidateRow[];
   /**
    * Casos, linha do tempo do caso e demandas (migration 0280).
    *
@@ -438,6 +520,48 @@ export interface ExportPayload {
    */
   passagens: PassagemDeAtendimentoRow[];
   avisos_de_caso: AvisoDeCasoEntregaRow[];
+  /**
+   * Campanhas que falaram com o titular (migration 0375).
+   *
+   * Entra pelo mesmo motivo de `voice_calls`: o trigger
+   * `trg_redigir_campanhas_anonimizado` APAGA o texto e o telefone destas linhas
+   * quando ele pede anonimização, e o que se apaga a pedido dele é o que se
+   * entrega a pedido dele (Art. 18 II). Sem este bloco, alguém que recebeu uma
+   * prospecção pediria acesso e não veria a mensagem que recebeu.
+   */
+  campaign_recipients: CampaignRecipientRow[];
+  /**
+   * Lista de exclusão de campanhas (migration 0375).
+   *
+   * Entra pelo mesmo motivo das demais: o trigger
+   * `trg_redigir_exclusoes_anonimizado` APAGA o vínculo e os últimos dígitos
+   * quando o titular pede anonimização, e o que se apaga a pedido dele é o que
+   * se entrega a pedido dele (Art. 18 II).
+   */
+  campaign_suppressions: CampaignSuppressionRow[];
+  /** Rascunhos escritos PARA o titular por outro sistema (0419), apagados na
+   *  anonimização. Opcional como `reply_drafts`: o tipo é montado à mão nos testes de PDF. */
+  conversation_drafts?: Array<{
+    id: string;
+    conversation_id: string;
+    body: string;
+    source: string;
+    consumed_at: string | null;
+    created_at: string;
+  }>;
+  /** Propostas de campo do contato (0123), também APAGADAS na anonimização. */
+  contact_field_proposals?: Array<{
+    id: string;
+    campo: string;
+    valor_proposto: string;
+    valor_anterior: string | null;
+    conversation_id: string | null;
+    trecho: string | null;
+    status: string;
+    proposed_at: string;
+    decided_at: string | null;
+    motivo_recusa: string | null;
+  }>;
   reply_drafts?: Array<{
     id: string;
     status: string;
@@ -579,6 +703,43 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       });
     }
     if (data) {
+      const customFields =
+        data.custom_fields && typeof data.custom_fields === "object" && !Array.isArray(data.custom_fields)
+          ? (data.custom_fields as Record<string, unknown>)
+          : {};
+      // Os rótulos vêm das perguntas dos roteiros que o contato percorreu. Duas
+      // leituras planas (sem embed): o coletor também roda sobre clientes que
+      // só entendem coluna simples (tests/invariants/agenda-meet-export).
+      const grafos: unknown[] = [];
+      const { data: inscricoes, error: inscricoesErr } = await admin
+        .from("followup_enrollments")
+        .select("version_id")
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("started_at", { ascending: false })
+        .limit(50);
+      const versaoIds = [
+        ...new Set((inscricoes ?? []).flatMap((r) => (r.version_id ? [r.version_id as string] : []))),
+      ];
+      if (versaoIds.length > 0 && !inscricoesErr) {
+        const { data: versoes, error: versoesErr } = await admin
+          .from("followup_flow_versions")
+          .select("id, graph")
+          .eq("organization_id", organizationId)
+          .in("id", versaoIds);
+        if (versoesErr) {
+          logger.warn("[lgpd-export-worker] roteiros load failed", { request_id: requestId, error: versoesErr.message });
+        }
+        const porId = new Map((versoes ?? []).map((v) => [v.id as string, v.graph]));
+        for (const id of versaoIds) grafos.push(porId.get(id)); // o mais recente primeiro
+      }
+      if (inscricoesErr) {
+        logger.warn("[lgpd-export-worker] roteiros load failed", {
+          request_id: requestId,
+          error: inscricoesErr.message,
+        });
+      }
+      const legiveis = camposLegiveis(customFields, perguntasDosGrafos(grafos));
       contact = {
         id: data.id,
         name: data.name ?? null,
@@ -596,6 +757,9 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
         created_at: data.created_at,
         last_activity_at: data.last_activity_at ?? null,
         first_service_at: data.first_service_at ?? null,
+        custom_fields: customFields,
+        campos_legiveis: legiveis.campos,
+        cpf_informado_na_conversa: legiveis.cpfInformado,
       };
     }
   }
@@ -770,6 +934,26 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  // Resumos do agente — contact_id direto em lead_checkpoints.
+  let checkpoints: CheckpointRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("lead_checkpoints")
+      .select("id, rolling_summary, commitments, objections, next_action, created_at")
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      logger.warn("[lgpd-export-worker] checkpoints load failed", {
+        request_id: requestId,
+        error: error.message,
+      });
+    } else if (data) {
+      checkpoints = data;
+    }
+  }
+
   // Agenda — contact_id direto em calendar_appointments.
   //
   // ⚠️ ESTA METADE FALTAVA, e a outra tinha gate. A migration 0184 declarou esta
@@ -877,6 +1061,48 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  // Campanhas — `contact_id` direto em `campaign_recipients` (migration 0375).
+  let campaign_recipients: CampaignRecipientRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("campaign_recipients")
+      .select(
+        "id, campaign_id, status, eligibility_status, exclusion_reason, rendered_body, sent_at, delivered_at, read_at, replied_at, opted_out_at",
+      )
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      logger.warn("[lgpd-export-worker] campaign recipients load failed", {
+        request_id: requestId,
+        error: error.message,
+      });
+    } else if (data) {
+      campaign_recipients = data as unknown as CampaignRecipientRow[];
+    }
+  }
+
+  // Lista de exclusão de campanhas — `contact_id` direto (migration 0375).
+  let campaign_suppressions: CampaignSuppressionRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("campaign_suppressions")
+      .select("id, address_tail, reason, source, created_at")
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) {
+      logger.warn("[lgpd-export-worker] campaign suppressions load failed", {
+        request_id: requestId,
+        error: error.message,
+      });
+    } else if (data) {
+      campaign_suppressions = data as unknown as CampaignSuppressionRow[];
+    }
+  }
+
   // Captação por webhook — a MESMA classe do bloco acima, achada pelo gate.
   let webhook_captures: CaptureRow[] = [];
   if (contactId) {
@@ -896,6 +1122,32 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       });
     } else if (data) {
       webhook_captures = data;
+    }
+  }
+
+  // Propostas de campo do contato: a anonimização as APAGA, e o valor proposto é
+  // dado do titular. Mesmo escopo da função que apaga, com os ids internos fora.
+  //
+  // POR PÁGINA, não por teto: esta fila a IA alimenta enquanto a conversa dura, e
+  // um `limit` faria as mais antigas sumirem do relatório sem ninguém saber. A
+  // chave é `id` (única) — ordenar por `proposed_at` deixaria empates decidirem a
+  // página. Mesma forma do bloco dos rascunhos, logo acima.
+  const contact_field_proposals: NonNullable<ExportPayload["contact_field_proposals"]> = [];
+  if (contactId) {
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await admin
+        .from("contact_field_proposals")
+        .select(
+          "id, campo, valor_proposto, valor_anterior, conversation_id, trecho, status, proposed_at, decided_at, motivo_recusa",
+        )
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(offset, offset + 499);
+      // Uma falha não pode virar um relatório que diz que não guardamos dados.
+      if (error) throw error;
+      contact_field_proposals.push(...(data ?? []));
+      if (!data || data.length < 500) break;
     }
   }
 
@@ -944,6 +1196,27 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       if (!data || data.length < 500) break;
     }
   }
+  // Espelha exatamente o escopo da redação 0361: contato + organização.
+  // Telefone coincidente sem vínculo não comprova identidade. Tokens de
+  // supressão e a autorização de envio permanecem internos, fora da projeção.
+  const prospecting_candidates: ProspectingCandidateRow[] = [];
+  if (contactId) {
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await admin
+        .from("prospecting_candidates")
+        .select(
+          "id,campaign_id,place_id,phone,data,status,lead_id,conversation_id,attempted_at,error,created_at,updated_at",
+        )
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("id")
+        .range(offset, offset + 499);
+      // Uma falha não pode virar um relatório que diz que não guardamos dados.
+      if (error) throw error;
+      prospecting_candidates.push(...(data ?? []));
+      if (!data || data.length < 500) break;
+    }
+  }
   // Casos, linha do tempo do caso e demandas — o que a 0280 pôs na cascata.
   //
   // O escopo do CASO é a CONVERSA do titular: `agent_cases` não tem FK para
@@ -957,6 +1230,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
   const case_chat_messages: CaseChatMessageRow[] = [];
   const passagens: PassagemDeAtendimentoRow[] = [];
   const avisos_de_caso: AvisoDeCasoEntregaRow[] = [];
+  const conversation_drafts: NonNullable<ExportPayload["conversation_drafts"]> = [];
   if (contactId) {
     const pageSize = 500;
     const refBatchSize = 100; // Mantém o filtro IN abaixo dos limites de URL dos proxies.
@@ -1090,6 +1364,23 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       passagens.push(...(pagina ?? []));
       if (!pagina || pagina.length < pageSize) break;
     }
+    // Os rascunhos das conversas do titular — o MESMO escopo que a função de
+    // anonimização usa, a partir dos ids já paginados acima: sem FK para
+    // `contacts`, nenhuma outra leitura alcançaria a tabela.
+    for (let batch = 0; batch < conversationIds.length; batch += refBatchSize) {
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await admin
+          .from("conversation_drafts")
+          .select("id, conversation_id, body, source, consumed_at, created_at")
+          .eq("organization_id", organizationId)
+          .in("conversation_id", conversationIds.slice(batch, batch + refBatchSize))
+          .order("id")
+          .range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        conversation_drafts.push(...(data ?? []));
+        if (!data || data.length < pageSize) break;
+      }
+    }
     // O registro de entrega do aviso ao suporte (migration 0292). O escopo sai
     // dos CASOS já coletados, e não de uma segunda derivação pela conversa: um
     // `case_id` que não esteja em `cases` seria de outro titular.
@@ -1218,7 +1509,11 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     lei_citada: citacaoDaLei(perfil),
     documento_rotulo: perfil.documento.rotulo,
     generated_at: new Date().toISOString(),
-    no_local_footprint: !contact && conversations.length === 0 && orders.length === 0,
+    no_local_footprint:
+      !contact &&
+      conversations.length === 0 &&
+      orders.length === 0 &&
+      prospecting_candidates.length === 0,
     contact,
     consents,
     conversations,
@@ -1227,6 +1522,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     leads,
     orders,
     activities,
+    checkpoints,
     appointments,
     sales,
     tasks,
@@ -1236,12 +1532,17 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     meeting_deliveries,
     appointment_notices,
     voice_calls,
+    prospecting_candidates,
     cases,
     case_events,
     demandas,
     case_chat_messages,
     passagens,
     avisos_de_caso,
+    campaign_recipients,
+    campaign_suppressions,
+    conversation_drafts,
+    contact_field_proposals,
   };
 }
 
@@ -1268,6 +1569,7 @@ function emptyPayload(
     leads: [],
     orders: [],
     activities: [],
+    checkpoints: [],
     appointments: [],
     sales: [],
     tasks: [],
@@ -1276,11 +1578,14 @@ function emptyPayload(
     meeting_deliveries: [],
     appointment_notices: [],
     voice_calls: [],
+    prospecting_candidates: [],
     cases: [],
     case_events: [],
     demandas: [],
     case_chat_messages: [],
     passagens: [],
     avisos_de_caso: [],
+    campaign_recipients: [],
+    campaign_suppressions: [],
   };
 }

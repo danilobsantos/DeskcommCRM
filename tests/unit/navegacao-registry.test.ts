@@ -117,6 +117,12 @@ describe("sidebarGroups", () => {
     // para encerrar. Ela mora dentro do hub, em "O dia a dia da venda", que é
     // onde o grupo com hub recebe tela nova (ver o comentário no destino, em
     // lib/navigation/catalogo.ts).
+
+    // `/app/prospecting` NÃO está aqui, e a ausência é decisão, não esquecimento:
+    // a tela existe e é alcançável pelo hub e pelo ⌘K, mas o menu já está no
+    // limite — com ela seriam 20 portas e o e2e reprova por scroll em 900px. A
+    // razão e a condição que encerram a exceção estão ao lado do item, em
+    // `lib/navigation/catalogo.ts`.
     const crm = sidebarGroups(true, null).find((g) => g.group.id === "crm");
     expect(crm?.items.map((i) => i.href)).toEqual([
       "/app/kanban",
@@ -166,7 +172,9 @@ describe("hubSections", () => {
     const secoes = hubSections("crm", true, null);
     expect(secoes.map((s) => s.section)).toEqual(["O dia a dia da venda", "Preparar a venda"]);
     expect(secoes.flatMap((s) => s.items.map((i) => i.href))).toEqual([
+      "/app/prospecting",
       "/app/kanban",
+      "/app/campaigns",
       "/app/contacts",
       "/app/tasks",
       "/app/calls",

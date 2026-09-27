@@ -23,9 +23,8 @@ describe("o campo de logo anuncia que hidratou", () => {
       <CampoDeLogo
         escopo="instalacao"
         logoDaCamada={{ url: null }}
-        logoDaCamadaDark={{ url: null }}
         logoHerdado={null}
-        logoHerdadoDark={null}
+        logoEscuroHerdado={null}
         origemDoHerdado="do sistema"
         nomeEmVigor="DeskcommCRM"
       />,
@@ -43,13 +42,12 @@ describe("o campo de logo anuncia que hidratou", () => {
       <CampoDeLogo
         escopo="organizacao"
         logoDaCamada={{ url: null }}
-        logoDaCamadaDark={{ url: null }}
         logoHerdado={null}
-        logoHerdadoDark={null}
+        logoEscuroHerdado={null}
         origemDoHerdado="da instalação"
         nomeEmVigor="Empresa"
       />,
     );
-    expect(document.querySelector("#logo-organizacao-light")).not.toBeNull();
+    expect(document.querySelector("#logo-organizacao")).not.toBeNull();
   });
 });

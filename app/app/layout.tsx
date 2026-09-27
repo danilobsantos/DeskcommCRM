@@ -16,6 +16,7 @@ import { marcaDaInstalacao } from "@/lib/branding/instalacao";
 import { resolverMarcaDaOrganizacao } from "@/lib/branding/organizacao";
 import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { modulosLigados } from "@/lib/instalacao/modulos";
 import {
   ImpersonateBanner,
 } from "@/components/app/ImpersonateBanner";
@@ -72,8 +73,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         .maybeSingle()
     : Promise.resolve(null);
   const brandInstalacaoPromise = marcaDaInstalacao();
+  // Módulos opcionais da INSTALAÇÃO (portas de menu): uma leitura, junto com
+  // as outras — não entra no `if (activeOrg)` abaixo para não refazer o que o
+  // paralelo acima já trouxe.
+  const modulosPromise = modulosLigados(admin);
 
-  const [{ data: orgRow }, conexoesCaidas, store, enrolled, paRes, brandInstalacao] =
+  const [{ data: orgRow }, conexoesCaidas, store, enrolled, paRes, brandInstalacao, modulos] =
     await Promise.all([
       orgPromise,
       conexoesPromise,
@@ -81,6 +86,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       mfaPromise,
       paPromise,
       brandInstalacaoPromise,
+      modulosPromise,
     ]);
   /**
    * A cor desta organização, serializada, ou `null` quando ela não tem uma.
@@ -109,6 +115,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       visibility_mode: mode ?? DEFAULT_VISIBILITY_MODE,
       // Mesma linha de `settings` já lida acima — nenhuma consulta a mais.
       cliente_pela_agenda: clientePelaAgendaLigado(orgRow?.settings),
+      modulos_ligados: modulos,
     };
 
     // M480 (migration 9003): expõe a flag de profissionais externos ao client
@@ -132,16 +139,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }
 
     const marcaDoTenant = {
+      logoDarkUrl: marca.logoDarkUrl ?? null,
       ...(marca.origens.nome === "organizacao" ? { nome: marca.name } : {}),
       ...(marca.origens.logoUrl === "organizacao" && marca.logoUrl !== null
         ? { logoUrl: marca.logoUrl }
         : {}),
-      // `logoUrlDark` tem o MESMO destino do logo claro: sem ele, o logo escuro
+      // `logoDarkUrl` tem o MESMO destino do logo claro: sem ele, o logo escuro
       // do tenant era descartado aqui e a barra caía no logo escuro da
       // INSTALAÇÃO em todo tema escuro — o tenant não via o logo próprio dele
       // nunca, e "nem sempre" a logo acompanhava o tema (só sem personalização).
-      ...(marca.origens.logoUrlDark === "organizacao" && marca.logoUrlDark !== null
-        ? { logoUrlDark: marca.logoUrlDark }
+      ...(marca.origens.logoDarkUrl === "organizacao" && marca.logoDarkUrl !== null
+        ? { logoDarkUrl: marca.logoDarkUrl }
         : {}),
     };
     if (Object.keys(marcaDoTenant).length > 0) {

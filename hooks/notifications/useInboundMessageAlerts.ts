@@ -163,7 +163,7 @@ export function useInboundMessageAlerts(): void {
       !shouldNotifyInbound({
         direction,
         conversationId,
-        openConversationId: getOpenConversationId(),
+        openConversationId: getOpenConversationId(conversationId),
         tabFocused: tabFocused(),
         tipo: (payload as { tipo?: unknown }).tipo,
       })

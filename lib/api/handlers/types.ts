@@ -1,3 +1,4 @@
+import type { ProspectingDelivery } from "@/lib/prospecting/guard";
 import type { AgentOperationContext } from "@/lib/ai/agents/operation";
 import type { ApprovedReplyContext } from "@/lib/ai/replies/delivery";
 import type { MeetingDeliveryContext, MeetingBookingContext } from "@/lib/agenda/meet-delivery";
@@ -71,6 +72,7 @@ export type Actor =
   | { type: "webhook_source"; id: string; textoEscritoPelaIA?: true };
 
 export interface HandlerCtx {
+  prospectingDelivery?: ProspectingDelivery;
   agentOperation?: AgentOperationContext;
   meetingDelivery?: MeetingDeliveryContext;
   approvedReply?: ApprovedReplyContext;
@@ -81,8 +83,23 @@ export interface HandlerCtx {
   serviceBoundary?: ServiceBoundary | null;
   /** Origem de evento derivado; não é campo de input público. */
   serviceOrigin?: ServiceOrigin;
+  /** Chave HTTP validada na borda para replay de uma criação. */
+  idempotencyKey?: string;
+  /** Identidade estável do job interno; não usar claim, que muda em cada reclaim. */
+  sourceJobId?: string;
   organization_id: string;
   actor: Actor;
+  /**
+   * Autoria "em nome de" (#1613): a PESSOA por cuja decisão o token envia.
+   *
+   * Vive no CTX, e não no input, de propósito: o mesmo input atravessa as tools
+   * MCP, que não têm escopo nenhum, e um campo gravável ali seria um envio
+   * forjado sem passar pelo gate `messages:on_behalf`. Quem preenche é
+   * `app/api/v1/messages/route.ts`, depois de validar o escopo do token e o
+   * membership do usuário; o handler recusa alto quando o input traz o campo e
+   * o ctx não — falha fechada, nunca grava por omissão.
+   */
+  onBehalfOf?: { userId: string; userName?: string | null; tokenName?: string | null };
   requestId: string;
   /**
    * Idioma de quem chamou, só quando é um usuário humano de verdade — as

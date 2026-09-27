@@ -120,10 +120,10 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
     // Deve renderizar a thread com a mensagem
     expect(screen.getByText("Mensagem 1")).toBeInTheDocument();
 
-    // rAF roda a rolagem
+    // A rolagem é direta no efeito (sem rAF)
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
-    expect(scrollToSpy).toHaveBeenCalled();
+    expect(scrollIntoViewSpy).toHaveBeenCalled();
   });
 
   it("ao receber nova mensagem inbound com o usuário no rodapé, rola automaticamente para exibi-la", async () => {
@@ -170,7 +170,7 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
     // Como estava no rodapé, DEVE rolar suavemente para exibir a nova mensagem
-    expect(scrollToSpy).toHaveBeenCalledWith(
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         behavior: "smooth",
       }),
@@ -264,6 +264,6 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
     // Como foi envio próprio, DEVE rolar para o rodapé
-    expect(scrollToSpy).toHaveBeenCalled();
+    expect(scrollIntoViewSpy).toHaveBeenCalled();
   });
 });

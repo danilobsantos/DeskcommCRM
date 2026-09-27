@@ -56,7 +56,7 @@ vi.mock("@/components/shell/VersionFooter", () => ({ VersionFooter: () => null }
 let marcaDaInstalacao: Branding = {
   name: "Sistema do Revendedor",
   logoUrl: null,
-  logoUrlDark: null,
+  logoDarkUrl: null,
   initial: "S",
 };
 
@@ -136,7 +136,7 @@ describe("o logo na barra lateral", () => {
   const LOGO_DA_ORG = "https://cdn.exemplo.test/loja-da-ana.png";
 
   afterEach(() => {
-    marcaDaInstalacao = { name: "Sistema do Revendedor", logoUrl: null, logoUrlDark: null, initial: "S" };
+    marcaDaInstalacao = { name: "Sistema do Revendedor", logoUrl: null, logoDarkUrl: null, initial: "S" };
     temaResolvido = "light";
   });
 
@@ -192,23 +192,26 @@ describe("o logo na barra lateral", () => {
 
   it("tema escuro: o logo escuro da ORGANIZAÇÃO substitui o da instalação", () => {
     // Não-regressão do bug "a logo nem sempre altera junto com o tema": o layout
-    // de `/app` descartava `logoUrlDark` do tenant, então no tema escuro a barra
+    // de `/app` descartava `logoDarkUrl` do tenant, então no tema escuro a barra
     // caía no logo escuro da INSTALAÇÃO mesmo quando a organização tinha o seu.
     const LOGO_DA_ORG_ESCURO = "https://cdn.exemplo.test/loja-da-ana-dark.png";
     marcaDaInstalacao = {
       ...marcaDaInstalacao,
       logoUrl: LOGO_DA_INSTALACAO,
-      logoUrlDark: "https://cdn.exemplo.test/revendedor-dark.png",
+      logoDarkUrl: "https://cdn.exemplo.test/revendedor-dark.png",
     };
     temaResolvido = "dark";
     contexto = {
       user: usuario,
-      activeOrg: { ...org, marca: { nome: "Loja da Ana", logoUrl: LOGO_DA_ORG, logoUrlDark: LOGO_DA_ORG_ESCURO } },
+      activeOrg: { ...org, marca: { nome: "Loja da Ana", logoUrl: LOGO_DA_ORG, logoDarkUrl: LOGO_DA_ORG_ESCURO } },
     };
     renderSidebar({ collapsed: false });
 
-    expect(imagem().getAttribute("src")).toBe(LOGO_DA_ORG_ESCURO);
-    expect(imagem().getAttribute("alt")).toBe("Loja da Ana");
+    // Duas artes no DOM (clara `dark:hidden`, escura `dark:block`): a escura é
+    // a que o tema escuro mostra.
+    const escuras = screen.getAllByRole("img").filter((i) => i.getAttribute("src") === LOGO_DA_ORG_ESCURO);
+    expect(escuras).toHaveLength(1);
+    expect(escuras[0]!.getAttribute("alt")).toBe("Loja da Ana");
   });
 
   it("tema escuro, org sem logo escuro: usa o logo claro dela, não o escuro da instalação", () => {
@@ -218,7 +221,7 @@ describe("o logo na barra lateral", () => {
     marcaDaInstalacao = {
       ...marcaDaInstalacao,
       logoUrl: LOGO_DA_INSTALACAO,
-      logoUrlDark: "https://cdn.exemplo.test/revendedor-dark.png",
+      logoDarkUrl: "https://cdn.exemplo.test/revendedor-dark.png",
     };
     temaResolvido = "dark";
     contexto = {

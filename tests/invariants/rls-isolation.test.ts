@@ -108,6 +108,7 @@ beforeAll(() => {
       v_method uuid;
       v_event_type uuid;
       v_sale uuid;
+      v_camp    uuid;
       v_sale_item uuid;
     begin
       foreach v_org in array array['${ORG_A}'::uuid, '${ORG_B}'::uuid] loop
@@ -130,6 +131,17 @@ beforeAll(() => {
         if not exists (select 1 from public.messages where organization_id = v_org) then
           insert into public.messages (organization_id, conversation_id, channel_session_id, contact_id, type, direction, body)
             values (v_org, v_conv, v_sess, v_contact, 'text', 'inbound', 'rls invariant probe');
+        end if;
+
+        -- migration 0419 — o rascunho sugerido por integração (#1611): o TEXTO
+        -- que outro sistema escreveu para esta pessoa, guardado ANTES de alguém
+        -- clicar em enviar. Vazar a linha entregaria ao vizinho a mensagem que a
+        -- empresa ainda não mandou — e a leitura da inbox é pela sessão do
+        -- atendente, por isso a policy precisa valer nos dois sentidos.
+        if not exists (select 1 from public.conversation_drafts where organization_id = v_org) then
+          insert into public.conversation_drafts
+            (organization_id, conversation_id, body, source, expires_at)
+          values (v_org, v_conv, 'RLS invariant rascunho sugerido', 'erp', now() + interval '24 hours');
         end if;
 
         -- 0227: sugestões contêm texto privado da conversa. Os dois tenants
@@ -459,6 +471,38 @@ beforeAll(() => {
                     '\\x00'::bytea, '\\x000000000000000000000000'::bytea,
                     '\\x00000000000000000000000000000000'::bytea);
         end if;
+
+        -- migrations 0374/0375 -- a campanha e quem ela alcancou. A tabela
+        -- campaigns NAO entra na lista de TABLES porque nao tem FK para
+        -- contacts; as duas que guardam pessoa, sim. channel_session_id e
+        -- obrigatorio e reusa a sessao que esta semente ja criou.
+        if not exists (select 1 from public.campaigns where organization_id = v_org) then
+          -- um id por ORGANIZACAO: o loop roda para as duas, e um uuid sorteado
+          -- na declaracao seria o MESMO nas duas voltas (campaigns_pkey).
+          v_camp := gen_random_uuid();
+          insert into public.campaigns
+            (id, organization_id, name, channel_session_id, base_legal, lia_ref)
+            values (v_camp, v_org, 'RLS invariant campanha', v_sess,
+                    'legitimate_interest', 'LIA-RLS-INVARIANTE');
+
+          insert into public.campaign_recipients
+            (organization_id, campaign_id, contact_id, recipient_address, rendered_body)
+            values (v_org, v_camp, v_contact, '+5500000000000', 'RLS invariant mensagem');
+
+          insert into public.campaign_suppressions
+            (organization_id, contact_id, recipient_address_hash, address_tail, reason)
+            values (v_org, v_contact, md5(v_org::text || 'rls-invariante'), '0000', 'RLS invariant');
+
+          -- o texto salvo e o pool de numeros da campanha: as duas sao
+          -- tenant-aware e entram na lista abaixo pelo mesmo motivo.
+          insert into public.campaign_templates
+            (organization_id, name, body)
+            values (v_org, 'RLS invariant modelo', 'RLS invariant corpo');
+
+          insert into public.campaign_channel_sessions
+            (organization_id, campaign_id, channel_session_id)
+            values (v_org, v_camp, v_sess);
+        end if;
       end loop;
     end
     $seed$;
@@ -595,6 +639,21 @@ export const TABLES = [
   // natural seria afrouxar a policy para caber no molde. A prova dela vive em
   // `tests/invariants/historico-de-captacao-rls.test.ts`, que mede as duas
   // direções MAIS o gate de papel (o `viewer` que não lê o formulário).
+  // migrations 0374/0375 — a campanha guarda o que foi DITO à pessoa
+  // (`rendered_body`) e o endereço para onde foi. Entram aqui no MESMO commit
+  // da migration, como a nota acima exige.
+  "campaign_recipients",
+  "campaign_suppressions",
+  "campaigns",
+  "campaign_templates",
+  "campaign_channel_sessions",
+  // migration 0419 (issue #1611) — o rascunho sugerido por integração. Guarda o
+  // TEXTO que um outro sistema escreveu sobre uma pessoa da conversa, antes de
+  // alguém clicar em enviar: vazar a linha entregaria ao vizinho a mensagem que
+  // a empresa ainda não mandou. A leitura é da SESSÃO do atendente (a caixa de
+  // entrada abre por `?rascunho=`), então o `agent` semeado aqui é controle
+  // positivo legítimo e a policy `for all` cobre também o UPDATE do consumo.
+  "conversation_drafts",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {

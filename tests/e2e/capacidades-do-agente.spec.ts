@@ -20,7 +20,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./helpers/test";
 
 import { TETO_TOOLS_POR_AGENTE } from "@/lib/mcp/tools/selecao-por-pacote";
 
@@ -79,6 +79,11 @@ const TOOLS_DO_SEED = [
   // Nove reproduzem a MESMA aritmética no teto novo: 9 + 17 = 26 > 25, recusa
   // por 1 vaga; desligar uma deixa 8 + 17 = 25, que é o teto exato e passa.
   //
+  // Com o teto em 26 (merge main→dev 2026-09-18: a base do `vender` cresceu),
+  // 9 + 17 = 26 CABE e a recusa some — então a DÉCIMA entra: 10 + 17 = 27,
+  // recusa por 1 vaga; desligar uma deixa 9 + 17 = 26, o teto exato, e passa.
+  // Ver `TETO_TOOLS_POR_AGENTE` e `tests/unit/teto-do-atender-bate-com-a-recusa-da-spec.test.ts`.
+  //
   // Os 17 são o pacote "Atender" DEPOIS da #528, e foi ela que mudou o número:
   // a crítica que o pacote contava (o envio de WhatsApp, que o motor descarta
   // em todo turno) deixou de ser oferecida, e com ela saiu uma vaga da conta.
@@ -97,6 +102,9 @@ const TOOLS_DO_SEED = [
   // Existe para a aritmética continuar estourando depois da #528; sem ela o
   // cenário de recusa vira um clique que sempre dá certo.
   "crm_list_knowledge_sources",
+  // A DÉCIMA: idem, para o teto 26 — sem ela, 9 + 17 = 26 cabe e a recusa some.
+  // Leitura de previsão do funil, fora de "Atender" como as outras.
+  "crm_get_pipeline_forecast",
 ];
 
 /**
@@ -111,7 +119,7 @@ async function login(page: Page, email: string): Promise<void> {
   await page.goto("/login");
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(creds.password);
-  await page.getByRole("button", { name: /entrar/i }).click();
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await page.waitForURL(/\/app(\/|$)/);
 }
 
@@ -244,6 +252,13 @@ test.describe("Configurar o que o agente pode fazer", () => {
     // faltam, e o operador faz o que a própria tela manda.
     await page.getByTestId("switch-pacote-atender").click();
     await expect(page.getByTestId("aviso-teto")).toContainText(/faltam? 1 vaga/);
+    // O aviso nasce DENTRO do cartão clicado, não no topo do seletor: com a
+    // tela rolada até um pacote lá de baixo, o aviso do topo ficava fora da
+    // vista e o clique parecia não fazer nada.
+    await expect(
+      page.getByTestId("pacote-atender").getByTestId("aviso-teto"),
+      "a recusa precisa aparecer onde a pessoa clicou",
+    ).toBeVisible();
     await expect(
       page.getByTestId("pacote-atender"),
       "recusar significa NÃO aplicar: pacote meio-ligado seria o pior dos dois mundos",
