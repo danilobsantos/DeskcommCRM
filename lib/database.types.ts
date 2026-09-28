@@ -10144,7 +10144,6 @@ export type Database = {
           p_actor: string
           p_org: string
           p_path: string
-          p_path_dark?: string
         }
         Returns: number
       }

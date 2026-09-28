@@ -40638,3 +40638,11 @@ update public.organizations o
    and o.settings #>> '{branding,logo_dark_path}' is null;
 
 notify pgrst, 'reload schema';
+
+-- ---- derruba o overload de 4 args do logo da org (migration 9010) ----
+-- A 0406 recriou a de 3 args como wrapper do tema; a de 4 da dev (9001) ficou
+-- de pé ao lado e a chamada de 3 virou PGRST203. Cai a de 4 (morta), fica a de
+-- 3 (caminho vivo). Idempotente.
+drop function if exists public.fn_definir_logo_da_organizacao(uuid, uuid, text, text);
+
+notify pgrst, 'reload schema';
