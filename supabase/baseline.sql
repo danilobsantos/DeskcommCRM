@@ -22653,7 +22653,7 @@ notify pgrst, 'reload schema';
 alter table public.agent_inbox_items
   add column if not exists resolved_at timestamptz;
 
--- ---- realtime conversation_notes (migration 0219) ----
+-- ---- realtime conversation_notes (migration 9011; era 0232, renumerada em 2026-09-28) ----
 -- Adicionado à publicação para que a UI de inbox receba atualizações em tempo real
 do $$ begin
   if exists (select 1 from pg_publication where pubname='supabase_realtime') then
