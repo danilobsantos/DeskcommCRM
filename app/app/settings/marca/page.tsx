@@ -79,13 +79,13 @@ export default async function MarcaDaOrganizacaoPage() {
           app_name: gravada?.app_name ?? null,
           accent_hex: gravada?.accent_hex ?? null,
           logo_path: gravada?.logo_path ?? null,
-          logo_path_dark: gravada?.logo_path_dark ?? null,
+          logo_dark_path: gravada?.logo_dark_path ?? null,
         }}
         instalacao={{
           app_name: linha?.app_name ?? null,
           logo_url: linha?.logo_url ?? null,
           logo_path: linha?.logo_path ?? null,
-          logo_path_dark: linha?.logo_path_dark ?? null,
+          logo_dark_path: linha?.logo_dark_path ?? null,
           accent_hex: linha?.accent_hex ?? null,
         }}
         ambiente={{

@@ -47,7 +47,7 @@ const org = {
 let contexto: { user: AuthUser; activeOrg: ActiveOrg | null } = { user: usuario, activeOrg: org };
 vi.mock("@/hooks/auth/AuthProvider", () => ({ useAuth: () => contexto }));
 
-const PADRAO: Branding = { name: DEFAULT_APP_NAME, logoUrl: null, logoUrlDark: null, initial: "D" };
+const PADRAO: Branding = { name: DEFAULT_APP_NAME, logoUrl: null, logoDarkUrl: null, initial: "D" };
 
 function renderSidebar(marca: Branding, collapsed: boolean) {
   return render(
@@ -97,7 +97,7 @@ describe("o desenho na barra lateral", () => {
   });
 
   it("com nome da instalação, segue em texto — o desenho do produto não vaza", () => {
-    renderSidebar({ name: "Sistema do Revendedor", logoUrl: null, logoUrlDark: null, initial: "S" }, false);
+    renderSidebar({ name: "Sistema do Revendedor", logoUrl: null, logoDarkUrl: null, initial: "S" }, false);
     expect(screen.getByText("Sistema do Revendedor")).toBeTruthy();
     expect(document.querySelector("svg[role=img]")).toBeNull();
   });

@@ -224,7 +224,7 @@ Em todo `call-ended`: `emit_event()` → linha em `event_log` (consumidores futu
 
 ### 5.1 Discador (iniciar chamada)
 
-Botão "Ligar" no header do contato/lead (Customer 360), visível só quando: `organizations.settings.voice_calls.enabled = true` E existe `channel_sessions` com `provider='wacalls'` e status pareado pra essa org. Clique → `POST /api/v1/voice/calls` com o telefone do contato → abre painel de chamada em andamento (§5.3) já em estado `ringing`.
+Botão "Ligar" no header do contato/lead (Customer 360) e no cabeçalho da conversa na Inbox (exceto grupos; `components/inbox/ConversationHeader.tsx`, mesmo `DialButton`), visível só quando: `organizations.settings.voice_calls.enabled = true` E existe `channel_sessions` com `provider='wacalls'` e status pareado pra essa org. Clique → `POST /api/v1/voice/calls` com o telefone do contato → abre painel de chamada em andamento (§5.3) já em estado `ringing`.
 
 ### 5.2 Chamada recebida
 
@@ -234,13 +234,24 @@ Escutado via Realtime (Supabase Realtime em `voice_calls`, filtrado por `organiz
 
 Painel fixo (não modal bloqueante — usuário deve conseguir navegar no CRM durante a ligação): duração corrida, nome do contato, botões mute/desmute e encerrar. Abre a `RTCPeerConnection` do navegador contra o endpoint de WebRTC do WaCalls (via proxy de sinalização do §4.1; mídia direta conforme §3.3). Estado sincronizado com `voice_calls.status` via Realtime — se a ligação cair do lado do WhatsApp, o painel reflete `ended`/`failed` sem esperar o usuário clicar em nada.
 
+**Uma perna de áudio por ligação, e é a da aba do gesto.** O WaCalls guarda uma ponte de áudio por chamada: a troca de SDP mais recente substitui a anterior e fecha a outra sem erro nem log (`setBridge`, `internal/app/session/session.go`). Medido em produção em 2026-09-15: o áudio abria em todo documento do usuário que recebia o `connected` pelo Realtime; duas abas trocaram SDP com 7 ms de diferença e ninguém ouviu ninguém. Regra em vigor (`hooks/voice/useVoiceCallSession.ts`):
+
+- o áudio abre **no clique** — "Chamar" logo depois de a ligação nascer, ainda tocando, e "Atender" depois do aceite —, como o cliente oficial do WaCalls (`client/src/hooks/useStartCall.ts`). `doWebRTC` só exige que a chamada exista; a crença de que a troca precisava esperar o atendimento era falsa;
+- a aba do gesto grava a marca `voz:midia` em `sessionStorage` (por aba, sobrevive ao recarregar). O `connected` só reabre o áudio na aba com a marca — o caso de recarregar no meio da ligação;
+- outra aba ou aparelho do mesmo usuário mostra "O áudio desta ligação está em outra aba" com **Ouvir aqui**, que traz a ponte para ela;
+- cada troca de SDP manda um id aleatório da aba, gravado em `voice.call_media_attached.metadata.aba`: `count(distinct metadata->>'aba')` por ligação responde quantas abas abriram áudio sem console de navegador.
+
+**O painel não depende de uma entrega única.** Enquanto há ligação, o hook confere `GET /api/v1/voice/calls/history` a cada 10 s, quando a aba volta a ficar visível, quando o canal Realtime avisa que reassinou e quando a conexão de áudio cai (o fim da ligação fecha a ponte, e é a primeira notícia que o navegador tem). A conferência só avança o ciclo de vida, nunca recua nem ressuscita ligação encerrada. Medido em 2026-09-15: o `ended` não chegou pelo Realtime e o painel ficou 66 s depois de o celular desligar.
+
+**O aviso de mídia separa as causas:** "O áudio desta ligação está em outra aba" (Ouvir aqui), "Sem áudio: o canal de voz não abriu" (Tentar de novo — rede, porta UDP) e "O áudio caiu" (Reconectar — o canal chegou a abrir). Encerrar tem trava de clique repetido, e `DELETE /api/v1/voice/calls/:id` de ligação já `ended` responde 204 sem chamar o WaCalls nem auditar.
+
 Design: aplicar `hm-design`/`frontend-design` antes de considerar pronto — não é tela de formulário, é UI de estado ao vivo (padrão de referência: discador do macOS/iOS FaceTime, não um `<Dialog>` genérico shadcn).
 
 ---
 
 ## 6. Living System Checklist (doutrina `sistema-vivo.md`)
 
-- **Entrada**: botão Ligar no Customer 360; discador acessível.
+- **Entrada**: botão Ligar no Customer 360 e no cabeçalho da conversa na Inbox (exceto grupos); discador acessível.
 - **Saída**: `voice_calls` na timeline do lead + `agent_inbox_items` pra chamada perdida.
 - **Atividade/log**: `crm_lead_activities` type `voice_call`; `event_log` via `emit_event`.
 - **Porta na navegação**: painel de chamada é overlay global, não precisa de item de menu próprio; configuração de pareamento entra em Configurações › Canais (grupo já existente em `lib/navigation/registry.ts`).

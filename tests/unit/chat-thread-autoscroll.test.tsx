@@ -1,7 +1,20 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import type { Message } from "@/lib/types/messaging";
+
+function thread() {
+  const cliente = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={cliente}>
+      <ChatThread conversationId="conv-1" />
+    </QueryClientProvider>
+  );
+}
+function renderThread() {
+  return render(thread());
+}
 
 const mockMessagesState = {
   data: {
@@ -51,6 +64,7 @@ vi.mock("@/hooks/ai/useDebugToggle", () => ({
 vi.mock("@/hooks/auth/AuthProvider", () => ({
   useActiveOrg: () => ({ role: "admin" }),
   useUser: () => ({ id: "user-1" }),
+  usePermission: () => true,
 }));
 
 import { ptBR } from "date-fns/locale";
@@ -101,19 +115,19 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
   });
 
   it("rola ao fim na primeira carga da conversa", async () => {
-    render(<ChatThread conversationId="conv-1" />);
+    renderThread();
 
     // Deve renderizar a thread com a mensagem
     expect(screen.getByText("Mensagem 1")).toBeInTheDocument();
 
-    // rAF roda a rolagem
+    // A rolagem é direta no efeito (sem rAF)
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
-    expect(scrollToSpy).toHaveBeenCalled();
+    expect(scrollIntoViewSpy).toHaveBeenCalled();
   });
 
   it("ao receber nova mensagem inbound com o usuário no rodapé, rola automaticamente para exibi-la", async () => {
-    const { rerender, container } = render(<ChatThread conversationId="conv-1" />);
+    const { rerender, container } = renderThread();
 
     await new Promise((resolve) => requestAnimationFrame(resolve));
     scrollToSpy.mockClear();
@@ -149,14 +163,14 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
       ],
     };
 
-    rerender(<ChatThread conversationId="conv-1" />);
+    rerender(thread());
 
     expect(screen.getByText("Nova mensagem do cliente")).toBeInTheDocument();
 
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
     // Como estava no rodapé, DEVE rolar suavemente para exibir a nova mensagem
-    expect(scrollToSpy).toHaveBeenCalledWith(
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         behavior: "smooth",
       }),
@@ -164,7 +178,7 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
   });
 
   it("não rola se o usuário rolou para cima lendo mensagens antigas e chega mensagem inbound", async () => {
-    const { rerender, container } = render(<ChatThread conversationId="conv-1" />);
+    const { rerender, container } = renderThread();
 
     await new Promise((resolve) => requestAnimationFrame(resolve));
     scrollToSpy.mockClear();
@@ -200,7 +214,7 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
       ],
     };
 
-    rerender(<ChatThread conversationId="conv-1" />);
+    rerender(thread());
 
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
@@ -209,7 +223,7 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
   });
 
   it("rola para o fim se o usuário enviou uma mensagem outbound, mesmo que estivesse lendo acima", async () => {
-    const { rerender, container } = render(<ChatThread conversationId="conv-1" />);
+    const { rerender, container } = renderThread();
 
     await new Promise((resolve) => requestAnimationFrame(resolve));
     scrollToSpy.mockClear();
@@ -245,11 +259,11 @@ describe("ChatThread - rolagem automática ao receber mensagens", () => {
       ],
     };
 
-    rerender(<ChatThread conversationId="conv-1" />);
+    rerender(thread());
 
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
     // Como foi envio próprio, DEVE rolar para o rodapé
-    expect(scrollToSpy).toHaveBeenCalled();
+    expect(scrollIntoViewSpy).toHaveBeenCalled();
   });
 });

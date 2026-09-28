@@ -5,6 +5,8 @@
  */
 
 import type { InboxKind } from "@/lib/agent-engine/db/repository";
+import { traduzir } from "@/lib/i18n/dicionario";
+import type { Idioma } from "@/lib/i18n/idiomas";
 
 export type AgentInboxSeverity = "info" | "warn" | "critical";
 
@@ -46,6 +48,10 @@ export const KIND_LABEL = {
   // chegou. O motivo técnico fica no corpo do aviso.
   message_send_stuck: "Uma resposta ficou presa e não chegou ao cliente",
   midia_nao_lida: "O agente não conseguiu ler uma foto ou áudio que o cliente enviou",
+  // Diz o que o CLIENTE vive, não a configuração: do lado de lá as mensagens
+  // chegam e ninguém responde. "Modo de teste sem número autorizado" descreve
+  // o campo; "a IA não responde ninguém" é o que faz o operador agir.
+  canal_mudo_sem_numero: "Um canal está em modo de teste — a IA não responde ninguém nele",
   // Diz o que o CLIENTE está esperando, não o que o sistema deixou de gravar.
   // "Promessa não cumprida" é a única frase que faz o dono do negócio agir: do
   // lado de lá existe uma pessoa que ouviu um compromisso e está aguardando.
@@ -74,6 +80,17 @@ export const KIND_LABEL = {
   // conseguiu. O motivo cru do upstream (`user_ended`, `do_not_disturb`) nunca
   // chega à tela — vira frase de gente no corpo do aviso, escrito pelo worker.
   voice_call_missed: "Alguém ligou e ninguém atendeu",
+  // Diz o que NÃO aconteceu do ponto de vista de quem opera — "não chegou ao
+  // WhatsApp da equipe" —, e nunca "a entrega falhou": quem lê precisa entender
+  // que o caso continua aberto e que ninguém foi avisado por fora do CRM. O
+  // código do erro (`canal_desconectado`, `teto_diario_do_numero`) vira frase no
+  // CORPO do aviso, escrito pelo handler; aqui é só o título.
+  aviso_de_caso_nao_entregue: "Um aviso de atendimento não chegou ao WhatsApp da equipe",
+  // Diz o que o fluxo NÃO está fazendo, não o que falta no cadastro. "Sem
+  // agente vinculado" descreve a linha do banco; do lado de lá existe gente que
+  // devia estar recebendo mensagem e não recebe, e é isso que faz alguém abrir
+  // o aviso. O passo que conserta fica no corpo.
+  followup_sem_agente: "Um follow-up está publicado e não está disparando",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 
@@ -119,11 +136,17 @@ export type PromessaSemDono =
 export function copyDaPromessaSemDono(
   quantas: number,
   porque: PromessaSemDono,
+  /**
+   * O idioma da ORGANIZAÇÃO. O aviso é LINHA gravada — a Central mostra como
+   * veio, sem passar por `t()` —, então é na escrita que ele ganha o idioma de
+   * quem vai ler, como o aviso de passagem para pessoa já fazia.
+   */
+  idioma: Idioma = "pt-BR",
 ): { title: string; body: string } {
   const title =
     quantas === 1
-      ? "O assistente prometeu algo ao cliente e ninguém ficou responsável"
-      : `${quantas} promessas ao cliente sem ninguém responsável`;
+      ? traduzir("O assistente prometeu algo ao cliente e ninguém ficou responsável", idioma)
+      : `${quantas} ${traduzir("promessas ao cliente sem ninguém responsável", idioma)}`;
 
   const CORPO: Record<PromessaSemDono, string> = {
     operador_sem_ferramentas:
@@ -141,5 +164,5 @@ export function copyDaPromessaSemDono(
       "combinado e decida quem faz.",
   };
 
-  return { title, body: CORPO[porque] };
+  return { title, body: traduzir(CORPO[porque], idioma) };
 }

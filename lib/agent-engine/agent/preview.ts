@@ -5,7 +5,7 @@ import type { ToolSet } from '../edge/llm/run-model-call';
 import type { LeadContext, LeadContextResult } from '../edge/crm/get-lead-context';
 import type { PublishedAgentConfig } from './agent-config';
 import type { LeadCheckpointRow } from './inbound-turn';
-import { temFerramentaDeAgenda } from './inbound-turn';
+import { ferramentasDeAgendaDoAgente, temFerramentaDeAgenda } from './inbound-turn';
 import {
   evaluateBeforeSend,
   type GateContext,
@@ -123,17 +123,24 @@ export async function previewGateContext(
     // quem afina o prompt testar contra outro sistema.
     agenda: {
       active: temFerramentaDeAgenda(p.agent.toolIds),
-      podeMarcar: p.agent.toolIds.includes('crm_book_appointment'),
+      ferramentas: ferramentasDeAgendaDoAgente(p.agent.toolIds),
       toolCalledThisTurn: false,
     },
     internalVocabularyEnforced: true,
   };
 }
-const SCENARIO_READS = new Set([
+export const SCENARIO_READS = new Set([
   'crm_list_pipelines',
   'crm_list_stages',
-  'crm_list_appointment_types',
+  'crm_list_event_types',
   'crm_find_free_slots',
+  'crm_describe_external_data',
+  'crm_query_external_data',
+  // Catálogo e acervo são material da ORGANIZAÇÃO, não de um contato: sem eles o
+  // Testar (que roda sem contato) não responde preço nem agenda e o agente cai
+  // em "vou confirmar e te retorno". Dado de contato/lead continua fora daqui.
+  'crm_search_products',
+  'crm_search_knowledge',
 ]);
 /** Unknown tools fail closed. A write proposal never calls its original execute. */
 export function applyPreviewPolicy(

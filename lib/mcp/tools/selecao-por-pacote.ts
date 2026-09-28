@@ -48,18 +48,40 @@ import { entraPorPacote, type ToolBundle, type ToolRisk } from "./pacotes";
  * escolhido no olho — subir mais seria apostar contra um argumento que continua
  * de pé só porque ninguém o mediu.
  *
+ * ═══ Por que 26, e não mais os 25 de antes (merge main→dev, 2026-09-18) ═════
+ *
+ * A base do `vender` foi 20→21: `crm_find_and_book_appointment` (upstream) e
+ * `crm_list_providers` (profissionais externos da dev, migration 9003) entraram
+ * no pacote. Medido no catálogo do merge: atender 35, escalar 33, organizar 37,
+ * evoluir 26, reter 27, contra o teto de 25 — NENHUM segundo pacote cabia a
+ * partir do agente que nasce hoje, e o guardião D3
+ * (`pacote-reserva-vaga-da-critica`) fechou. 26 é o menor passo que reabre:
+ * `evoluir` exige exatamente 26. Margem zero — o próximo +1 no `vender` fecha
+ * de novo, e aí a decisão volta (teto ou catálogo).
+ *
  * ⚠️ O QUE FALTA, e é honesto dizer: não há instrumento para observar a
  * degradação que a heurística prevê. O lugar de observá-la é
  * `app/api/v1/ai/agents/[id]/tool-usage` e o log de invocação do run, com
  * "ferramenta errada escolhida" como sinal. Quem for subir de novo mede antes.
  */
-export const TETO_TOOLS_POR_AGENTE = 25;
+export const TETO_TOOLS_POR_AGENTE = 26;
 
 /** O mínimo que a regra precisa saber de uma capacidade. */
 export interface CapacidadeSelecionavel {
   name: string;
   risco: ToolRisk;
   pacotes: ReadonlyArray<ToolBundle>;
+  /**
+   * `false` = o MOTOR descarta (capacidade do harness, ver
+   * `lib/mcp/tools/ferramentas-do-harness.ts`).
+   *
+   * O pacote não pode oferecer o que o turno joga fora: era assim que o dono
+   * ligava "Atender e responder", via `crm_send_whatsapp_message` nas críticas e
+   * `crm_request_human_handoff` entrar sozinho pelo toggle de escalar, e o engine
+   * descartava as duas em silêncio. Ausente = marcável, porque quem monta uma
+   * capacidade à mão (teste, catálogo de terceiro) não tem como saber disto.
+   */
+  marcavel?: boolean;
 }
 
 export type EstadoPacote = "ligado" | "parcial" | "desligado";
@@ -68,7 +90,7 @@ function doPacote(
   catalogo: ReadonlyArray<CapacidadeSelecionavel>,
   pacote: ToolBundle,
 ): CapacidadeSelecionavel[] {
-  return catalogo.filter((c) => c.pacotes.includes(pacote));
+  return catalogo.filter((c) => c.pacotes.includes(pacote) && c.marcavel !== false);
 }
 
 /** As que o toggle do pacote liga sozinho — tudo que não é `critico`. */

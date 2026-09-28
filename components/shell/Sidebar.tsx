@@ -12,7 +12,6 @@ import { VersionFooter } from "@/components/shell/VersionFooter";
 import { LogotipoDoProduto, SimboloDoProduto } from "@/components/branding/MarcaDoProduto";
 import { marcaEhADoProduto } from "@/lib/branding";
 import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
-import { useTheme } from "@/lib/theme";
 import { GRUPO_NO_RODAPE, sidebarGroups } from "@/lib/navigation/registry";
 
 const CHAVE_GRUPOS_FECHADOS = "sidebar-grupos-fechados";
@@ -47,6 +46,7 @@ export function SidebarContent({
     activeOrg?.role ?? null,
     activeOrg?.interface_settings,
     activeOrg?.providers_enabled ?? false,
+    activeOrg?.modulos_ligados ?? [],
   );
   // Configurações sai da área que rola e vai para o rodapé fixo: medido em
   // 1280x768, ele caía fora da dobra mesmo em telas de 1080px.
@@ -103,19 +103,22 @@ export function SidebarContent({
    * rota de `activeOrg`, e os dois lados leem o mesmo objeto por construção.
    */
   const nome = activeOrg?.marca?.nome ?? brand.name;
-  const { resolvedTheme } = useTheme();
-  // Precedência do logo por TEMA, com o logo do TENANT à frente do da instalação:
-  // quem personalizou a conta usa o logo dele nos dois temas; o logo do /admin
-  // (instalação) só aparece para quem NÃO personalizou. Antes, no tema escuro, uma
-  // organização com só o logo claro caía no logo escuro da instalação — a logo
-  // "nem sempre" acompanhava o tema. `|| null` mantém a regra de que string vazia
-  // é AUSÊNCIA (mesma semântica de `resolveBranding` e `primeiroDefinido`,
-  // e do `||` do upstream: com `??` um `""` apagaria o logo do revendedor).
-  const orgLight = activeOrg?.marca?.logoUrl || null;
-  const orgDark = activeOrg?.marca?.logoUrlDark || null;
-  const logoLight = orgLight ?? brand.logoUrl;
-  const logoDark = orgDark ?? orgLight ?? brand.logoUrlDark ?? brand.logoUrl;
-  const logo = resolvedTheme === "dark" ? (logoDark ?? logoLight) : logoLight;
+  /**
+   * O mesmo desenho para o LOGO — e é este par de linhas que fecha o caminho do
+   * `logo_url` gravado até a tela.
+   *
+   * `||` e não `??`: vazio é AUSÊNCIA de logo, não "logo em branco". É a regra
+   * que `resolveBranding` e `primeiroDefinido` já aplicam nas camadas de baixo, e
+   * com `??` um `""` vindo de cima apagaria o logo do revendedor em vez de
+   * descer para ele — que é o contrário do que a precedência por campo promete.
+   */
+  const logo = activeOrg?.marca?.logoUrl || brand.logoUrl;
+  const logoEscuro =
+    activeOrg?.marca?.logoDarkUrl !== undefined
+      ? activeOrg.marca.logoDarkUrl
+      : activeOrg?.marca?.logoUrl
+        ? null
+        : brand.logoDarkUrl;
   // Só quando NINGUÉM — nem a instalação, nem a organização — pôs marca própria:
   // é a condição de `lib/branding.ts`, avaliada sobre o que a barra vai mostrar.
   const marcaDoProduto = marcaEhADoProduto({ name: nome, logoUrl: logo ?? null });
@@ -128,19 +131,41 @@ export function SidebarContent({
           collapsed ? "justify-center" : "justify-start",
         )}
       >
-        {logo && !collapsed ? (
-          // SEM moldura clara de propósito (divergência assumida do upstream #659):
-          // aqui há UMA ARTE POR TEMA (`logo` acima já é a do tema em vigor, com
-          // fallback em cascata) — a premissa do chip ("uma arte só, pensada
-          // para fundo claro") não vale, e a moldura branca virava moldura de
-          // sobra sobre logo já pensado para o escuro.
-          // <img> em vez de next/image de propósito: a URL vem de quem hospeda
-          // (banco ou .env), e next/image exige allowlist de domínios fechada em
-          // build — a imagem pré-buildada rejeitaria o domínio do self-hoster.
-          // Altura fixa e largura livre porque a arte enviada tem proporção
-          // desconhecida; forçar as duas distorceria o logo de quem configurou.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logo} alt={nome} className="h-7 w-auto max-w-[10rem] object-contain" />
+        {(logo || logoEscuro) && !collapsed ? (
+          // Sem arte própria para o escuro, preserva a proteção de contraste.
+          <div
+            className={cn(
+              "rounded-md",
+              !logoEscuro && "dark:bg-white dark:px-2 dark:py-1 dark:shadow-sm",
+            )}
+          >
+            {/* <img> em vez de next/image de propósito: a URL vem de quem hospeda
+              (banco ou .env), e next/image exige allowlist de domínios fechada em
+              build — a imagem pré-buildada rejeitaria o domínio do self-hoster.
+              Altura fixa e largura livre porque a arte enviada tem proporção
+              desconhecida; forçar as duas distorceria o logo de quem configurou. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {logo ? (
+              <img
+                src={logo}
+                alt={nome}
+                className={cn(
+                  "h-7 w-auto max-w-[10rem] object-contain",
+                  logoEscuro && "dark:hidden",
+                )}
+              />
+            ) : (
+              <span className="dark:hidden">{nome}</span>
+            )}
+            {logoEscuro ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoEscuro}
+                alt={nome}
+                className="hidden h-7 w-auto max-w-[10rem] object-contain dark:block"
+              />
+            ) : null}
+          </div>
         ) : marcaDoProduto ? (
           // O desenho do produto, inline (ver `components/branding/MarcaDoProduto.tsx`):
           // logotipo com a barra aberta, só o símbolo com ela recolhida.
