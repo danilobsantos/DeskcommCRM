@@ -131,9 +131,9 @@ describe("com SUPABASE_SERVER_URL preenchida, os LINKS continuam na origem públ
     const fonte = readFileSync(join(__dirname, "..", "..", "proxy.ts"), "utf8");
 
     expect(fonte).toContain("fetchDoServidor(");
-    expect(fonte).toContain(
-      "urlDoSupabaseNoServidor(env.SUPABASE_SERVER_URL, env.NEXT_PUBLIC_SUPABASE_URL)",
-    );
+    // O fork aceita SUPABASE_INTERNAL_URL como fallback — a forma exata varia.
+    expect(fonte).toContain("urlDoSupabaseNoServidor(");
+    expect(fonte).toContain("env.SUPABASE_SERVER_URL");
     expect(fonte).toContain("env.NEXT_PUBLIC_SUPABASE_URL,");
   });
 });

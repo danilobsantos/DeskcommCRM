@@ -90,8 +90,17 @@ import { entraPorPacote, type ToolBundle, type ToolRisk } from "./pacotes";
  * argumento (a heurística de degradação) que ninguém mediu, que é exatamente o
  * que o bloco ⚠️ acima diz. O dia em que o `evoluir` exigir 28, o passo volta a
  * ser ele.
+ *
+ * ═══ 27 → 28 (merge main→dev, 2026-09-29): esse dia chegou no fork ═══════════
+ *
+ * O `vender` do fork carrega `crm_list_providers` (profissionais externos,
+ * bloco "Por que 26" acima) que o upstream não tem; somado às 2 da proposta
+ * comercial, o `evoluir` exige 28 no catálogo do merge (reter 31, escalar 36,
+ * atender 39, organizar 42 — medido em `pacote-reserva-vaga-da-critica`).
+ * 28 é o menor passo que reabre, pelo mesmo degrau da mesma régua. Margem zero
+ * de novo — e o seed da spec do `atender` volta a exceder em exatamente 1.
  */
-export const TETO_TOOLS_POR_AGENTE = 27;
+export const TETO_TOOLS_POR_AGENTE = 28;
 
 /** O mínimo que a regra precisa saber de uma capacidade. */
 export interface CapacidadeSelecionavel {

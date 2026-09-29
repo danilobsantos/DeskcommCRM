@@ -390,7 +390,12 @@ describe("a variável é lida nos três pontos de servidor, e nowhere menos", ()
     for (const arquivo of pontosDeLeitura) {
       const fonte = readFileSync(arquivo, "utf8");
       expect(fonte, `${arquivo} não resolve a URL do servidor`).toContain(
-        "urlDoSupabaseNoServidor(env.SUPABASE_SERVER_URL, env.NEXT_PUBLIC_SUPABASE_URL)",
+        "urlDoSupabaseNoServidor(",
+      );
+      // O fork aceita SUPABASE_INTERNAL_URL (alias legado do instalador
+      // single-server) como fallback — a forma exata varia, o resolvedor não.
+      expect(fonte, `${arquivo} não lê SUPABASE_SERVER_URL`).toContain(
+        "env.SUPABASE_SERVER_URL",
       );
     }
   });
