@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { loadAuthUser } from "@/lib/auth/server";
 import { marcaDaInstalacao } from "@/lib/branding/instalacao";
+import { logoDaCamada } from "@/lib/branding/logo";
 import { REGUA_DO_PRODUTO } from "@/lib/branding/regua-do-produto";
 import { camadaDaInstalacao, camadaDoAmbiente, resolverMarca } from "@/lib/branding/resolve";
 import { env } from "@/lib/env";
@@ -101,7 +102,9 @@ export default async function Page() {
         }}
         nomeEmVigor={marca.name}
         logoEmVigor={marca.logoUrl}
-        logoEscuroEmVigor={marca.logoDarkUrl ?? null}
+        logoEscuroEmVigor={marca.logoDarkUrl}
+        // Mesma conversão caminho → URL do logo; `null` sem arquivo subido.
+        iconeDaAba={logoDaCamada(linha?.favicon_path, null)}
         logoDoAmbiente={semOArquivo.logoUrl}
         logoDoAmbienteDark={semOArquivo.logoDarkUrl ?? null}
         origens={marca.origens}

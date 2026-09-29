@@ -70,15 +70,31 @@ const schema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: requiredAlways("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
   SUPABASE_SERVICE_ROLE_KEY: requiredAlways("SUPABASE_SERVICE_ROLE_KEY"),
   /**
-   * URL interna do Supabase para chamadas server-side (Server Actions, API
-   * Routes, Workers). Quando definida, `lib/supabase/server.ts` e `admin.ts`
-   * usam esta URL em vez de NEXT_PUBLIC_SUPABASE_URL — eliminando a latência
-   * Brasil→Europa em chamadas internas.
+   * Endereço do Supabase PARA O SERVIDOR, e só para ele (issue #1082).
    *
-   * Exemplo: "http://kong:8000" (rede Docker interna).
-   * Ausente = usa NEXT_PUBLIC_SUPABASE_URL (comportamento anterior).
+   * Numa instalação com o Supabase na mesma rede (Kong/self-host, `http://kong:8000`),
+   * o caminho curto existe e não precisa sair para a internet — mas colocá-lo na
+   * `NEXT_PUBLIC_*` o publicaria para o navegador. Esta variável é a bifurcação:
+   * preenchida, o servidor fala com o endereço interno; vazia, vale a pública, e
+   * é o que toda instalação existente já faz.
+   *
+   * `z.string()` cru, NUNCA `.url()` e NUNCA `required()`, pelo motivo escrito ao
+   * lado de `APP_ACCENT_HEX` e `SIGNUP_MODE` mais abaixo: `lib/env.ts` lança na
+   * IMPORTAÇÃO do módulo, que no Next é a primeira requisição, e o healthcheck do
+   * contêiner é probe TCP — um `.url()` aqui transformaria um `.env` com espaço
+   * sobrando no derrubador do produto inteiro, com o Docker mostrando `healthy` e
+   * 100% das requisições em 500. Quem interpreta (recusa o que não é endereço,
+   * tira barra final e avisa) é `urlDoSupabaseNoServidor`, em
+   * `lib/supabase/url-do-servidor.ts`.
    */
-  SUPABASE_INTERNAL_URL: z.string().url().optional().default(""),
+  SUPABASE_SERVER_URL: z.string().optional().default(""),
+  /**
+   * Alias legado do fork (instalador single-server escreve esta).
+   * Vale como fallback quando SUPABASE_SERVER_URL está vazia — ver
+   * `lib/supabase/server.ts`, `admin.ts` e `proxy.ts`.
+   * Mantida como string crua pelo mesmo motivo acima (nunca `.url()`).
+   */
+  SUPABASE_INTERNAL_URL: z.string().optional().default(""),
 
   // Cron / interno
   INTERNAL_SECRET: required("INTERNAL_SECRET"),
