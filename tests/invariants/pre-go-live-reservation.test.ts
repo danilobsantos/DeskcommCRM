@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { metadataInicialDoCanal } from "../../lib/ai/elegibilidade/pre-go-live";
+import { TETO_NOME_DE_SESSAO_WAHA } from "../../lib/channels/nome-da-sessao";
 
 if (!process.env.TEST_DB_CONTAINER) throw new Error("Rode via pnpm test:db");
 const pool = new Pool({ connectionString: `postgresql://postgres:postgres@127.0.0.1:${process.env.TEST_DB_PORT}/postgres` });
@@ -38,7 +39,7 @@ describe("reserva WAHA preserva pré-go-live da main", () => {
     // a 0237 do upstream gerava `org_<8>_<32>` e também cabia, mas a cadeia
     // termina na 9005). O que este invariante prende é teto + estabilidade.
     expect(first.channel.waha_session_name).toMatch(/^org_[0-9a-f]{8}_[0-9a-f]{12}$/);
-    expect(first.channel.waha_session_name.length).toBeLessThanOrEqual(54);
+    expect(first.channel.waha_session_name.length).toBeLessThanOrEqual(TETO_NOME_DE_SESSAO_WAHA);
     await pool.query("select fn_finish_channel_connection($1,$2,$3,'FAILED','connection_repair_required')",[org,first.receipt_id,first.lease_token]);
     // Mudança explícita do operador não pode ser desfeita por retry de conexão.
     const mode=onboarding?"pre_go_live":"open";
