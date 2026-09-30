@@ -4,12 +4,14 @@ import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
 import { useT } from "@/hooks/i18n/useT";
 
-import { differenceInMinutes, format } from "date-fns";
+import { addDays, differenceInMinutes, format, subDays } from "date-fns";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
+import { useDiasBloqueados } from "@/hooks/agenda/useDiasBloqueados";
 import { useHorariosLivres } from "@/hooks/agenda/useHorariosLivres";
 import { useRemarcarAgendamento } from "@/hooks/agenda/useRemarcarAgendamento";
+import { mapaDeDiasBloqueados } from "@/lib/agenda/dias-bloqueados";
 import type { MotivoDaGradeTravada } from "@/lib/agenda/grade-interativa";
 import { cn } from "@/lib/utils";
 
@@ -128,6 +130,33 @@ export function AgendaInterativa({
   }, [horarios]);
 
   /**
+   * Os dias fechados do MESMO dono da consulta acima — o selo "Fechado" da
+   * grade. Janela com 1 dia de folga de cada lado: `exception_date` é data
+   * civil no fuso da jornada e o recorte é instante, então a borda convertida
+   * pode cair no dia vizinho; buscar a mais e filtrar a menos é mais barato
+   * que acertar o fuso aqui (o motor já aplica o dele, #878).
+   */
+  const temDono = Boolean(providerId ?? ownerUserId);
+  const { data: excecoes } = useDiasBloqueados(
+    temDono
+      ? {
+          de: format(subDays(new Date(recorte.de), 1), "yyyy-MM-dd"),
+          ate: format(addDays(new Date(recorte.ate), 1), "yyyy-MM-dd"),
+          ...(providerId ? { provider_id: providerId } : {}),
+          ...(ownerUserId ? { owner_user_id: ownerUserId } : {}),
+        }
+      : null,
+  );
+  const diasBloqueados = React.useMemo(
+    () =>
+      mapaDeDiasBloqueados(
+        excecoes ?? [],
+        temDono ? { provider_id: providerId, owner_user_id: ownerUserId } : null,
+      ),
+    [excecoes, temDono, providerId, ownerUserId],
+  );
+
+  /**
    * Por que a grade está travada — a MESMA ordem do painel de marcação, e de
    * propósito: as duas telas do mesmo produto respondendo diferente à mesma
    * pergunta é o que faz alguém abrir chamado dizendo que a agenda "às vezes
@@ -224,7 +253,7 @@ export function AgendaInterativa({
     : "";
 
   return (
-    <div className={cn("flex min-h-0 flex-col gap-2", className)}>
+    <div className={cn("flex flex-col gap-2", className)}>
       {horarios?.google_cobertura_parcial && <p role="status" className="text-xs text-warning">{t("Ocupação do Google ainda não verificada neste período.")}</p>}
       {tipos.length > 1 && (
         <div
@@ -340,7 +369,10 @@ export function AgendaInterativa({
         pessoas={pessoas}
         agendamentos={desenhados}
         onAbrirAgendamento={onAbrirAgendamento}
-        className="min-h-0 flex-1"
+        // SEM `min-h-0`: a grade aparece inteira e quem rola é a página
+        // (ver o comentário na raiz da grade).
+        className="flex-1"
+        diasBloqueados={diasBloqueados}
         interacao={
           tipo && onMarcarEm
             ? {

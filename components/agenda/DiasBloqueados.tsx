@@ -34,12 +34,16 @@ import { apiClient } from "@/lib/api/client";
 
 type Excecao = {
   id: string;
+  user_id: string | null;
+  provider_id: string | null;
   exception_date: string;
   is_unavailable: boolean;
   start_minute: number;
   end_minute: number;
   reason: string | null;
 };
+
+type ProfissionalOpcao = { id: string; nome: string };
 
 const DIA_INTEIRO = { start_minute: 0, end_minute: 1440 };
 
@@ -82,18 +86,47 @@ function emMinutos(hhmm: string): number {
   return Number(h) * 60 + Number(m);
 }
 
-export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
+/**
+ * Os dias CORRIDOS de `inicio` até `fim`, inclusive — o "período" de umas
+ * férias ou de um congresso. Mesmo truque de meio-dia UTC do semanal acima:
+ * a aritmética aqui é de DIAS, não de instantes.
+ */
+function datasConsecutivas(inicio: string, fim: string, teto: number): string[] {
+  const limite = new Date(`${fim}T12:00:00Z`).getTime();
+  const datas: string[] = [];
+  for (let d = new Date(`${inicio}T12:00:00Z`); d.getTime() <= limite; d.setUTCDate(d.getUTCDate() + 1)) {
+    if (datas.length >= teto) break;
+    datas.push(d.toISOString().slice(0, 10));
+  }
+  return datas;
+}
+
+export function DiasBloqueados({
+  podeEditar,
+  profissionais,
+}: {
+  podeEditar: boolean;
+  /**
+   * Com a lista, vira o fechamento de PROFISSIONAL externo: só fecha (sem o
+   * modo abrir), para um ou mais selecionados, num dia ou num período corrido.
+   * Sem ela, é o comportamento original — a agenda do próprio usuário.
+   */
+  profissionais?: ProfissionalOpcao[];
+}) {
   const t = useT();
   const qc = useQueryClient();
+  const modoProfissional = profissionais !== undefined;
   const [data, setData] = useState("");
   const [motivo, setMotivo] = useState("");
   const [modo, setModo] = useState<"fechar" | "abrir">("fechar");
   const [de, setDe] = useState("08:00");
   const [ate, setAte] = useState("12:00");
   const [repetirAte, setRepetirAte] = useState("");
+  const [atePeriodo, setAtePeriodo] = useState("");
+  const [selecionados, setSelecionados] = useState<string[]>([]);
   const [resultado, setResultado] = useState<{ criados: number; pulados: number } | null>(null);
 
-  const abrindo = modo === "abrir";
+  const abrindo = !modoProfissional && modo === "abrir";
   // O CHECK do banco é `end_minute > start_minute`; barrar aqui troca um 422 por
   // um botão que não deixa errar.
   const faixaInvalida = abrindo && emMinutos(ate) <= emMinutos(de);
@@ -104,7 +137,13 @@ export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
       (await apiClient.get<{ data: Excecao[] }>("/api/v1/agenda/excecoes")).data,
   });
 
-  const lista = query.data ?? [];
+  // A mesma lista do GET serve aos dois modos; cada um só enxerga as linhas do
+  // seu dono — sem isso, o fechamento do dentista apareceria na tela "minha
+  // agenda" e vice-versa.
+  const lista = (query.data ?? []).filter((e) =>
+    modoProfissional ? e.provider_id != null : e.provider_id == null,
+  );
+  const nomeDoProfissional = new Map((profissionais ?? []).map((p) => [p.id, p.nome]));
 
   const invalidar = () => {
     // A agenda também muda: um dia fechado tira horários da consulta.
@@ -118,30 +157,50 @@ export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
         : // Dia FECHADO é sempre inteiro — fechar meio dia é o caso de quem ABRE
           // o outro meio, e esse caminho é o de cima.
           DIA_INTEIRO;
-      const alvos = repetirAte ? datasSemanais(data, repetirAte, TETO_DA_REPETICAO) : [data];
+      const dias = modoProfissional
+        ? atePeriodo && atePeriodo >= data
+          ? datasConsecutivas(data, atePeriodo, TETO_DA_REPETICAO)
+          : [data]
+        : repetirAte
+          ? datasSemanais(data, repetirAte, TETO_DA_REPETICAO)
+          : [data];
+      // Um pedido por (dono, dia): no modo profissional, um por profissional
+      // por dia. O lote continua sendo da tela — ver comentário abaixo.
+      const donos = modoProfissional ? selecionados : [null];
+      const alvos: Array<{ dono: string | null; dia: string }> = [];
+      for (const dono of donos) for (const dia of dias) alvos.push({ dono, dia });
 
       // O QUE JÁ EXISTE É PULADO, e não recusado.
       //
       // A tabela não tem unicidade por data — de propósito, porque um dia pode
       // ter duas faixas abertas (manhã num lugar, tarde noutro). Sem esta
       // conferência, repetir duas vezes o mesmo trimestre dobraria cada linha
-      // em silêncio, e o dono só descobriria pela lista crescendo.
+      // em silêncio, e o dono só descobriria pela lista crescendo. A chave leva
+      // o profissional junto (o mesmo feriado vale para cada um separado); no
+      // modo usuário ela é vazia dos dois lados, como sempre foi — incluir
+      // `user_id` aqui quebraria a dedupe em produção, onde as linhas o têm.
+      const chave = (dono: string | null, e: Pick<Excecao, "provider_id" | "exception_date" | "start_minute" | "end_minute" | "is_unavailable">) =>
+        `${dono ?? e.provider_id ?? ""}|${e.exception_date}|${e.start_minute}|${e.end_minute}|${e.is_unavailable}`;
       const jaTem = new Set(
         lista
           .filter((e) => e.is_unavailable === !abrindo)
-          .map((e) => `${e.exception_date}|${e.start_minute}|${e.end_minute}`),
+          .map((e) => chave(null, e)),
       );
       const novos = alvos.filter(
-        (d) => !jaTem.has(`${d}|${faixa.start_minute}|${faixa.end_minute}`),
+        (a) =>
+          !jaTem.has(
+            `${a.dono ?? ""}|${a.dia}|${faixa.start_minute}|${faixa.end_minute}|${!abrindo}`,
+          ),
       );
 
       // Em série, e não em paralelo: são poucas requisições e o servidor de
       // quem se auto-hospeda é pequeno. Cada dia é uma linha real e uma linha
       // de auditoria — o lote é da tela, não do banco.
-      for (const dia of novos) {
+      for (const { dono, dia } of novos) {
         await apiClient.post("/api/v1/agenda/excecoes", {
           exception_date: dia,
           is_unavailable: !abrindo,
+          ...(dono ? { provider_id: dono } : {}),
           ...faixa,
           ...(motivo.trim() ? { reason: motivo.trim() } : {}),
         });
@@ -152,6 +211,7 @@ export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
       setData("");
       setMotivo("");
       setRepetirAte("");
+      setAtePeriodo("");
       setResultado(r);
       invalidar();
     },
@@ -164,34 +224,66 @@ export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
     onError: showApiError,
   });
 
+  // Fechar para N profissionais exige escolher QUEM: sem ninguém marcado o
+  // botão não deixa errar (padrão começa vazio de propósito — fechar a agenda
+  // de todo mundo sem querer não se desfaz com um clique).
+  const semAlvo = modoProfissional && selecionados.length === 0;
+
+  const alternarProfissional = (id: string) =>
+    setSelecionados((atuais) =>
+      atuais.includes(id) ? atuais.filter((x) => x !== id) : [...atuais, id],
+    );
+
   return (
     <section className="space-y-3 rounded-xl border p-4" data-testid="dias-bloqueados">
       <h2 className="font-semibold">{t("Dias fora da rotina")}</h2>
       <p className="text-sm text-text-muted">
-        {t(
-          "Feche um dia (feriado, férias, viagem) ou abra um dia que a sua jornada semanal não cobre. Em dia fechado o sistema deixa de oferecer horários, e o que já estava marcado continua marcado, para você decidir o que fazer com cada um.",
-        )}
+        {modoProfissional
+          ? t(
+              "Feche um dia ou um período (feriado, férias, motivo particular) para um ou mais profissionais. Em dia fechado a IA deixa de oferecer horários com ele, e o que já estava marcado continua marcado, para você decidir o que fazer com cada um.",
+            )
+          : t(
+              "Feche um dia (feriado, férias, viagem) ou abra um dia que a sua jornada semanal não cobre. Em dia fechado o sistema deixa de oferecer horários, e o que já estava marcado continua marcado, para você decidir o que fazer com cada um.",
+            )}
       </p>
 
       {podeEditar ? (
         <div className="flex flex-wrap items-end gap-2">
+          {modoProfissional ? (
+            <fieldset className="block">
+              <span className="block text-sm">{t("Profissionais")}</span>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 rounded-md border p-2">
+                {(profissionais ?? []).map((p) => (
+                  <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selecionados.includes(p.id)}
+                      onChange={() => alternarProfissional(p.id)}
+                    />
+                    {p.nome}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ) : (
+            <label className="block">
+              <span className="block text-sm">{t("O que fazer")}</span>
+              <select
+                aria-label={t("O que fazer")}
+                className="mt-1 rounded-md border p-2"
+                data-testid="modo-do-dia"
+                value={modo}
+                onChange={(e) => setModo(e.target.value === "abrir" ? "abrir" : "fechar")}
+              >
+                <option value="fechar">{t("Fechar o dia")}</option>
+                <option value="abrir">{t("Abrir para atendimento")}</option>
+              </select>
+            </label>
+          )}
           <label className="block">
-            <span className="block text-sm">{t("O que fazer")}</span>
-            <select
-              aria-label={t("O que fazer")}
-              className="mt-1 rounded-md border p-2"
-              data-testid="modo-do-dia"
-              value={modo}
-              onChange={(e) => setModo(e.target.value === "abrir" ? "abrir" : "fechar")}
-            >
-              <option value="fechar">{t("Fechar o dia")}</option>
-              <option value="abrir">{t("Abrir para atendimento")}</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="block text-sm">{t("Dia")}</span>
+            <span className="block text-sm">{modoProfissional ? t("Dia inicial") : t("Dia")}</span>
             <input
-              aria-label={t("Dia")}
+              aria-label={modoProfissional ? t("Dia inicial") : t("Dia")}
               className="mt-1 rounded-md border p-2"
               type="date"
               value={data}
@@ -236,24 +328,38 @@ export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
               onChange={(e) => setMotivo(e.target.value)}
             />
           </label>
-          <label className="block">
-            <span className="block text-sm">{t("Repetir toda semana até (opcional)")}</span>
-            <input
-              aria-label={t("Repetir toda semana até (opcional)")}
-              className="mt-1 rounded-md border p-2"
-              type="date"
-              min={data || undefined}
-              value={repetirAte}
-              onChange={(e) => setRepetirAte(e.target.value)}
-            />
-          </label>
+          {modoProfissional ? (
+            <label className="block">
+              <span className="block text-sm">{t("Até (opcional)")}</span>
+              <input
+                aria-label={t("Até (opcional)")}
+                className="mt-1 rounded-md border p-2"
+                type="date"
+                min={data || undefined}
+                value={atePeriodo}
+                onChange={(e) => setAtePeriodo(e.target.value)}
+              />
+            </label>
+          ) : (
+            <label className="block">
+              <span className="block text-sm">{t("Repetir toda semana até (opcional)")}</span>
+              <input
+                aria-label={t("Repetir toda semana até (opcional)")}
+                className="mt-1 rounded-md border p-2"
+                type="date"
+                min={data || undefined}
+                value={repetirAte}
+                onChange={(e) => setRepetirAte(e.target.value)}
+              />
+            </label>
+          )}
           <Button
             // Alvo de toque generoso: esta tela também é usada no celular.
             className="min-h-11"
-            disabled={!data || criar.isPending || faixaInvalida}
+            disabled={!data || criar.isPending || faixaInvalida || semAlvo}
             onClick={() => criar.mutate()}
           >
-            {abrindo ? t("Abrir este dia") : t("Fechar este dia")}
+            {abrindo ? t("Abrir este dia") : modoProfissional ? t("Fechar dias") : t("Fechar este dia")}
           </Button>
           {faixaInvalida ? (
             <p className="w-full text-sm text-destructive">
@@ -262,9 +368,12 @@ export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
           ) : null}
           {resultado ? (
             // Dizer QUANTOS, e quantos já existiam, é o que diferencia "repeti
-            // sem querer" de "não aconteceu nada".
+            // sem querer" de "não aconteceu nada". No modo profissional cada
+            // (profissional, dia) é um bloqueio próprio.
             <p className="w-full text-sm text-text-muted" data-testid="resultado-do-lote">
-              {`${resultado.criados} ${t("dia(s) gravado(s)")}`}
+              {modoProfissional
+                ? `${resultado.criados} ${t("bloqueio(s) gravado(s)")}`
+                : `${resultado.criados} ${t("dia(s) gravado(s)")}`}
               {resultado.pulados > 0 ? ` · ${resultado.pulados} ${t("já existia(m)")}` : ""}
             </p>
           ) : null}
@@ -284,6 +393,9 @@ export function DiasBloqueados({ podeEditar }: { podeEditar: boolean }) {
           {lista.map((e) => (
             <li key={e.id} className="flex items-center justify-between gap-2 text-sm">
               <span>
+                {modoProfissional && e.provider_id
+                  ? `${nomeDoProfissional.get(e.provider_id) ?? t("Profissional")} · `
+                  : ""}
                 {new Date(`${e.exception_date}T12:00:00`).toLocaleDateString()} · {faixa(e, t)}
                 {e.is_unavailable ? "" : ` · ${t("aberto excepcionalmente")}`}
                 {e.reason ? ` · ${e.reason}` : ""}

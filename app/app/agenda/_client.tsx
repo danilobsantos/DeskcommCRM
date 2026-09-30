@@ -1097,7 +1097,12 @@ export function AgendaClient({
         agendamentos={agendamentosAcionaveis}
         pessoas={pessoas}
         agora={new Date()}
-        className="max-h-[320px]"
+        // `shrink-0` não é estética: com a grade em altura total (nada mais
+        // encolhe — quem rola é a página), este era o ÚNICO item espremensível
+        // da coluna (`min-h-0` na raiz do componente) e absorvia TODO o
+        // excesso, colapsando até as abas saírem da caixa — e o aviso de agenda
+        // vazia, irmão seguinte com fundo opaco, pintava por cima delas.
+        className="max-h-[320px] shrink-0"
         // ⚠️ ESTAS DUAS PROPS FALTAVAM, e a ausência tinha cara de permissão.
         // `HistoricoDaAgenda` usa `disabled={!onRemarcar}`; sem elas os botões
         // nasciam cinzas em toda linha, de toda organização — e o `title` dizia
@@ -1210,7 +1215,10 @@ export function AgendaClient({
           parametros.set("compromisso", id);
           router.push(`/app/agenda?${parametros.toString()}`);
         }}
-        className="min-h-0 flex-1"
+        // SEM `min-h-0` de propósito: a grade aparece inteira (720px de corpo)
+        // e quem rola é a página. Com `min-h-0`, o bloco encolheria para caber
+        // na viewport e o conteúdo transbordaria sem barra para alcançá-lo.
+        className="flex-1"
       />
     </div>
   );

@@ -1150,6 +1150,15 @@ export const DICIONARIO: Traducoes = {
   "Feriado, férias, viagem. Nesses dias o sistema deixa de oferecer horários — e o que já estava marcado continua marcado, para você decidir o que fazer com cada um.": { es: "Días festivos, vacaciones, viajes. Esos días el sistema deja de ofrecer horarios. Las citas que ya estaban programadas se mantienen, para que decidas qué hacer con cada una." },
   "Ex.: feriado": { es: "Ej.: día festivo" },
   "Fechar este dia": { es: "Cerrar este día" },
+  "Fechar dias": { es: "Cerrar días" },
+  Fechado: { es: "Cerrado" },
+  "bloqueio(s) gravado(s)": { es: "bloqueo(s) guardado(s)" },
+  "Dia inicial": { es: "Día inicial" },
+  "Até (opcional)": { es: "Hasta (opcional)" },
+  Profissional: { es: "Profesional" },
+  "Feche um dia ou um período (feriado, férias, motivo particular) para um ou mais profissionais. Em dia fechado a IA deixa de oferecer horários com ele, e o que já estava marcado continua marcado, para você decidir o que fazer com cada um.": {
+    es: "Cierra un día o un período (festivo, vacaciones, motivo particular) para uno o más profesionales. En un día cerrado la IA deja de ofrecer horarios con él, y las citas que ya estaban programadas se mantienen para que decidas qué hacer con cada una.",
+  },
   "Dias fora da rotina": { es: "Días fuera de la rutina" },
   "Feche um dia (feriado, férias, viagem) ou abra um dia que a sua jornada semanal não cobre. Em dia fechado o sistema deixa de oferecer horários, e o que já estava marcado continua marcado, para você decidir o que fazer com cada um.": { es: "Cierra un día (festivo, vacaciones, viaje) o abre uno que tu jornada semanal no cubre. En un día cerrado el sistema deja de ofrecer horarios, y las citas que ya estaban programadas se mantienen para que decidas qué hacer con cada una." },
   "O que fazer": { es: "Qué hacer" },
@@ -1233,6 +1242,20 @@ export const DICIONARIO: Traducoes = {
   "consulta futura": { es: "consulta futura" },
   "consultas futuras": { es: "consultas futuras" },
   "Profissional cadastrado": { es: "Profesional registrado" },
+  "Profissional atualizado": { es: "Profesional actualizado" },
+  "Profissional excluído": { es: "Profesional eliminado" },
+  "Excluir profissional": { es: "Eliminar profesional" },
+  "Excluir este profissional?": { es: "¿Eliminar este profesional?" },
+  "Ele tem consultas futuras — transfira ou cancele antes. A exclusão só passa sem elas.": {
+    es: "Tiene citas futuras — transfiérelas o cancélelas antes. La eliminación solo procede sin ellas.",
+  },
+  "O passado dele sai junto da linha. Essa ação não pode ser desfeita.": {
+    es: "Su historial se va con el registro. Esta acción no se puede deshacer.",
+  },
+  "Editar profissional": { es: "Editar profesional" },
+  "Nome e especialidades aparecem na agenda e na lista que a IA consulta.": {
+    es: "Nombre y especialidades aparecen en la agenda y en la lista que la IA consulta.",
+  },
   "Agenda de profissionais ligada": { es: "Agenda de profesionales activada" },
   "Agenda de profissionais desligada": {
     es: "Agenda de profesionales desactivada",

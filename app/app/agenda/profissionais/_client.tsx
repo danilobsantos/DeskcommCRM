@@ -1,7 +1,19 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Clock, Plus, Trash } from "@/lib/ui/icons";
+import { Clock, PencilSimple, Plus, Trash } from "@/lib/ui/icons";
+import { DiasBloqueados } from "@/components/agenda/DiasBloqueados";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,7 +41,9 @@ import { FUSOS_OFERECIDOS } from "@/lib/tempo/fusos";
 import type { ScheduleWindow } from "@/lib/schemas/routing";
 import {
   alternarProfissionalAtivo,
+  atualizarProfissional,
   criarProfissional,
+  excluirProfissional,
   salvarJornadaProfissional,
 } from "@/app/actions/agenda/providers";
 
@@ -55,6 +69,7 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
   const [nome, setNome] = useState("");
   const [especialidades, setEspecialidades] = useState("");
   const [editandoJornada, setEditandoJornada] = useState<ProfissionalInicial | null>(null);
+  const [editandoDados, setEditandoDados] = useState<ProfissionalInicial | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const criar = () => {
@@ -86,6 +101,39 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
       setProfissionais((lista) =>
         lista.map((p) => (p.id === id ? { ...p, ativo } : p)),
       );
+    });
+  };
+
+  const salvarDados = (nomeEditado: string, especialidadesEditadas: string) => {
+    if (!editandoDados) return;
+    const specs = especialidadesEditadas
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    startTransition(async () => {
+      const r = await atualizarProfissional(editandoDados.id, {
+        name: nomeEditado.trim(),
+        specialties: specs,
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(t("Profissional atualizado"));
+      setEditandoDados(null);
+      window.location.reload();
+    });
+  };
+
+  const excluir = (id: string) => {
+    startTransition(async () => {
+      const r = await excluirProfissional(id);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(t("Profissional excluído"));
+      setProfissionais((lista) => lista.filter((p) => p.id !== id));
     });
   };
 
@@ -140,7 +188,7 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
           </Card>
         )}
         {profissionais.map((p) => (
-          <Card key={p.id} className="p-4">
+          <Card key={p.id} className="p-4" data-testid={`profissional-${p.id}`}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h3 className="font-medium truncate">{p.nome}</h3>
@@ -172,16 +220,78 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
                   variant="outline"
                   size="sm"
                   className="ml-auto"
+                  onClick={() => setEditandoDados(p)}
+                >
+                  <PencilSimple size={14} className="mr-1" aria-hidden />
+                  {t("Editar")}
+                </Button>
+              )}
+              {canWrite && (
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => setEditandoJornada(p)}
                 >
                   <Clock size={14} className="mr-1" aria-hidden />
                   {t("Horário")}
                 </Button>
               )}
+              {canWrite && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={t("Excluir profissional")}
+                    >
+                      <Trash size={14} aria-hidden />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {t("Excluir este profissional?")}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {p.proximas > 0
+                          ? t(
+                              "Ele tem consultas futuras — transfira ou cancele antes. A exclusão só passa sem elas.",
+                            )
+                          : t(
+                              "O passado dele sai junto da linha. Essa ação não pode ser desfeita.",
+                            )}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t("Cancelar")}</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => excluir(p.id)}>
+                        {t("Excluir")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
             </div>
           </Card>
         ))}
       </div>
+
+      {editandoDados && (
+        <EditorDeDados
+          nome={editandoDados.nome}
+          especialidades={editandoDados.especialidades}
+          isPending={isPending}
+          onCancel={() => setEditandoDados(null)}
+          onSave={salvarDados}
+        />
+      )}
+
+      {profissionais.length > 0 && (
+        <DiasBloqueados
+          podeEditar={canWrite}
+          profissionais={profissionais.map((p) => ({ id: p.id, nome: p.nome }))}
+        />
+      )}
 
       {editandoJornada && (
         <EditorDeJornada
@@ -193,6 +303,69 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
         />
       )}
     </div>
+  );
+}
+
+function EditorDeDados({
+  nome,
+  especialidades,
+  isPending,
+  onCancel,
+  onSave,
+}: {
+  nome: string;
+  especialidades: string[];
+  isPending: boolean;
+  onCancel: () => void;
+  onSave: (nome: string, especialidades: string) => void;
+}) {
+  const t = useT();
+  const [nomeEditado, setNomeEditado] = useState(nome);
+  const [specsEditadas, setSpecsEditadas] = useState(especialidades.join(", "));
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("Editar profissional")}</DialogTitle>
+          <DialogDescription>
+            {t("Nome e especialidades aparecem na agenda e na lista que a IA consulta.")}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="nome-prof">{t("Nome")}</Label>
+            <Input
+              id="nome-prof"
+              value={nomeEditado}
+              maxLength={200}
+              onChange={(e) => setNomeEditado(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="specs-prof">{t("Especialidades, separadas por vírgula")}</Label>
+            <Input
+              id="specs-prof"
+              value={specsEditadas}
+              onChange={(e) => setSpecsEditadas(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel}>
+            {t("Cancelar")}
+          </Button>
+          <Button
+            disabled={isPending || !nomeEditado.trim()}
+            onClick={() => onSave(nomeEditado, specsEditadas)}
+          >
+            {t("Salvar")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

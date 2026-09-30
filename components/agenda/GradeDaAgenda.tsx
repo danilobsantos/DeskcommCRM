@@ -34,6 +34,7 @@ import { useT } from "@/hooks/i18n/useT";
 
 import { corDaTrilha, fundoDaTrilha } from "./paleta";
 import type { Agendamento, Pessoa, VisaoDaAgenda } from "./tipos";
+import type { DiaBloqueado } from "@/lib/agenda/dias-bloqueados";
 
 /**
  * Altura de uma hora, em pixels. É a régua de toda a grade: posição e duração
@@ -538,6 +539,7 @@ function ColunaDeDia({
   interacao,
   proposta,
   arrasteDoCard,
+  diasBloqueados,
 }: {
   dia: Date;
   agora: Date;
@@ -559,14 +561,23 @@ function ColunaDeDia({
     aoTeclar: (e: React.KeyboardEvent<HTMLButtonElement>, a: Agendamento) => void;
     moveu: () => boolean;
   };
+  /** `yyyy-MM-dd` → dia fechado. Vem da rota de exceções, não dos slots. */
+  diasBloqueados?: Record<string, DiaBloqueado>;
 }) {
   const localeDaData = useLocaleDeData();
+  const t = useT();
   const doDia = agendamentos.filter((c) => isSameDay(new Date(c.comeca), dia));
   const ehHoje = isSameDay(dia, agora);
+  const chave = format(dia, "yyyy-MM-dd");
+  const bloqueio = diasBloqueados?.[chave];
+  // O motivo vai ao `title`, nunca ao layout: `reason` é texto livre.
+  const tituloBloqueio = bloqueio
+    ? [t("Fechado"), ...bloqueio.motivos].join(" · ")
+    : undefined;
 
   return (
     <div
-      data-testid={`coluna-dia-${format(dia, "yyyy-MM-dd")}`}
+      data-testid={`coluna-dia-${chave}`}
       className={cn(
         "relative min-w-0 flex-1 border-r border-border last:border-r-0",
         soNoDesktop && "max-md:hidden",
@@ -589,6 +600,15 @@ function ColunaDeDia({
         >
           {format(dia, "d")}
         </span>
+        {bloqueio ? (
+          <span
+            data-testid={`dia-fechado-${chave}`}
+            title={tituloBloqueio}
+            className="rounded-sm bg-surface-elevated px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted"
+          >
+            {t("Fechado")}
+          </span>
+        ) : null}
       </div>
 
       <div
@@ -647,11 +667,14 @@ function VisaoDeMes({
   agora,
   agendamentos,
   pessoas,
+  diasBloqueados,
 }: {
   ancora: Date;
   agora: Date;
   agendamentos: Agendamento[];
   pessoas: Pessoa[];
+  /** O mesmo mapa da semana — o mês nunca teve sinal de disponibilidade. */
+  diasBloqueados?: Record<string, DiaBloqueado>;
 }) {
   const t = useT();
   const localeDaData = useLocaleDeData();
@@ -683,6 +706,8 @@ function VisaoDeMes({
         {semanas.flat().map((d) => {
           const doDia = agendamentos.filter((c) => isSameDay(new Date(c.comeca), d));
           const doMes = isSameMonth(d, ancora);
+          const chaveMes = format(d, "yyyy-MM-dd");
+          const bloqueioMes = diasBloqueados?.[chaveMes];
           return (
             <div
               key={d.toISOString()}
@@ -705,6 +730,15 @@ function VisaoDeMes({
                 >
                   {format(d, "d")}
                 </span>
+                {bloqueioMes ? (
+                  <span
+                    data-testid={`dia-fechado-${chaveMes}`}
+                    title={[t("Fechado"), ...bloqueioMes.motivos].join(" · ")}
+                    className="rounded-sm bg-surface-elevated px-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted"
+                  >
+                    {t("Fechado")}
+                  </span>
+                ) : null}
                 {doDia.length > 2 && (
                   <span className="text-[10px] tabular-nums text-text-subtle">
                     +{doDia.length - 2}
@@ -761,6 +795,7 @@ export function GradeDaAgenda({
   agendamentos,
   onAbrirAgendamento,
   interacao,
+  diasBloqueados,
   className,
 }: {
   visao: VisaoDaAgenda;
@@ -779,6 +814,12 @@ export function GradeDaAgenda({
   onAbrirAgendamento?: (id: string) => void;
   /** Ausente = grade só de leitura, como a vitrine a monta. Ver `InteracaoDaGrade`. */
   interacao?: InteracaoDaGrade;
+  /**
+   * Dias fechados por dono (`yyyy-MM-dd`). Separado de `interacao` de
+   * propósito: o selo é informação e aparece também na grade de leitura —
+   * amarrá-lo à interação o esconderia de quem só lê.
+   */
+  diasBloqueados?: Record<string, DiaBloqueado>;
   className?: string;
 }) {
   const dias = visao === "dia" ? [ancora] : diasDaSemanaDe(ancora);
@@ -986,18 +1027,36 @@ export function GradeDaAgenda({
     <div
       data-testid="grade-da-agenda"
       data-visao={visao}
+      // SEM `overflow-hidden` nem `min-h-0` de propósito: a grade mede 720px de
+      // corpo e aparece INTEIRA — quem rola é a página (`main` do AppShell).
+      // `overflow` não-`visible` criaria uma caixa de rolagem aqui e o
+      // `sticky top-0` do cabeçalho grudaria nela (que nunca rola) em vez de
+      // na viewport.
       className={cn(
-        "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-surface",
+        "flex flex-col rounded-lg border border-border bg-surface",
         className,
       )}
     >
       {visao === "mes" ? (
-        <VisaoDeMes ancora={ancora} agora={agora} agendamentos={agendamentos} pessoas={pessoas} />
+        <VisaoDeMes
+          ancora={ancora}
+          agora={agora}
+          agendamentos={agendamentos}
+          pessoas={pessoas}
+          diasBloqueados={diasBloqueados}
+        />
       ) : (
-        // A rolagem mora AQUI dentro, e não na página: `html, body` têm
-        // `overflow-x: hidden` no globals.css, então uma grade que estourasse a
-        // largura simplesmente sumiria pela direita, sem barra para trazê-la de volta.
-        <div ref={gradeRef} className="flex min-h-0 flex-1 overflow-auto">
+        // Só horizontal, e só onde precisa: `overflow-x: clip` NÃO cria caixa
+        // de rolagem (ao contrário de `hidden`/`auto`), então no desktop o
+        // cabeçalho continua grudando na viewport. No mobile (`auto`) as 7
+        // colunas ganham a barra de volta — `html, body` têm `overflow-x:
+        // hidden` no globals.css, e sem ela a grade sumiria pela direita.
+        // (Antes este `div` tinha `overflow-auto` nos dois eixos: era a
+        // rolagem interna que escondia o fim da agenda.)
+        <div
+          ref={gradeRef}
+          className="flex overflow-x-auto overflow-y-visible md:overflow-x-clip"
+        >
           <ColunaDeHoras />
           <div className="flex min-w-0 flex-1">
             {dias.map((d) => (
@@ -1013,6 +1072,7 @@ export function GradeDaAgenda({
                 interacao={interacao}
                 proposta={proposta}
                 arrasteDoCard={arrasteDoCard}
+                diasBloqueados={diasBloqueados}
               />
             ))}
           </div>
