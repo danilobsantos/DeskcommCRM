@@ -1257,9 +1257,11 @@ export async function listaTiposDeAtendimento(
 
 
 /**
- * Os profissionais externos ativos da organização — o alvo da tool
+ * Os profissionais externos da organização — o alvo da tool
  * `crm_list_providers`, para a IA saber com quem tem agenda além dos
- * atendentes-usuários.
+ * atendentes-usuários. Com `apenasAtivos`, inativos somem da lista (a IA não
+ * tem como saber que existem); sem ele, voltam com o flag `ativo`, para telas
+ * de gestão.
  */
 export interface ProfissionalListado {
   id: string;
@@ -1271,12 +1273,14 @@ export interface ProfissionalListado {
 export async function listaProfissionais(
   supabase: SupabaseClient,
   organizationId: string,
+  opts?: { apenasAtivos?: boolean },
 ): Promise<ProfissionalListado[]> {
-  const { data, error } = await supabase
+  let q = supabase
     .from("providers")
     .select("id, name, specialties, active")
-    .eq("organization_id", organizationId)
-    .order("name");
+    .eq("organization_id", organizationId);
+  if (opts?.apenasAtivos) q = q.eq("active", true);
+  const { data, error } = await q.order("name");
 
   if (error) return [];
 

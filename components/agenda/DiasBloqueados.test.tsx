@@ -198,3 +198,138 @@ describe("Dias fora da rotina — fechar e abrir", () => {
     expect(await screen.findByTestId("resultado-do-lote")).toHaveTextContent("1");
   });
 });
+
+/**
+ * FECHAR DIA DE PROFISSIONAL — a porta que faltava para a linha `provider_id`
+ * que a migration 9003 criou no banco e o motor já respeitava.
+ *
+ * O que cada asserção guarda:
+ *
+ * 1. Um POST por profissional marcado, cada um com o seu `provider_id` e o dia
+ *    inteiro — fechar "o dia da Dra. Ana" não pode fechar o do Dr. Bia junto.
+ * 2. Sem ninguém marcado o botão trava: fechar a agenda de todo mundo sem
+ *    querer não se desfaz com um clique.
+ * 3. O período vira dias CORRIDOS (não semanais): férias de 3 dias são 3
+ *    linhas, não uma.
+ * 4. O que já existe para aquele profissional é pulado; o do colega não conta.
+ */
+describe("Dias fora da rotina — profissionais externos", () => {
+  const EQUIPE = [
+    { id: "prov-ana", nome: "Dra. Ana" },
+    { id: "prov-bia", nome: "Dr. Bia" },
+  ];
+
+  function montarEquipe() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <DiasBloqueados podeEditar profissionais={EQUIPE} />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    post.mockClear();
+    jaCadastrado = [];
+  });
+
+  it("fecha o dia para cada profissional marcado, com o provider_id dele", async () => {
+    const u = userEvent.setup();
+    montarEquipe();
+
+    await u.click(screen.getByLabelText("Dra. Ana"));
+    await u.click(screen.getByLabelText("Dr. Bia"));
+    await u.type(screen.getByLabelText("Dia inicial"), "2026-10-01");
+    await u.click(screen.getByRole("button", { name: "Fechar dias" }));
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls.map((c) => c[1])).toEqual([
+      expect.objectContaining({
+        exception_date: "2026-10-01",
+        provider_id: "prov-ana",
+        is_unavailable: true,
+        start_minute: 0,
+        end_minute: 1440,
+      }),
+      expect.objectContaining({
+        exception_date: "2026-10-01",
+        provider_id: "prov-bia",
+        is_unavailable: true,
+        start_minute: 0,
+        end_minute: 1440,
+      }),
+    ]);
+    expect(await screen.findByTestId("resultado-do-lote")).toHaveTextContent(
+      "2 bloqueio(s) gravado(s)",
+    );
+  });
+
+  it("sem profissional marcado o botão trava", async () => {
+    const u = userEvent.setup();
+    montarEquipe();
+
+    await u.type(screen.getByLabelText("Dia inicial"), "2026-10-01");
+
+    expect(screen.getByRole("button", { name: "Fechar dias" })).toBeDisabled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("período vira dias corridos, um POST por dia", async () => {
+    const u = userEvent.setup();
+    montarEquipe();
+
+    await u.click(screen.getByLabelText("Dra. Ana"));
+    await u.type(screen.getByLabelText("Dia inicial"), "2026-10-01");
+    await u.type(screen.getByLabelText("Até (opcional)"), "2026-10-03");
+    await u.click(screen.getByRole("button", { name: "Fechar dias" }));
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(3));
+    expect(post.mock.calls.map((c) => (c[1] as { exception_date: string }).exception_date)).toEqual([
+      "2026-10-01",
+      "2026-10-02",
+      "2026-10-03",
+    ]);
+  });
+
+  it("pula o dia que aquele profissional já tem, sem confundir com o do colega", async () => {
+    jaCadastrado = [
+      {
+        id: "ja-existe",
+        user_id: null,
+        provider_id: "prov-ana",
+        exception_date: "2026-10-02",
+        is_unavailable: true,
+        start_minute: 0,
+        end_minute: 1440,
+        reason: null,
+      },
+      {
+        id: "do-colega",
+        user_id: null,
+        provider_id: "prov-bia",
+        exception_date: "2026-10-02",
+        is_unavailable: true,
+        start_minute: 0,
+        end_minute: 1440,
+        reason: null,
+      },
+    ];
+    const u = userEvent.setup();
+    montarEquipe();
+    await screen.findByText(/Dra\. Ana/);
+
+    await u.click(screen.getByLabelText("Dra. Ana"));
+    await u.type(screen.getByLabelText("Dia inicial"), "2026-10-01");
+    await u.type(screen.getByLabelText("Até (opcional)"), "2026-10-02");
+    await u.click(screen.getByRole("button", { name: "Fechar dias" }));
+
+    // 01 e 02 eram os alvos da Ana; o 02 dela já existia. O 02 do Bia é outra
+    // linha, de outro dono, e não conta.
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]?.[1]).toMatchObject({
+      exception_date: "2026-10-01",
+      provider_id: "prov-ana",
+    });
+    expect(await screen.findByTestId("resultado-do-lote")).toHaveTextContent("1 já existia(m)");
+  });
+});

@@ -147,18 +147,21 @@ const listarProfissionaisShape = {};
 export const crmListProviders: McpToolDefinition<typeof listarProfissionaisShape> = {
   name: "crm_list_providers",
   description:
-    "Lista os PROFISSIONAIS EXTERNOS da organização — dentistas, corretores, consultores — que têm agenda própria " +
-    "mas NÃO têm conta de usuário no sistema. Use quando o cliente quer ser atendido por um profissional " +
+    "Lista os PROFISSIONAIS EXTERNOS ATIVOS da organização — dentistas, corretores, consultores — que têm agenda própria " +
+    "mas NÃO têm conta de usuário no sistema. Profissionais inativos NÃO aparecem aqui: não ofereça, não consulte " +
+    "horário e não marque com eles. Use quando o cliente quer ser atendido por um profissional " +
     "específico, ou quando `owner_user_id` não se aplica. NÃO confunda com `crm_list_team_members`, que lista os " +
     "atendentes-usuários da equipe. O `id` que volta aqui é o que você passa em `provider_id` de " +
     "`crm_find_free_slots` e `crm_book_appointment`. Lista vazia = a organização não tem profissionais externos " +
-    "cadastrados — ofereça horário pelos atendentes de sempre.",
+    "ativos — ofereça horário pelos atendentes de sempre.",
   inputSchema: listarProfissionaisShape,
   category: "read",
   requiresRole: "agent",
   requiresScope: "mcp:read",
   handler: async (_input, ctx) => {
-    const profissionais = await listaProfissionais(ctx.supabase, ctx.organizationId);
+    const profissionais = await listaProfissionais(ctx.supabase, ctx.organizationId, {
+      apenasAtivos: true,
+    });
     return {
       profissionais: profissionais.map((p) => ({
         id: p.id,

@@ -37,11 +37,17 @@ export default async function ProfissionaisPage() {
     .eq("organization_id", activeOrg.orgId)
     .order("name");
 
+  // `.not(..., "is", null)` e NÃO `.neq(..., null)`: o segundo gera
+  // `provider_id=neq.null`, e o PostgREST tenta converter o texto "null" para
+  // uuid (erro 22P02) — o `data` vinha `null`, o `?? []` engolia, e TODO
+  // profissional marcava "0 consultas futuras" desde a 9003. Medido contra o
+  // PostgREST local com sessão de manager antes de trocar.
   const { data: contagens } = await supabase
     .from("calendar_appointments")
     .select("provider_id")
     .eq("organization_id", activeOrg.orgId)
-    .neq("provider_id", null)
+    .not("provider_id", "is", null)
+    .in("status", ["pending", "confirmed"])
     .gte("starts_at", new Date().toISOString());
 
   const porProfissional = new Map<string, number>();

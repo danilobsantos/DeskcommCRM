@@ -26,6 +26,14 @@
  * Aceitá-lo cru do body sem a RLS atrás seria escrever na agenda alheia — e é a
  * RLS que barra, não uma checagem nossa.
  *
+ * **`provider_id` é o mesmo gesto para profissional externo** (migration 9003:
+ * dentista sem login). Exclusivo com `user_id` — a constraint
+ * `calendar_exceptions_dono_unico` exige no máximo um dono. Linha de profissional
+ * tem `user_id` NULL, então só passa na RLS por manager+ (o dono da agenda não
+ * existe como usuário); o 403 daqui traduz isso. O motor já lia essas linhas
+ * (`consulta.ts`), então fechar o dia do dentista impede a IA de oferecer
+ * horário sem tocar no agente.
+ *
  * **Dia inteiro é `0..1440`, não `null`.** O schema explica por quê: numa UNIQUE,
  * `NULL` não colide com `NULL`, então dois "dia 12 bloqueado" passariam os dois.
  *
@@ -46,13 +54,16 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const COLUNAS = "id, user_id, exception_date, is_unavailable, start_minute, end_minute, reason";
+const COLUNAS =
+  "id, user_id, provider_id, exception_date, is_unavailable, start_minute, end_minute, reason";
 
 const criarSchema = z
   .object({
     exception_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use uma data em AAAA-MM-DD"),
     /** Ausente = a própria pessoa. Manager+ pode informar outra (a RLS decide). */
     user_id: z.string().uuid().optional(),
+    /** Profissional externo da mesma org. Exclusivo com `user_id`. */
+    provider_id: z.string().uuid().optional(),
     is_unavailable: z.boolean().default(true),
     start_minute: z.number().int().min(0).max(1440).default(0),
     end_minute: z.number().int().min(0).max(1440).default(1440),
@@ -61,6 +72,10 @@ const criarSchema = z
   .refine((v) => v.end_minute > v.start_minute, {
     message: "O fim precisa ser depois do começo.",
     path: ["end_minute"],
+  })
+  .refine((v) => !(v.user_id && v.provider_id), {
+    message: "Informe user_id ou provider_id, não os dois.",
+    path: ["provider_id"],
   });
 
 export async function GET(req: NextRequest): Promise<Response> {
@@ -71,6 +86,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   const url = new URL(req.url);
   const de = url.searchParams.get("de");
   const ate = url.searchParams.get("ate");
+  const soProvider = url.searchParams.get("provider_id");
 
   const supabase = await createClient();
   let q = supabase
@@ -79,6 +95,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     .eq("organization_id", authz.org.orgId)
     .order("exception_date", { ascending: true })
     .limit(500);
+  if (soProvider) q = q.eq("provider_id", soProvider);
   // Sem janela, devolve do dia de hoje em diante: a lista serve para conferir o
   // que vem, e feriado do ano passado só faz a tela crescer.
   if (de) q = q.gte("exception_date", de);
@@ -107,11 +124,27 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const supabase = await createClient();
+
+  // Profissional de OUTRA org não pode virar dono de linha desta: a RLS da
+  // tabela só olha `organization_id`, então a checagem do dono é nossa.
+  if (lido.data.provider_id) {
+    const { data: dono } = await supabase
+      .from("providers")
+      .select("id")
+      .eq("organization_id", authz.org.orgId)
+      .eq("id", lido.data.provider_id)
+      .maybeSingle();
+    if (!dono) {
+      return fail("not_found", t("Profissional não encontrado."), 404, { requestId });
+    }
+  }
+
   const { data, error } = await supabase
     .from("calendar_availability_exceptions")
     .insert({
       organization_id: authz.org.orgId,
-      user_id: lido.data.user_id ?? authz.user.id,
+      user_id: lido.data.provider_id ? null : (lido.data.user_id ?? authz.user.id),
+      provider_id: lido.data.provider_id ?? null,
       exception_date: lido.data.exception_date,
       is_unavailable: lido.data.is_unavailable,
       start_minute: lido.data.start_minute,
@@ -122,16 +155,26 @@ export async function POST(req: NextRequest): Promise<Response> {
     .single();
 
   if (error) {
-    // 23505 é a UNIQUE (mesma pessoa, mesmo dia, mesma faixa): recusa esperada,
-    // não erro de sistema. 42501 é a RLS dizendo que esta pessoa não escreve na
-    // agenda daquela outra.
+    // 23505 é a UNIQUE (mesmo dono, mesmo dia, mesma faixa): recusa esperada,
+    // não erro de sistema. 42501 é a RLS dizendo que esta pessoa não escreve
+    // naquela agenda — a própria, a de outro usuário, ou a de um profissional
+    // (linha sem `user_id`, que só manager+ alcança).
     if (error.code === "23505") {
       return fail("conflict", t("Já existe um bloqueio para este dia e horário."), 409, {
         requestId,
       });
     }
     if (error.code === "42501") {
-      return fail("forbidden", t("Você só pode alterar a sua própria agenda."), 403, { requestId });
+      return fail(
+        "forbidden",
+        t(
+          lido.data.provider_id
+            ? "Só quem gerencia a clínica pode alterar a agenda de um profissional."
+            : "Você só pode alterar a sua própria agenda.",
+        ),
+        403,
+        { requestId },
+      );
     }
     return fail("internal_error", error.message, 500, { requestId });
   }
@@ -145,7 +188,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     requestId,
     metadata: {
       exception_date: lido.data.exception_date,
-      dono: lido.data.user_id ?? authz.user.id,
+      dono: lido.data.provider_id ?? lido.data.user_id ?? authz.user.id,
       dia_inteiro: lido.data.start_minute === 0 && lido.data.end_minute === 1440,
     },
   });

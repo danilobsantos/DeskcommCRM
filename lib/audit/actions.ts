@@ -1006,6 +1006,9 @@ export const AUDIT_ACTIONS = [
   "company_people.updated",
   "contacts.person_linked",
   "imports.companies_people",
+  // Profissional externo excluído (migration 9003; action criada com a
+  // exclusão — desligar continua sendo `agenda.provider_updated {active}`).
+  "agenda.provider_deleted",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
