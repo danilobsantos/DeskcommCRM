@@ -1882,6 +1882,7 @@ export type Database = {
           history_message_window: number
           history_token_window: number
           id: string
+          inbound_debounce_ms: number | null
           knowledge_source_ids: string[]
           max_steps: number
           model: string
@@ -1920,6 +1921,7 @@ export type Database = {
           history_message_window?: number
           history_token_window?: number
           id?: string
+          inbound_debounce_ms?: number | null
           knowledge_source_ids?: string[]
           max_steps?: number
           model: string
@@ -1958,6 +1960,7 @@ export type Database = {
           history_message_window?: number
           history_token_window?: number
           id?: string
+          inbound_debounce_ms?: number | null
           knowledge_source_ids?: string[]
           max_steps?: number
           model?: string
@@ -4101,6 +4104,10 @@ export type Database = {
           warmup_daily_caps: Json | null
           window_end_hour: number | null
           window_start_hour: number | null
+          atraso_notar_ms: number | null
+          ms_por_caractere: number | null
+          atraso_minimo_ms: number | null
+          atraso_maximo_ms: number | null
         }
         Insert: {
           allow_sunday?: boolean | null
@@ -4117,6 +4124,10 @@ export type Database = {
           warmup_daily_caps?: Json | null
           window_end_hour?: number | null
           window_start_hour?: number | null
+          atraso_notar_ms?: number | null
+          ms_por_caractere?: number | null
+          atraso_minimo_ms?: number | null
+          atraso_maximo_ms?: number | null
         }
         Update: {
           allow_sunday?: boolean | null
@@ -4133,6 +4144,10 @@ export type Database = {
           warmup_daily_caps?: Json | null
           window_end_hour?: number | null
           window_start_hour?: number | null
+          atraso_notar_ms?: number | null
+          ms_por_caractere?: number | null
+          atraso_minimo_ms?: number | null
+          atraso_maximo_ms?: number | null
         }
         Relationships: [
           {
@@ -8345,6 +8360,7 @@ export type Database = {
           status: string
           suspended_at: string | null
           suspended_by: string | null
+          suspended_kind: string | null
           suspended_reason: string | null
           timezone: string
           updated_at: string
@@ -8371,6 +8387,7 @@ export type Database = {
           status?: string
           suspended_at?: string | null
           suspended_by?: string | null
+          suspended_kind?: string | null
           suspended_reason?: string | null
           timezone?: string
           updated_at?: string
@@ -8397,6 +8414,7 @@ export type Database = {
           status?: string
           suspended_at?: string | null
           suspended_by?: string | null
+          suspended_kind?: string | null
           suspended_reason?: string | null
           timezone?: string
           updated_at?: string
@@ -10945,6 +10963,10 @@ export type Database = {
         Args: { p_dias: number; p_lote?: number }
         Returns: number
       }
+      fn_followup_turno_descartado: {
+        Args: { p_job: string; p_org: string }
+        Returns: boolean
+      }
       fn_gasto_de_ia_do_mes: { Args: { p_org: string }; Returns: number }
       fn_is_platform_admin: { Args: never; Returns: boolean }
       fn_lgpd_anonymize_contact: {
@@ -11022,9 +11044,14 @@ export type Database = {
         }
         Returns: string
       }
+      fn_org_operante: { Args: { p_org: string }; Returns: boolean }
       fn_podar_fila_de_jobs: {
         Args: { p_limite?: number; p_retencao_dias?: number }
         Returns: number
+      }
+      fn_reativar_organizacao: {
+        Args: { p_ator: string; p_kind_exigido: string; p_org: string }
+        Returns: Json
       }
       fn_reply_action: {
         Args: {
@@ -11140,6 +11167,15 @@ export type Database = {
         Returns: {
           tag: string
         }[]
+      }
+      fn_suspender_organizacao: {
+        Args: {
+          p_ator: string
+          p_kind: string
+          p_motivo: string
+          p_org: string
+        }
+        Returns: Json
       }
       fn_upsert_wa_contact: {
         Args: {

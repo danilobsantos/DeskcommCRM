@@ -145,7 +145,7 @@ import {
 } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
 import { matchesHandoffKeyword, type PublishedAgentConfig } from './agent-config';
-import { garantirPerguntaDoRoteiro, prepararRoteiroDoTurno } from './roteiro-no-turno';
+import { garantirPerguntaDoRoteiro, perguntaDoRoteiroPodeSair, prepararRoteiroDoTurno } from './roteiro-no-turno';
 import { validarRespostaDoFluxo } from './flow-validate';
 import { moduloLigadoComMemo } from '@/lib/instalacao/modulos';
 import { msAteAJanelaAbrir } from './janela-de-atendimento';
@@ -1793,6 +1793,20 @@ export async function runAgentTurn(
  *     planejamento: não abrem o WhatsApp de ninguém.
  *   * `operator_turn` — retaguarda (mexe no funil), nunca fala com o lead.
  */
+/**
+ * ═══ RESPOSTA vs RETOMADA — a distinção que a janela da 0495 faz ═══
+ *
+ * `turnoVaiFalarComOLead` admite `followup_turn`, que RETOMA conversa parada — e
+ * retomar NÃO é responder: abrir `followup_turn` junto faria o número mandar
+ * "e aí, tudo certo?" às 4h para quem dormiu.
+ *
+ * Só a REAÇÃO a uma mensagem recebida lê a janela de resposta. `case_reply_turn`
+ * entra porque responde a um caso em aberto: ninguém "chama" um caso, o caso chama.
+ */
+export function eTurnoDeResposta(job: Pick<JobRow, 'kind'>): boolean {
+  return job.kind === 'inbound_turn' || job.kind === 'case_reply_turn';
+}
+
 function turnoVaiFalarComOLead(job: JobRow): boolean {
   if (job.kind === 'inbound_turn' || job.kind === 'case_reply_turn') return true;
   if (job.kind !== 'followup_turn') return false;
@@ -1933,15 +1947,19 @@ async function executarTurnoDoAgente(
   if (!preview && turnoVaiFalarComOLead(liveJob())) {
     const { knobs } = await loadChannelKnobs(pool, tenantId, input.channelSessionId, runLog);
     const agora = clock();
-    if (!janelaDeEnvioAberta(agora, knobs)) {
-      const abertura = proximaAberturaDaJanela(agora, knobs);
+    const resposta = eTurnoDeResposta(liveJob());
+    // `resposta` separa as janelas: reação a quem escreveu lê `resposta*` (0495,
+    // que herda `window*` quando vazia); retomada e disparo leem `window*`.
+    if (!janelaDeEnvioAberta(agora, knobs, resposta)) {
+      const abertura = proximaAberturaDaJanela(agora, knobs, resposta);
       await rescheduleJob(pool, liveJob().id, ctx.workerId, {
         acquiredAt: claimOfJob(liveJob())?.acquired_at,
         delayMs: Math.max(abertura.getTime() - agora.getTime(), 1_000),
         reason: 'fora da janela anti-ban de envio — turno adiado para a abertura',
       });
       runLog.info('turno adiado — fora da janela anti-ban de envio', {
-        janela: `${knobs.windowStartHour}h-${knobs.windowEndHour}h`,
+        janela: `${resposta ? knobs.respostaStartHour : knobs.windowStartHour}h-${resposta ? knobs.respostaEndHour : knobs.windowEndHour}h`,
+        tipo: resposta ? 'resposta' : 'retomada',
         timezone: knobs.timezone,
         abertura: abertura.toISOString(),
       });
@@ -1958,7 +1976,7 @@ async function executarTurnoDoAgente(
           tenantId,
           channelSessionId: input.channelSessionId,
           abertura,
-          janela: `${knobs.windowStartHour}h-${knobs.windowEndHour}h`,
+          janela: `${resposta ? knobs.respostaStartHour : knobs.windowStartHour}h-${resposta ? knobs.respostaEndHour : knobs.windowEndHour}h`,
           timezone: knobs.timezone,
           domingoDesligado: !knobs.allowSunday,
         });
@@ -2543,6 +2561,11 @@ async function executarTurnoDoAgente(
   // O que o modelo de fato mandou neste turno (depois da cadeia). A trava "a
   // pergunta saiu?" do roteiro de atendimento lê daqui.
   const corposEnviados: string[] = [];
+  // #1943: o turno foi DESCARTADO como obsoleto (guard `resposta_obsoleta`, #1940)
+  // ainda no run — o cliente escreveu de novo enquanto o modelo pensava. Quando
+  // ligada, NADA mais sai dele, nem a pergunta pendente do roteiro (que segue
+  // feita para o turno da mensagem nova). Ver `perguntaDoRoteiroPodeSair`.
+  let turnoDescartado = false;
   // Teto de mensagens físicas por turno (F2-15b) — `seq` JÁ é a contagem certa: ele só
   // avança quando o envio de fato sai pro canal (send_message + send_template, bolhas
   // incluídas), nunca em veto de gate. Checar `seq` antes de tentar o próximo envio
@@ -2597,6 +2620,19 @@ async function executarTurnoDoAgente(
   // turno com dois vetos ficaria mudo por mais de 20 segundos: o conserto do
   // "rápido demais" viraria o defeito simétrico, mais caro que o original.
   let jaEsperouComoHumano = false;
+  // Knobs de atraso humano por conexão (0499) — lidos UMA vez por turno para a
+  // pausa antes da 1ª bolha (`esperarComoHumano`) e para o jitter entre bolhas
+  // (`throttle_ms + jitter_max_ms`). Sem linha em channel_knobs caem nos defaults
+  // de defaults.ts — que espelham os valores históricos (regressão zero).
+  const pacingDoTurno = !preview
+    ? await loadChannelKnobs(pool, tenantId, input.channelSessionId, runLog)
+    : null;
+  const knobsDeAtrasoHumano = {
+    atrasoNotarMs: pacingDoTurno?.knobs.atrasoNotarMs,
+    msPorCaractere: pacingDoTurno?.knobs.msPorCaractere,
+    atrasoMinimoMs: pacingDoTurno?.knobs.atrasoMinimoMs,
+    atrasoMaximoMs: pacingDoTurno?.knobs.atrasoMaximoMs,
+  };
   // Cap de envio (warm-up/diário) vetado neste turno — capturado aqui porque o veto
   // não empurra outcome nenhum a `outcomes` (ver comentário no ponto de captura, mais
   // abaixo). Diferente da janela horária (checada ANTES do modelo rodar, linha ~1233):
@@ -2853,6 +2889,8 @@ async function executarTurnoDoAgente(
           // Só ESTE gate muda; stop, LGPD e pacing continuam valendo integralmente.
           isTemplate: true,
           optedOutThisTurn,
+          // Resposta do turno, mesmo sendo template: lê a janela de resposta (0495).
+          resposta: eTurnoDeResposta(liveJob()),
           crmDailyLimit: null,
           now: clock(),
           sleep: deps.sleep,
@@ -3000,6 +3038,10 @@ async function executarTurnoDoAgente(
             job_id: liveJob().id,
             conversation_id: input.conversationId,
           });
+          // #1943: marca o turno como descartado. NADA mais sai dele, nem a
+          // pergunta pendente do roteiro — ela segue feita para o turno da
+          // mensagem nova. Ver `perguntaDoRoteiroPodeSair` no `enviar`.
+          turnoDescartado = true;
           return {
             ok: false,
             error: {
@@ -3063,6 +3105,10 @@ async function executarTurnoDoAgente(
             channelSessionId: input.channelSessionId,
             body,
             optedOutThisTurn,
+            // `inbound_turn`/`case_reply_turn` respondem a quem escreveu e leem a
+            // janela de RESPOSTA (0495). `followup_turn` retoma conversa parada e
+            // continua na janela de DISPARO.
+            resposta: eTurnoDeResposta(liveJob()),
             // ponytail: channel_sessions.daily_message_limit do CRM ainda não é lido
             // no runtime — null cai nos degraus de warm-up (conservadores). Injetar
             // aqui quando o drain expuser o limite da sessão.
@@ -3136,6 +3182,9 @@ async function executarTurnoDoAgente(
                     agentConfig?.splitMaxChars ?? 600,
                     Math.max(1, maxSendsPerTurn - seq),
                   )[0] ?? body,
+                // Os quatro números do atraso por conexão (0499). Vazios (sem
+                // linha em channel_knobs / preview) = defaults históricos.
+                knobs: knobsDeAtrasoHumano,
                 // `processamentoMs` é a contribuição do #849 (@Teowfb): a pausa humana desconta o
                 // tempo que o turno JÁ gastou pensando, em vez de somar em cima dele. Sem este
                 // argumento o `gasto` de `atraso-humano.ts` cai no `?? 0` e o desconto não acontece —
@@ -3159,7 +3208,13 @@ async function executarTurnoDoAgente(
               corposEnviados.push(finalBody);
               const sleep =
                 deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-              const jitter = () => 1200 + Math.floor(Math.random() * 800); // piso no throttle anti-ban (1.2s) — bolhas são mensagens físicas
+              const jitter = () =>
+                // Piso no throttle anti-ban do número (1.2s default) — bolhas são
+                // mensagens físicas. Lê os knobs da CONEXÃO (throttle_ms + jitter_max_ms,
+                // 0499) e não o literal: desde a 0010 os dois já são configuração por
+                // número, e o call site estava cravando `1200 + rand*800` ignorando-a.
+                (pacingDoTurno?.knobs.throttleMs ?? 1200) +
+                Math.floor(Math.random() * (pacingDoTurno?.knobs.jitterMaxMs ?? 800));
               const enviar = (
                 corpo: string,
                 media?: FotoParaEnvio,
@@ -3408,6 +3463,7 @@ async function executarTurnoDoAgente(
               tenantId,
               leadId,
               toStage: update.transition.to,
+              ...(agentConfig !== null ? { pipelineIds: agentConfig.pipelineIds } : {}),
               ...(update.transition.reason !== undefined
                 ? { reason: update.transition.reason }
                 : {}),
@@ -4235,7 +4291,10 @@ async function executarTurnoDoAgente(
           roteiro,
           corposEnviados,
           enviar: async (texto) => {
-            if (seq >= maxSendsPerTurn) return false;
+            // #1943: turno descartado como obsoleto → a pergunta do roteiro NÃO
+            // sai (segue pendente para o turno seguinte). Também vigia o teto
+            // de mensagens físicas do turno (F2-15b).
+            if (!perguntaDoRoteiroPodeSair({ turnoDescartado, seq, maxSendsPerTurn })) return false;
             const chain = await runBeforeSend({
               pool,
               log: runLog,
@@ -4246,6 +4305,9 @@ async function executarTurnoDoAgente(
               channelSessionId: input.channelSessionId,
               body: texto,
               optedOutThisTurn,
+              // Sai no MESMO turno da resposta: sem isto, às 3h com a janela de
+              // resposta aberta, o agente responde e a pergunta do roteiro é vetada.
+              resposta: eTurnoDeResposta(liveJob()),
               crmDailyLimit: null,
               // A pergunta repete por design (foi feita e não respondida); o
               // anti-blast vetaria justamente o que esta trava garante. Mesmo

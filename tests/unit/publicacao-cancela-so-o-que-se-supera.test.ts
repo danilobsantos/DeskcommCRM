@@ -1,7 +1,6 @@
 /**
  * O publish-image.yml cancela a rodada superada em pull_request E no push da
- * `production` (o `latest` superado é sobrescrito minutos depois — no fork, a
- * branch que publica é a `production`, não a `main`), mas NUNCA a de uma
+ * `main` (o `latest` superado é sobrescrito minutos depois), mas NUNCA a de uma
  * tag — é ela que publica a versão e promove `stable`. Aqui a expressão do
  * workflow é AVALIADA nos quatro eventos, não só lida.
  */
@@ -28,6 +27,7 @@ type Contexto = {
   workflow: string;
   pr?: number;
   matriz: string;
+  arquitetura: string;
   tentativa?: string;
   head?: string;
 };
@@ -45,6 +45,7 @@ function avaliar(expr: string, c: Contexto): unknown {
     .replace(/github\.workflow/g, "c.workflow")
     .replace(/github\.ref\b/g, "c.ref")
     .replace(/matrix\.name/g, "c.matriz")
+    .replace(/matrix\.arch/g, "c.arquitetura")
     .replace(/==/g, "===")
     .replace(/!=/g, "!==");
   const format = (modelo: string, ...args: unknown[]) =>
@@ -59,17 +60,17 @@ function interpolar(modelo: string, c: Contexto): string {
 
 const WORKFLOW = "Publicar imagem Docker (GHCR)";
 const EVENTOS = {
-  pr: { event_name: "pull_request", ref: "refs/pull/42/merge", workflow: WORKFLOW, pr: 42, matriz: "conecta-app" },
-  main: { event_name: "push", ref: "refs/heads/production", workflow: WORKFLOW, matriz: "conecta-app" },
-  tag: { event_name: "push", ref: "refs/tags/v1.35.0", workflow: WORKFLOW, matriz: "conecta-app" },
-  dispatch: { event_name: "workflow_dispatch", ref: "refs/heads/production", workflow: WORKFLOW, matriz: "conecta-app" },
+  pr: { event_name: "pull_request", ref: "refs/pull/42/merge", workflow: WORKFLOW, pr: 42, matriz: "deskcommcrm", arquitetura: "amd64" },
+  main: { event_name: "push", ref: "refs/heads/main", workflow: WORKFLOW, matriz: "deskcommcrm", arquitetura: "amd64" },
+  tag: { event_name: "push", ref: "refs/tags/v1.35.0", workflow: WORKFLOW, matriz: "deskcommcrm", arquitetura: "amd64" },
+  dispatch: { event_name: "workflow_dispatch", ref: "refs/heads/main", workflow: WORKFLOW, matriz: "deskcommcrm", arquitetura: "amd64" },
 } satisfies Record<string, Contexto>;
 
 describe("publish-image: cancela só o que se supera", () => {
   const cancela = campo("cancel-in-progress");
   const grupo = campo("group");
 
-  it("cancela PR e push da production; nunca tag nem dispatch", () => {
+  it("cancela PR e push da main; nunca tag nem dispatch", () => {
     expect(interpolar(cancela, EVENTOS.pr)).toBe("true");
     expect(interpolar(cancela, EVENTOS.main)).toBe("true");
     expect(interpolar(cancela, EVENTOS.tag)).toBe("false");
@@ -77,14 +78,16 @@ describe("publish-image: cancela só o que se supera", () => {
   });
 
   // Segunda trava, independente da primeira: mesmo que a condição mudasse, a
-  // tag cai num grupo só dela e não há rodada da production para cancelá-la.
-  it("tag fica fora do grupo da production — o grupo de uma tag é só dela", () => {
+  // tag cai num grupo só dela e não há rodada da main para cancelá-la.
+  it("tag fica fora do grupo da main — o grupo de uma tag é só dela", () => {
     const g = (c: Contexto) => interpolar(grupo, c);
     expect(g(EVENTOS.tag)).not.toBe(g(EVENTOS.main));
     expect(g(EVENTOS.tag)).toContain("refs/tags/v1.35.0");
     expect(g({ ...EVENTOS.tag, ref: "refs/tags/v1.36.0" })).not.toBe(g(EVENTOS.tag));
     // E a matriz entra no grupo: sem ela, o build do worker cancelaria o do app.
-    expect(g({ ...EVENTOS.pr, matriz: "conecta-worker" })).not.toBe(g(EVENTOS.pr));
+    expect(g({ ...EVENTOS.pr, matriz: "deskcomm-worker" })).not.toBe(g(EVENTOS.pr));
+    // A arquitetura também entra no grupo: os jobs ARM e AMD64 devem rodar juntos.
+    expect(g({ ...EVENTOS.main, arquitetura: "arm64" })).not.toBe(g(EVENTOS.main));
   });
 
   // Reentrada — aprovação de `action_required` ou rerun, ambas tentativa ≥ 2 —
