@@ -1122,6 +1122,7 @@ jobs:
         agenda-primeira-pintura-no-fuso.spec.ts
         agenda-portao-de-hidratacao.spec.ts
         etapa-pela-conversa.spec.ts
+        pausa-de-reentrada.spec.ts
         funil-arquivado-volta-pela-tela.spec.ts
         followup-builder.spec.ts
         followup-journey.spec.ts
@@ -1193,7 +1194,9 @@ jobs:
         agenda-google-meet.spec.ts
         agenda-presenca-recuperacao.spec.ts
         filtro-por-marcador-pela-tela.spec.ts
+        fonte-de-captacao-assina-os-envios.spec.ts
         inbox-busca-e-filtros-dizem-a-verdade.spec.ts
+        mapas-em-provedores.spec.ts
         painel-de-configuracao-da-instalacao.spec.ts
         protecao-de-envio-nao-congela-o-padrao.spec.ts
         prova-painel-provedores.spec.ts

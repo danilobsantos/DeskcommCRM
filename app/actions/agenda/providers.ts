@@ -6,7 +6,9 @@ import type { z } from "zod";
 
 import { audit } from "@/lib/audit";
 import { providerCreateSchema, providerUpdateSchema } from "@/lib/agenda/providers";
+import { podeAdministrarEmpresa } from "@/lib/auth/pode-administrar-empresa";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
+import { ROLE_RANK } from "@/lib/auth/types";
 import { supportWriteError } from "@/lib/impersonate/support";
 import { availabilityScheduleSchema } from "@/lib/schemas/routing";
 import { createClient } from "@/lib/supabase/server";
@@ -28,7 +30,7 @@ export async function criarProfissional(input: {
   }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
-  if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
+  if (!podeAdministrarEmpresa(user, activeOrg) && ROLE_RANK[activeOrg.role] < ROLE_RANK.manager) {
     return { ok: false, error: "Permissão insuficiente." };
   }
 
@@ -77,7 +79,7 @@ export async function atualizarProfissional(
   }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
-  if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
+  if (!podeAdministrarEmpresa(user, activeOrg) && ROLE_RANK[activeOrg.role] < ROLE_RANK.manager) {
     return { ok: false, error: "Permissão insuficiente." };
   }
 
@@ -129,7 +131,7 @@ export async function excluirProfissional(providerId: string): Promise<ProviderA
   }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
-  if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
+  if (!podeAdministrarEmpresa(user, activeOrg) && ROLE_RANK[activeOrg.role] < ROLE_RANK.manager) {
     return { ok: false, error: "Permissão insuficiente." };
   }
 
@@ -194,7 +196,7 @@ export async function alternarProfissionalAtivo(
   }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
-  if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
+  if (!podeAdministrarEmpresa(user, activeOrg) && ROLE_RANK[activeOrg.role] < ROLE_RANK.manager) {
     return { ok: false, error: "Permissão insuficiente." };
   }
 
@@ -234,7 +236,7 @@ export async function salvarJornadaProfissional(
   }
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return { ok: false, error: "Sem organização ativa." };
-  if (!user.is_platform_admin && !(activeOrg.role === "manager" || activeOrg.role === "admin")) {
+  if (!podeAdministrarEmpresa(user, activeOrg) && ROLE_RANK[activeOrg.role] < ROLE_RANK.manager) {
     return { ok: false, error: "Permissão insuficiente." };
   }
 

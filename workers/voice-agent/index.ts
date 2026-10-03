@@ -132,7 +132,7 @@ async function handleStasisStart(event: AriEvent) {
         contactId: callerContactId,
         conversationId: callRow.id,
         nomeDoContato: channel.caller?.name ?? null,
-        origem: { rotulo: "chamada", source: "voip", motivo: "primeira ligação recebida" },
+        origem: { rotulo: "telefone", source: "voip", motivo: "primeira ligação recebida" },
       });
       if (!nascimento.criado) {
         console.info(`[voice-agent] lead não criado para ${callerNumber}: ${nascimento.motivo}`);

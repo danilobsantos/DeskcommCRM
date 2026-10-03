@@ -246,7 +246,17 @@ unset _deskcomm_chamador
 # o override subiria o Caddy e ele iria bater de frente com o proxy da hospedagem.
 dc() {
   if [ "${SINGLE_SERVER:-0}" = "1" ]; then
-    docker compose -f "$COMPOSE" -f docker-compose.single-server.yml "$@"
+    # #2099: o single-server também respeita o proxy da hospedagem. Os dois
+    # ramos eram `if SINGLE_SERVER` → return ANTES do seletor, então o
+    # docker-compose.traefik.yml (ou npm) nunca entrava aqui: o Caddy do
+    # single-server subia e perdia o bind das 80/443 para o Traefik/NPM que já
+    # estava lá. Junta os dois: o overlay do proxy vem DEPOIS do overlay do
+    # single-server, e o padrão (sem a variável) continua só o single-server.
+    case "${REVERSE_PROXY:-caddy}" in
+    traefik) docker compose -f "$COMPOSE" -f docker-compose.single-server.yml -f "$COMPOSE_TRAEFIK" "$@" ;;
+    npm)     docker compose -f "$COMPOSE" -f docker-compose.single-server.yml -f "$COMPOSE_NPM" "$@" ;;
+    *)       docker compose -f "$COMPOSE" -f docker-compose.single-server.yml "$@" ;;
+    esac
     return
   fi
   case "${REVERSE_PROXY:-caddy}" in
@@ -261,7 +271,14 @@ dc() {
 # próprio dono derrubaria o site seguindo a instrução do kit.
 dc_files() {
   if [ "${SINGLE_SERVER:-0}" = "1" ]; then
-    printf -- '-f %s -f %s' "$COMPOSE" docker-compose.single-server.yml
+    # #2099: mesma junção de dc() — a lista de -f tem de bater com o que dc()
+    # realmente roda, ou a mensagem ensinaria o dono a omitir o overlay do
+    # proxy e ele derrubaria o site seguindo a instrução do kit.
+    case "${REVERSE_PROXY:-caddy}" in
+    traefik) printf -- '-f %s -f %s -f %s' "$COMPOSE" docker-compose.single-server.yml "$COMPOSE_TRAEFIK" ;;
+    npm)     printf -- '-f %s -f %s -f %s' "$COMPOSE" docker-compose.single-server.yml "$COMPOSE_NPM" ;;
+    *)       printf -- '-f %s -f %s' "$COMPOSE" docker-compose.single-server.yml ;;
+    esac
     return
   fi
   case "${REVERSE_PROXY:-caddy}" in
@@ -415,6 +432,42 @@ sincronizar_signup_mode_do_gotrue() {
   return 0
 }
 
+# ── E-mails de acesso: o GoTrue busca o MOLDE no app (#2109) ────────────────
+#
+# O molde padrão do GoTrue linka para `/auth/v1/verify`, e o clique em "esqueci
+# a senha" termina em `/login?error=link_invalido` (diagnóstico na #2109). As
+# rotas `/email-templates/recovery` e `/email-templates/confirmation` do app
+# emitem o link com `token_hash`, que `app/auth/confirm` sabe fechar.
+#
+# O compose oficial do Supabase não mapeia estas chaves para o serviço `auth`
+# (só `GOTRUE_SMTP_*` e `GOTRUE_MAILER_URLPATHS_*`), então elas valem DUAS
+# vezes: no .env do Supabase, que o compose interpola, e no
+# `supabase-single-server.override.yml`, que as entrega ao contêiner.
+#
+# Chamada pelo install-single-server.sh (com o domínio que ele recebeu) e por
+# atualizar_supabase_single_server (sem domínio: sai do SITE_URL que o
+# instalador gravou como https://DOMINIO). Valor já presente — no .env do
+# Supabase ou no ambiente — manda: nada sobrescreve um molde que o operador já
+# apontou. Sem URL https para montar o caminho, não grava nada: um molde
+# apontado para `localhost` seria pior que o padrão.
+gravar_modelos_do_gotrue() {  # gravar_modelos_do_gotrue <.env do Supabase> [https://DOMINIO]
+  local env_sb="$1" base="${2:-}" chave caminho valor
+  [ -f "$env_sb" ] || return 0
+  [ -n "$base" ] || base="$(valor_do_env "$env_sb" SITE_URL)"
+  case "$base" in https://?*) base="${base%/}" ;; *) return 0 ;; esac
+  for chave in GOTRUE_MAILER_TEMPLATES_CONFIRMATION GOTRUE_MAILER_TEMPLATES_RECOVERY; do
+    [ -n "$(valor_do_env "$env_sb" "$chave")" ] && continue
+    case "$chave" in
+      *CONFIRMATION) caminho=/email-templates/confirmation ;;
+      *) caminho=/email-templates/recovery ;;
+    esac
+    valor="${!chave:-}"
+    [ -n "$valor" ] || valor="${base}${caminho}"
+    set_env_var "$env_sb" "$chave" "$valor"
+  done
+  return 0
+}
+
 # ── O update.sh leva o Supabase até a versão pinada ──────────────────────────
 #
 # O `update.sh` oficial do Supabase faz o merge de três vias dos arquivos dele
@@ -434,6 +487,10 @@ atualizar_supabase_single_server() {
       c_ylw "$(t "⚠ O Supabase não foi atualizado; segue na versão {1}. A próxima atualização tenta de novo." "${atual:-$(t "anterior")}")"
     fi
   fi
+  # #2109 — no corpo desta função, e não numa linha do update.sh, pelo mesmo
+  # motivo do #1653 logo abaixo. Antes do `up -d --wait`: o compose recria o
+  # auth com o ambiente novo, sem reinício à parte.
+  gravar_modelos_do_gotrue "$dir/.env"
   dc_supabase up -d --wait || return 1
   # #1653 — a sincronização do modo de cadastro mora AQUI, no corpo desta
   # função, e não numa linha do update.sh. Na atualização que traz este
@@ -660,7 +717,20 @@ religar_o_supabase() {
 }
 
 restaurar_servicos() {
+  # O código de SAÍDA da execução que está terminando, capturado antes de
+  # qualquer coisa: é ele que o diagnóstico (#1955) relata como desfecho. Este
+  # é o gatilho `trap restaurar_servicos EXIT INT TERM HUP` do update.sh — e é
+  # também por ele que TODO run termina com diagnóstico persistido.
+  local rc_da_execucao=$?
   religar_o_supabase
+  # O rollback dos pins ANTES de qualquer subida (#1955, critério 4). É esta
+  # linha que faz o `dc up -d` lá embaixo trazer a versão de ANTES: sem ela, o
+  # ambiente e o `.env` seguem apontando para a imagem que falhou, e a "volta"
+  # deixa os serviços em `Created`/`Exited`. No-op quando a atualização não
+  # passou da troca de versão (ou quando terminou bem e o rollback foi
+  # desarmado) — e também é no-op em qualquer outro script do kit, que não
+  # arma nada.
+  restaurar_versao_anterior
   # ⛔ O CRM NÃO VOLTA AO AR COM REGRA DE ISOLAMENTO FALTANDO.
   #
   # Um CRM fora do ar é um problema visível que alguém resolve em minutos. Um
@@ -673,6 +743,7 @@ restaurar_servicos() {
     # ⚠️ O aviso de manutenção NÃO desce aqui, de propósito. Com regra faltando o
     # CRM não volta, e a página é a única coisa que explica isso a quem tentar
     # abrir o sistema — melhor que um erro de conexão sem autor.
+    diagnostico_de_atualizacao "$rc_da_execucao"
     return 0
   fi
   # O aviso desce ANTES de o CRM subir, e não depois. Com o Caddy do próprio kit
@@ -685,6 +756,9 @@ restaurar_servicos() {
   # agent.sh também sourceiam este arquivo e não têm o que derrubar.
   declare -F manutencao_desce >/dev/null 2>&1 && manutencao_desce
   dc up -d app worker scheduler >/dev/null 2>&1 || true
+  # Por ÚLTIMO: assim o diagnóstico mostra o estado DEPOIS da volta, que é o
+  # que interessa a quem for ler o arquivo depois (#1955, critério 5).
+  diagnostico_de_atualizacao "$rc_da_execucao"
 }
 
 # ── Imagem pronta que não serve para esta VPS: constrói a versão aqui ────────
@@ -727,6 +801,277 @@ construir_aqui_e_subir() {  # construir_aqui_e_subir [versão alvo] → 0 se sub
     c_red "$(t "✖ As imagens foram construídas, mas os serviços não subiram.")"
     return 1
   fi
+  return 0
+}
+
+# ── O que fazer quando o REGISTRO DE IMAGENS não responde (#1955) ───────────
+#
+# MEDIDO numa instalação real da HostGator, reproduzido duas vezes: durante um
+# update pela tela o resolver do Docker saturou (`[resolver] more than 1024
+# concurrent queries`, `dial udp 8.8.4.4:53: i/o timeout`), o `pull` e o
+# `up -d` morreram, e o script caiu no fallback de CONSTRUÇÃO LOCAL — que
+# gastou a memória inteira da VPS no `next-build` (OOM) e deixou app, worker,
+# scheduler e proxy em `Created`/`Exited`. 502 para todo mundo até alguém
+# reiniciar o Docker à mão.
+#
+# Três peças fecham a classe inteira, e elas são as que faltavam:
+#
+#   1. `preflight_atualizacao` — pergunta ao registro ANTES de parar qualquer
+#      coisa. Falhou? `refuse` (RC 3): a versão atual segue no ar intocada.
+#   2. `build_local_permitido` — construção local deixa de ser o que acontece
+#      SOZINHO quando o registro não responde. Continua sendo o caminho de
+#      quem quer de propósito (DESKCOMM_BUILD_LOCAL=1) e de quem tem registro
+#      respondendo (a recuperação de arquitetura, #1060/#1143).
+#   3. `restaurar_versao_anterior` + `diagnostico_de_atualizacao` — o rollback
+#      dos pins de versão e o laço que garante diagnóstico no fim de TODO run.
+#
+# O prazo é a outra metade: sem ele o `docker ps` também trava (foi o que
+# prendeu o healthcheck no passo "▶ Containers") e nenhum destes sinais chega
+# a existir — o script simplesmente nunca termina.
+com_prazo() {  # com_prazo <segundos> <comando...>
+  local prazo="$1"; shift
+  # `timeout` é do coreutils e está em todo Linux onde o kit roda; sem ele o
+  # comportamento continua o antigo, não nasce um erro novo.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$prazo" "$@"
+  else
+    "$@"
+  fi
+}
+
+# As QUATRO imagens da release estão prontas no registro?
+#
+# O agente da tela anunciava "nova versão" olhando SÓ a etiqueta no Git e SÓ a
+# imagem do app: um run de publicação que morresse no meio deixava a release
+# anunciada com o worker (ou o scheduler, ou a voz) inexistente — e era o
+# `up -d` de quem clicava em "Atualizar" que descobria.
+#
+# Ecoa: prontas | incompleta | indisponivel
+#   prontas       → as quatro existem;
+#   incompleta    → ALGUMA falta e o registro respondeu = publicação incompleta;
+#   indisponivel  → NENHUMA respondeu = o registro/DNS está fora (ou a tag nem
+#                   existe, o que para o chamador dá no mesmo: não se sabe).
+veredito_das_imagens_da_release() {  # veredito_das_imagens_da_release <versão>
+  local versao="${1:-}" img total=0 achadas=0
+  versao="${versao#v}"
+  [ -n "$versao" ] || { printf 'indisponivel'; return 0; }
+  for img in "$IMG_APP" "$IMG_WORKER" "$IMG_SCHEDULER" "$IMG_VOICE_AGENT"; do
+    total=$((total + 1))
+    if com_prazo 20 docker buildx imagetools inspect "${img}:${versao}" >/dev/null 2>&1; then
+      achadas=$((achadas + 1))
+    fi
+  done
+  if [ "$achadas" -eq "$total" ]; then
+    printf 'prontas'
+  elif [ "$achadas" -eq 0 ]; then
+    printf 'indisponivel'
+  else
+    printf 'incompleta'
+  fi
+}
+
+# O preflight: dá para atualizar sem derrubar o que está no ar?
+# → 0 = pode seguir; 1 = NÃO pode, com o motivo na stdout.
+#
+# Este é o critério 3 da issue: preflight falho mantém a versão ATUAL no ar.
+# Por isso ele roda antes do backup, antes do `git checkout` e antes de
+# qualquer `docker stop` — o `refuse` devolve RC 3, que o agent.sh lê como
+# "esta atualização nunca começou" e não tenta desfazer nada.
+preflight_atualizacao() {  # preflight_atualizacao <versão alvo>
+  local versao="${1:-}" veredito
+  versao="${versao#v}"
+  if ! com_prazo 30 docker info >/dev/null 2>&1; then
+    printf '%s' "o Docker não respondeu em 30s (daemon parado ou travado — veja 'systemctl status docker' e 'journalctl -u docker -n 100')."
+    return 1
+  fi
+  # Quem pediu construção local de propósito não depende do registro: é a
+  # saída de escape que o próprio portão do build ensina, e recusá-la aqui a
+  # anularia justamente com o registro fora.
+  build_local_pedido && return 0
+  # Sem o plugin buildx a sonda abaixo falha nas quatro imagens, e o motivo
+  # sairia como "registro fora (DNS/rede)" — diagnóstico errado, e o dono iria
+  # mexer na rede de uma VPS cuja rede está boa.
+  if ! com_prazo 20 docker buildx version >/dev/null 2>&1; then
+    printf '%s' "o plugin buildx do Docker não está instalado nesta VPS, e é com ele que confiro se a versão $versao está publicada. Instale o pacote docker-buildx-plugin. Nada foi parado nem baixado."
+    return 1
+  fi
+  veredito="$(veredito_das_imagens_da_release "$versao")"
+  case "$veredito" in
+    prontas) return 0 ;;
+    incompleta)
+      printf '%s' "a versão $versao está INCOMPLETA no registro: uma ou mais das quatro imagens (app, worker, scheduler, voz) ainda não existe — o run de publicação não terminou. Nada foi parado nem baixado."
+      return 1 ;;
+    *)
+      printf '%s' "não consegui falar com o registro de imagens (DNS/rede) para a versão $versao. Nada foi parado nem baixado: a versão atual segue no ar."
+      return 1 ;;
+  esac
+}
+
+# A construção local continua sendo o caminho de quem TEM registro respondendo
+# (é a recuperação de arquitetura, #1060/#1143 — ela não pode sumir) e de quem
+# pede de propósito. O que ela deixou de ser é AUTOMÁTICA quando quem falhou é
+# o registro: foi exatamente isso que transformou um apagão de DNS em OOM no
+# `next-build` e a instalação em 502 (#1955, critério 2).
+#
+# → 0 = pode construir aqui.
+build_local_pedido() {  # → 0 quando quem opera pediu construção local de propósito
+  case "${DESKCOMM_BUILD_LOCAL:-}" in 1|sim|s|yes) return 0 ;; esac
+  return 1
+}
+
+build_local_permitido() {  # build_local_permitido <versão alvo>
+  build_local_pedido && return 0
+  case "${DESKCOMM_BUILD_LOCAL:-}" in
+    0|nao|não|no) return 1 ;;  # quem opera proibiu de propósito
+  esac
+  [ "$(veredito_das_imagens_da_release "${1:-}")" != "indisponivel" ]
+}
+
+# Os serviços que deveriam estar de pé depois do `up -d` (#1955, critério 6).
+# Ecoa, um por linha, os que NÃO estão rodando. Vazio = "não sei".
+#
+# "Não sei" NUNCA vira rollback: derrubar uma instalação que está de pé por
+# causa de um `ps` que falhou seria o defeito de antes, só que invertido. Só
+# se devolve a versão anterior quando há UM SERVIÇO POSITIVAMENTE fora do ar.
+servicos_fora_do_ar() {
+  local esperados="app worker scheduler" saida svc estado conhecidos=0 rodando=" " fora=""
+  case "${REVERSE_PROXY:-caddy}" in traefik|npm) ;; *) esperados="$esperados caddy" ;; esac
+  # shellcheck disable=SC2046
+  # Com prazo pelo mesmo motivo do healthcheck: um `ps` preso no resolver
+  # saturado prenderia aqui o fim da atualização. Estourou = "não sei".
+  saida="$(com_prazo 30 docker compose $(dc_files) ps -a --format '{{.Service}} {{.State}}' 2>/dev/null)" || return 0
+  [ -n "$saida" ] || return 0
+  while read -r svc estado; do
+    [ -n "${svc:-}" ] || continue
+    # CONHECER o estado e estar RODANDO são perguntas diferentes: `exited` e
+    # `created` provam que o `ps` respondeu (então a lista vale), mas são
+    # justamente o serviço fora do ar que esta conferência existe para pegar.
+    case "$estado" in
+      running|Up*)
+        conhecidos=$((conhecidos + 1))
+        rodando="${rodando}${svc} " ;;
+      exited|created|paused|restarting|dead|removing|Exit*)
+        conhecidos=$((conhecidos + 1)) ;;
+    esac
+  done <<EOF
+$saida
+EOF
+  [ "$conhecidos" -gt 0 ] || return 0
+  for svc in $esperados; do
+    case "$rodando" in *" $svc "*) ;; *) fora="${fora}${fora:+ }${svc}" ;; esac
+  done
+  printf '%s' "$fora"
+}
+
+# ── O rollback dos pins de versão (#1955, critério 4) ───────────────────────
+#
+# `gravar_imagens` troca os OITO pins de versão do `.env` ANTES de baixar
+# qualquer coisa, e o `update.sh` exporta as quatro imagens por cima. Daí em
+# diante, TODO `docker compose up -d` usa o endereço da versão NOVA — inclusive
+# o da volta, o do gatilho de saída e o do `up -d` manual que o dono roda
+# depois. Se a nova imagem não existe (registro fora, publicação incompleta),
+# a "volta" deixa os serviços em `Created`: era o desfecho da issue.
+#
+# O snapshot é a cópia fiel dos pins ANTES da troca; a restauração reescreve o
+# arquivo E reexporta as variáveis, porque o compose prefere o ambiente ao
+# `.env` — restaurar só o arquivo seria rollback no papel, com o ambiente ainda
+# apontando para a versão que falhou.
+CHAVES_DE_VERSAO="APP_IMAGE APP_PULL_POLICY WORKER_IMAGE WORKER_PULL_POLICY SCHEDULER_IMAGE SCHEDULER_PULL_POLICY VOICE_AGENT_IMAGE VOICE_AGENT_PULL_POLICY"
+SNAPSHOT_DE_VERSAO=".deskcomm-env-antes-do-update"
+
+armar_rollback_de_versao() {  # armar_rollback_de_versao <envfile>
+  local envfile="${1:-}" snap tmp
+  [ -f "$envfile" ] || return 0
+  # `${envfile%/*}` não corta nada num caminho sem barra (`.env` relativo, que
+  # é como o update.sh chama), e o snapshot caeria DENTRO de um arquivo.
+  case "$envfile" in
+    */*) snap="${envfile%/*}/${SNAPSHOT_DE_VERSAO}" ;;
+    *)   snap="./${SNAPSHOT_DE_VERSAO}" ;;
+  esac
+  tmp="${snap}.tmp.$$"
+  # Só as chaves que EXISTEM agora: uma chave ausente é omissão de uma
+  # instalação antiga, e a restauração tem de voltar a deixá-la ausente.
+  grep -E "^($(printf '%s' "$CHAVES_DE_VERSAO" | tr ' ' '|'))=" "$envfile" > "$tmp" 2>/dev/null || true
+  mv "$tmp" "$snap" 2>/dev/null || return 0
+  ROLLBACK_ENV_SNAPSHOT="$snap"
+  ROLLBACK_ENV_ARQUIVO="$envfile"
+  return 0
+}
+
+# Desarma sem apagar o arquivo: ele é a prova do estado anterior, e a próxima
+# execução o sobrescreve. Chamado no único ponto em que a atualização PROVOU
+# ter terminado (app saudável e serviços de pé).
+desarmar_rollback_de_versao() {
+  ROLLBACK_ENV_SNAPSHOT=""
+  return 0
+}
+
+restaurar_versao_anterior() {  # → 0 sempre (rollback que falha não mata a volta)
+  [ -n "${ROLLBACK_ENV_SNAPSHOT:-}" ] || return 0
+  [ -f "${ROLLBACK_ENV_SNAPSHOT:-}" ] || { ROLLBACK_ENV_SNAPSHOT=""; return 0; }
+  local envfile="${ROLLBACK_ENV_ARQUIVO:-}" tmp k v re
+  [ -n "$envfile" ] && [ -f "$envfile" ] || return 0
+  re="^($(printf '%s' "$CHAVES_DE_VERSAO" | tr ' ' '|'))="
+  tmp="${envfile}.rollback.$$"
+  grep -vE "$re" "$envfile" > "$tmp" 2>/dev/null || true
+  cat "$ROLLBACK_ENV_SNAPSHOT" >> "$tmp" 2>/dev/null || true
+  # O modo do `.env` (600) sobrevive ao `mv`: trocar de inode sem herdá-lo
+  # deixaria os segredos legíveis por outro usuário da VPS.
+  chmod --reference="$envfile" "$tmp" 2>/dev/null || chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$envfile" 2>/dev/null || return 0
+  # E as variáveis EXPORTADAS voltam junto — sem isto o rollback é só papel.
+  for k in $CHAVES_DE_VERSAO; do
+    v="$(sed -n "s/^${k}=//p" "$envfile" 2>/dev/null | tail -1)"
+    if [ -n "$v" ]; then
+      export "$k=$v" 2>/dev/null || true
+    else
+      unset "$k" 2>/dev/null || true
+    fi
+  done
+  ROLLBACK_ENV_SNAPSHOT=""
+  UPDATE_ROLLBACK="pins restaurados para a versão anterior"
+  return 0
+}
+
+# ── O diagnóstico que TODO run deixa para trás (#1955, critério 5) ──────────
+#
+# Escrito por um gatilho no TOPO do update.sh (cobre os caminhos que morrem
+# antes do banco) e por `restaurar_servicos` daí para baixo — os dois escrevem
+# no MESMO arquivo. Sem ele, a única evidência de um update que morreu era a
+# cauda do log que o agente guarda, e o apagão de resolver descrito na issue
+# não deixava rastro nenhum de POR QUÊ.
+#
+# Silencioso de propósito: sai no arquivo, nunca na stdout (um "✓" a mais na
+# tela de quem está operando é ruído, e ruído ensina a ignorar a saída).
+# Tudo com `|| true` — este código roda dentro de gatilho de saída, onde
+# falhar é pior do que não dizer.
+diagnostico_de_atualizacao() {
+  local rc="${1:-$?}" arq="${DIAGNOSTICO_ARQUIVO:-}" status
+  [ -n "$arq" ] || return 0
+  status="${UPDATE_STATUS:-em andamento}"
+  if [ "$rc" -ne 0 ] && [ "$status" = "em andamento" ]; then
+    status="FALHA (a execução saiu pelo caminho de erro)"
+  elif [ "$rc" -eq 0 ] && [ "$status" = "em andamento" ]; then
+    status="concluído"
+  fi
+  {
+    printf '══ diagnóstico da atualização do DeskcommCRM ══\n'
+    printf 'quando:     %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || date)"
+    printf 'diretório:  %s\n' "${PROJECT_DIR:-$PWD}"
+    printf 'status:     %s\n' "$status"
+    printf 'código:     %s\n' "$rc"
+    printf 'etapa:      %s\n' "${UPDATE_ETAPA:-desconhecida}"
+    printf 'alvo:       %s\n' "${TARGET_TAG:-—}"
+    printf 'instalada:  %s\n' "${CURRENT_TAG:-—}"
+    printf 'rollback:   %s\n' "${UPDATE_ROLLBACK:-não precisou (a atualização não passou da troca de versão)}"
+    printf 'containers:\n'
+    # shellcheck disable=SC2046
+    # Com prazo: este bloco roda no gatilho de SAÍDA, inclusive quando o
+    # preflight recusou porque o Docker não respondeu — sem prazo, o `ps`
+    # travaria ali e a atualização nunca terminaria.
+    com_prazo 30 docker compose $(dc_files) ps -a 2>/dev/null || printf '  (o Docker não respondeu em 30s)\n'
+    printf '\n'
+  } >> "$arq" 2>/dev/null || true
   return 0
 }
 
@@ -937,7 +1282,7 @@ c_grn() { paint 32 "$*"; }
 c_ylw() { paint 33 "$*"; }
 c_dim() { paint 2  "$*"; }
 die()   { c_red "✖ $*"; exit 1; }
-step()  { printf '\n'; paint 1 "▶ $*"; }
+step()  { printf '\n'; paint 1 "▶ $*"; UPDATE_ETAPA="$*"; }
 
 # Gêmea da de install.sh (se mexer numa, mexa na outra) — ver o comentário lá
 # para o defeito que ela fecha. Coberta por test-validators.sh.

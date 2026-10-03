@@ -62,7 +62,20 @@ vi.mock("@/lib/supabase/admin", () => ({
         },
         update: (patch: Record<string, unknown>) => {
           updateEqMock(patch);
-          return { eq: () => ({ eq: async () => ({ error: null }) }) };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const chain: any = new Proxy(
+            {
+              eq: () => chain,
+              neq: () => chain,
+              select: () => chain,
+              then: (onFulfilled: (v: unknown) => void, onRejected?: (e: unknown) => void) => {
+                const p = Promise.resolve({ data: [messageRow], error: null });
+                return p.then(onFulfilled, onRejected);
+              },
+            },
+            { get: (alvo, prop) => (prop in alvo ? alvo[prop as keyof typeof alvo] : () => chain) },
+          );
+          return chain;
         },
         then: (resolve: (v: unknown) => unknown) =>
           Promise.resolve({ data: linha ? [linha] : [], error: null }).then(resolve),
@@ -113,7 +126,7 @@ vi.mock("@/lib/agent-engine/edge/llm/credentials", () => {
   };
 });
 
-import { deriveMessageMedia, buildDeriveDeps, MARCADOR_NAO_LIDA } from "@/workers/media-derive-worker";
+import { deriveMessageMedia, MARCADOR_NAO_LIDA } from "@/workers/media-derive-worker";
 import { deriveMediaText } from "@/lib/messaging/media/derive";
 import { resolveOrgLlmConfig, LlmNotConfiguredError, type OrgLlmConfig } from "@/lib/agent-engine/edge/llm/credentials";
 import { DETALHE_TECNICO } from "@/lib/event-log/aviso-de-evento-morto";
@@ -268,36 +281,21 @@ describe("deriveMessageMedia", () => {
     );
   });
 
-  it("quando a org não tem credencial LLM (LlmNotConfiguredError), não falha permanentemente: deriva áudio via OpenAI", async () => {
+  // Desenho da #2171 (escada de transcrição, merge main→dev 2026-10-03): sem
+  // credencial LLM utilizável o erro SOBE em vez do fallback silencioso para a
+  // OpenAI — a tentativa devolve `error` (o dreno tenta de novo) e, na última,
+  // grava `failed` + MARCADOR + aviso na Central. O caso antigo ("deriva áudio
+  // via OpenAI") media o desenho pré-escada e contradiz o fluxo atual.
+  it("quando a org não tem credencial LLM (LlmNotConfiguredError), a tentativa falha com erro e não grava transcrição", async () => {
     vi.mocked(resolveOrgLlmConfig)
       .mockReset()
-      .mockRejectedValueOnce(new LlmNotConfiguredError())
-      .mockResolvedValueOnce({
-        provider: "openai",
-        apiKey: "sk-openai",
-        defaultModel: "gpt-5",
-        origemDaChave: "chave_da_instalacao",
-        params: {},
-        enabledModels: [],
-        orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
-        orcamentoIndisponivelPorque: null,
-        baseUrl: null,
-      });
+      .mockRejectedValueOnce(new LlmNotConfiguredError());
 
     const r = await deriveMessageMedia(eventRow());
-    expect(r.status).toBe("ok");
-    expect(updateEqMock).toHaveBeenCalledWith(
-      expect.objectContaining({ media_derived_text: "transcrição do áudio real", media_derived_status: "ready" }),
+    expect(r.status).toBe("error");
+    expect(updateEqMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ media_derived_status: "ready" }),
     );
-  });
-
-  it("quando a org não tem credencial LLM e é imagem, buildDeriveDeps gera MARCADOR_NAO_LIDA e avisa", async () => {
-    const adminFake = { from: fromMock };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deps = buildDeriveDeps(null, null, "org1", adminFake as any);
-    const texto = await deps.describeImage(Buffer.from([1, 2, 3]), "image/jpeg");
-    expect(texto).toBe(MARCADOR_NAO_LIDA);
-    expect(fromMock).toHaveBeenCalledWith("agent_inbox_items");
   });
 
   /**
