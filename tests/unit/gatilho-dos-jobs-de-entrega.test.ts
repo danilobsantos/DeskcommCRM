@@ -79,27 +79,35 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "tag nasce, nenhuma imagem sai, `stable` congela, e a descoberta é um cliente " +
       "rodando `update.sh` e não recebendo nada.",
   },
-  "publish-image.yml::a-tag-veio-da-production": {
+  "publish-image.yml::a-tag-veio-da-main": {
     condicao: null,
     efeito:
-      "Esta é a trava de procedência: nenhuma tag publica sem estar contida na `production`. " +
+      "Esta é a trava de procedência: nenhuma tag publica sem estar contida na `main`. " +
       "Ela é SEM `if:` de propósito — pulada, ela deixaria `build-and-push` pulado junto " +
       "e o `imagens-ok` leria `skipped` como reprovação.",
   },
-  // Em pull_request ele só construía e descartava as MESMAS imagens que os
-  // dois jobs `*-sobe` já constroem — builds Docker por push de PR sem medir
-  // nada a mais. No fork, sem `if:` (condição nula): o `imagens-ok` exige
-  // `success` dele em todo evento.
+  // Em pull_request ele só construía e descartava as MESMAS quatro imagens que os
+  // dois jobs `*-sobe` já constroem — 4 builds Docker por push de PR sem medir
+  // nada a mais. A condição tira só o PR; o `imagens-ok` exige `success` dele
+  // em todo outro evento e aceita `skipped` só em pull_request.
   "publish-image.yml::build-and-push": {
-    condicao: null,
+    condicao: "github.event_name != 'pull_request'",
     efeito:
-      "Este job PUBLICA as três imagens no GHCR — é o artefato que o self-hoster instala. " +
+      "Este job PUBLICA as quatro imagens no GHCR — é o artefato que o self-hoster instala. " +
       "Desligá-lo faz a tag existir sem imagem por trás dela.",
   },
-  // O fork não pula build em PR: sem `if:`, a condição é nula e o `imagens-ok`
-  // exige `success` sempre.
+  "publish-image.yml::juntar-manifestos": {
+    condicao: "github.event_name != 'pull_request'",
+    efeito:
+      "Este job junta os builds nativos AMD64 e ARM64 em cada tag que o cliente puxa. " +
+      "Desligá-lo deixa as tags finais sem um manifesto multi-arquitetura utilizável.",
+  },
+  // A condição só é falsa em pull_request que não alcança imagem nenhuma
+  // (scripts/pr-mexe-na-imagem.sh); fora de PR o output é sempre `sim`. O
+  // `imagens-ok` aceita o `skipped` SÓ nessa combinação — medida pela matriz
+  // de desfechos em tests/unit/imagens-ok-so-aceita-pulo-declarado.test.ts.
   "publish-image.yml::imagem-do-app-sobe": {
-    condicao: null,
+    condicao: "needs.a-tag-veio-da-main.outputs.imagem == 'sim'",
     efeito:
       "Este job prova que a imagem do app BOOTA, não só que ela constrói. Desligá-lo " +
       "devolve o defeito que derrubou a produção: imagem publicada que morre no " +
@@ -127,7 +135,7 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
   // Desligá-lo devolve exatamente esse buraco: a imagem publica, o canal anda,
   // e nada prova que o laço do event_log chegou a carregar.
   "publish-image.yml::imagens-de-fundo-sobem": {
-    condicao: null,
+    condicao: "needs.a-tag-veio-da-main.outputs.imagem == 'sim'",
     efeito:
       "Este job prova que o worker BOOTA com o laço do event_log carregado e que o " +
       "scheduler tem o evento no crontab. Desligá-lo (`skipped`) faz a tag existir com " +
@@ -141,12 +149,6 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "Ele precisa de `always()` para poder LER `skipped` dos `needs` e reprovar — e " +
       "desligá-lo (`always() && false`) o torna `skipped` ele mesmo, que a branch " +
       "protection lê como satisfeito.",
-  },
-  "publish-image.yml::deploy-dokploy": {
-    condicao:
-      "always() && github.event_name != 'pull_request' && needs.build-and-push.result == 'success' && needs.imagem-do-app-sobe.result == 'success' && needs.imagens-ok.result == 'success' && (needs.promover-stable.result == 'success' || needs.promover-stable.result == 'skipped')",
-    efeito:
-      "Dispara o webhook de deploy do Dokploy assim que as imagens estiverem publicadas.",
   },
 
   // --- os outros checks obrigatórios ------------------------------------------

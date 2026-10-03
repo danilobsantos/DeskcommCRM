@@ -469,6 +469,8 @@ export const AUDIT_ACTIONS = [
   // de mídia, então precisa de dono na trilha como a conexão acima.
   "google_ads_conversion_rules.updated",
   "google_ads_conversion_action.created",
+  // O que cada etapa do funil informa à Meta (0524) — o par da regra acima.
+  "meta_ads_conversion_rules.updated",
   // A conexão de LEITURA da organização com a conta de anúncios (0214).
   // Ação SEPARADA da de cima, e não um `metadata.purpose` na mesma: a pergunta
   // que cada trilha responde é diferente. "Quem apontou minhas vendas para este
@@ -1009,6 +1011,18 @@ export const AUDIT_ACTIONS = [
   // Profissional externo excluído (migration 9003; action criada com a
   // exclusão — desligar continua sendo `agenda.provider_updated {active}`).
   "agenda.provider_deleted",
+  // A chave de Mapas da organização (0504, Agente de IA › Provedores): gravada ou
+  // trocada, e removida. O metadata diz O QUE mudou — nunca a chave.
+  "ai.maps_credential_saved",
+  "ai.maps_credential_removed",
+
+  // A assinatura do emissor (#2066, PR #2079): quem ligou ou desligou o nome de
+  // quem fala nas mensagens ao cliente, e com que nome a IA passou a assinar.
+  "settings.message_signature_updated",
+
+  // A identidade da Página/WABA que a Meta exige no Purchase de clique-para-WhatsApp
+  // (#2098): gravada pela tela de Conversões, em `organizations.settings.conversions`.
+  "conversions.meta_identity_updated",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

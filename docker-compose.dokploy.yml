@@ -101,7 +101,7 @@ services:
 
   waha:
     mem_limit: 1280m
-    image: ${WAHA_IMAGE:-devlikeapro/waha:latest-2026.7.2}
+    image: ${WAHA_IMAGE:-devlikeapro/waha:latest-2026.9.2}
     restart: unless-stopped
     environment:
       WAHA_API_KEY: "${WAHA_API_KEY:-waha_secret_token_123456}"

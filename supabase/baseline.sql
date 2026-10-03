@@ -334,6 +334,16 @@ $$;
 
 
 ALTER FUNCTION "public"."fn_is_platform_admin"() OWNER TO "postgres";
+CREATE OR REPLACE FUNCTION "public"."fn_is_platform_admin_full"() RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (
+    select 1 from public.platform_admins
+    where user_id = auth.uid() and revoked_at is null and scope = 'full'
+  );
+$$;
+ALTER FUNCTION "public"."fn_is_platform_admin_full"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."fn_lgpd_cascade_redact_contact"("p_organization_id" "uuid", "p_contact_id" "uuid", "p_request_id" "uuid") RETURNS "jsonb"
@@ -4033,8 +4043,9 @@ ALTER TABLE "public"."api_tokens" ENABLE ROW LEVEL SECURITY;
 
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
-                WHERE polname = 'api_tokens_admin_only' AND polrelid = '"public"."api_tokens"'::regclass) THEN
-CREATE POLICY "api_tokens_admin_only" ON "public"."api_tokens" USING (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin"())) WITH CHECK (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin"()));
+                WHERE polname = 'api_tokens_tenant_read' AND polrelid = '"public"."api_tokens"'::regclass) THEN
+CREATE POLICY "api_tokens_tenant_read" ON "public"."api_tokens" FOR SELECT USING (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "api_tokens_admin_write" ON "public"."api_tokens" FOR ALL USING (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin_full"())) WITH CHECK (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4042,7 +4053,7 @@ END IF; END $baseline_guard$;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'audit_log_insert_tenant_member' AND polrelid = '"public"."api_audit_log"'::regclass) THEN
-CREATE POLICY "audit_log_insert_tenant_member" ON "public"."api_audit_log" FOR INSERT TO "authenticated" WITH CHECK ((("organization_id" IS NULL) OR ("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "audit_log_insert_tenant_member" ON "public"."api_audit_log" FOR INSERT TO "authenticated" WITH CHECK ((("organization_id" IS NULL) OR ("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4121,7 +4132,7 @@ END IF; END $baseline_guard$;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'lgpd_requests_admin_write' AND polrelid = '"public"."lgpd_requests"'::regclass) THEN
-CREATE POLICY "lgpd_requests_admin_write" ON "public"."lgpd_requests" USING (("public"."fn_is_platform_admin"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'admin'::"text")))) WITH CHECK (("public"."fn_is_platform_admin"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'admin'::"text"))));
+CREATE POLICY "lgpd_requests_admin_write" ON "public"."lgpd_requests" USING (("public"."fn_is_platform_admin_full"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'admin'::"text")))) WITH CHECK (("public"."fn_is_platform_admin_full"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'admin'::"text"))));
 END IF; END $baseline_guard$;
 
 
@@ -4140,7 +4151,7 @@ END IF; END $baseline_guard$;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'merge_queue_manager_write' AND polrelid = '"public"."merge_queue"'::regclass) THEN
-CREATE POLICY "merge_queue_manager_write" ON "public"."merge_queue" USING (("public"."fn_is_platform_admin"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text")))) WITH CHECK (("public"."fn_is_platform_admin"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text"))));
+CREATE POLICY "merge_queue_manager_write" ON "public"."merge_queue" USING (("public"."fn_is_platform_admin_full"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text")))) WITH CHECK (("public"."fn_is_platform_admin_full"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text"))));
 END IF; END $baseline_guard$;
 
 
@@ -4153,8 +4164,9 @@ ALTER TABLE "public"."nuvemshop_products" ENABLE ROW LEVEL SECURITY;
 
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
-                WHERE polname = 'nuvemshop_products_tenant' AND polrelid = '"public"."nuvemshop_products"'::regclass) THEN
-CREATE POLICY "nuvemshop_products_tenant" ON "public"."nuvemshop_products" USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+                WHERE polname = 'nuvemshop_products_read' AND polrelid = '"public"."nuvemshop_products"'::regclass) THEN
+CREATE POLICY "nuvemshop_products_read" ON "public"."nuvemshop_products" FOR SELECT USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "nuvemshop_products_tenant_write" ON "public"."nuvemshop_products" FOR ALL USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4173,7 +4185,7 @@ END IF; END $baseline_guard$;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'orders_tenant_write' AND polrelid = '"public"."orders"'::regclass) THEN
-CREATE POLICY "orders_tenant_write" ON "public"."orders" USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "orders_tenant_write" ON "public"."orders" USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4192,15 +4204,16 @@ END IF; END $baseline_guard$;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'orgs_write_platform_admin' AND polrelid = '"public"."organizations"'::regclass) THEN
-CREATE POLICY "orgs_write_platform_admin" ON "public"."organizations" USING ("public"."fn_is_platform_admin"()) WITH CHECK ("public"."fn_is_platform_admin"());
+CREATE POLICY "orgs_write_platform_admin" ON "public"."organizations" USING ("public"."fn_is_platform_admin_full"()) WITH CHECK ("public"."fn_is_platform_admin_full"());
 END IF; END $baseline_guard$;
 
 
 
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
-                WHERE polname = 'platform_admin_only_incidents' AND polrelid = '"public"."incidents"'::regclass) THEN
-CREATE POLICY "platform_admin_only_incidents" ON "public"."incidents" USING ("public"."fn_is_platform_admin"()) WITH CHECK ("public"."fn_is_platform_admin"());
+                WHERE polname = 'incidents_tenant_read' AND polrelid = '"public"."incidents"'::regclass) THEN
+CREATE POLICY "incidents_tenant_read" ON "public"."incidents" FOR SELECT USING ("public"."fn_is_platform_admin"());
+CREATE POLICY "incidents_admin_write" ON "public"."incidents" FOR ALL USING ("public"."fn_is_platform_admin_full"()) WITH CHECK ("public"."fn_is_platform_admin_full"());
 END IF; END $baseline_guard$;
 
 
@@ -4233,7 +4246,7 @@ ALTER TABLE "public"."tenant_integrations" ENABLE ROW LEVEL SECURITY;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'tenant_integrations_admin_write' AND polrelid = '"public"."tenant_integrations"'::regclass) THEN
-CREATE POLICY "tenant_integrations_admin_write" ON "public"."tenant_integrations" USING (("public"."fn_is_platform_admin"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text")))) WITH CHECK (("public"."fn_is_platform_admin"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text"))));
+CREATE POLICY "tenant_integrations_admin_write" ON "public"."tenant_integrations" USING (("public"."fn_is_platform_admin_full"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text")))) WITH CHECK (("public"."fn_is_platform_admin_full"() OR (("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) AND "public"."fn_role_at_least"("organization_id", 'manager'::"text"))));
 END IF; END $baseline_guard$;
 
 
@@ -4258,8 +4271,9 @@ END IF; END $baseline_guard$;
 
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
-                WHERE polname = 'tenant_isolation_ai_invocations_all' AND polrelid = '"public"."ai_invocations"'::regclass) THEN
-CREATE POLICY "tenant_isolation_ai_invocations_all" ON "public"."ai_invocations" USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+                WHERE polname = 'tenant_isolation_ai_invocations_read' AND polrelid = '"public"."ai_invocations"'::regclass) THEN
+CREATE POLICY "tenant_isolation_ai_invocations_read" ON "public"."ai_invocations" FOR SELECT USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "tenant_isolation_ai_invocations_write" ON "public"."ai_invocations" FOR ALL USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4275,8 +4289,9 @@ END IF; END $baseline_guard$;
 
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
-                WHERE polname = 'tenant_isolation_contacts_all' AND polrelid = '"public"."contacts"'::regclass) THEN
-CREATE POLICY "tenant_isolation_contacts_all" ON "public"."contacts" USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+                WHERE polname = 'tenant_isolation_contacts_read' AND polrelid = '"public"."contacts"'::regclass) THEN
+CREATE POLICY "tenant_isolation_contacts_read" ON "public"."contacts" FOR SELECT USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "tenant_isolation_contacts_write" ON "public"."contacts" FOR ALL USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4297,7 +4312,7 @@ ALTER TABLE "public"."user_organizations" ENABLE ROW LEVEL SECURITY;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'user_orgs_delete' AND polrelid = '"public"."user_organizations"'::regclass) THEN
-CREATE POLICY "user_orgs_delete" ON "public"."user_organizations" FOR DELETE USING (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "user_orgs_delete" ON "public"."user_organizations" FOR DELETE USING (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4305,7 +4320,7 @@ END IF; END $baseline_guard$;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'user_orgs_insert' AND polrelid = '"public"."user_organizations"'::regclass) THEN
-CREATE POLICY "user_orgs_insert" ON "public"."user_organizations" FOR INSERT WITH CHECK (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "user_orgs_insert" ON "public"."user_organizations" FOR INSERT WITH CHECK (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4321,7 +4336,7 @@ END IF; END $baseline_guard$;
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
                 WHERE polname = 'user_orgs_update' AND polrelid = '"public"."user_organizations"'::regclass) THEN
-CREATE POLICY "user_orgs_update" ON "public"."user_organizations" FOR UPDATE USING (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "user_orgs_update" ON "public"."user_organizations" FOR UPDATE USING (("public"."fn_role_at_least"("organization_id", 'admin'::"text") OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -4331,8 +4346,9 @@ ALTER TABLE "public"."user_recovery_codes" ENABLE ROW LEVEL SECURITY;
 
 DO $baseline_guard$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_policy
-                WHERE polname = 'warmup_tenant_isolation_all' AND polrelid = '"public"."channel_session_warmup"'::regclass) THEN
-CREATE POLICY "warmup_tenant_isolation_all" ON "public"."channel_session_warmup" USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+                WHERE polname = 'warmup_tenant_isolation_read' AND polrelid = '"public"."channel_session_warmup"'::regclass) THEN
+CREATE POLICY "warmup_tenant_isolation_read" ON "public"."channel_session_warmup" FOR SELECT USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin"()));
+CREATE POLICY "warmup_tenant_isolation_write" ON "public"."channel_session_warmup" FOR ALL USING ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"())) WITH CHECK ((("organization_id" IN ( SELECT "public"."fn_user_org_ids"() AS "fn_user_org_ids")) OR "public"."fn_is_platform_admin_full"()));
 END IF; END $baseline_guard$;
 
 
@@ -5039,12 +5055,12 @@ create policy "crm_pipelines_select" on public.crm_pipelines
 
 create policy "crm_pipelines_manager_write" on public.crm_pipelines
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -5061,12 +5077,12 @@ create policy "crm_stages_select" on public.crm_stages
 
 create policy "crm_stages_manager_write" on public.crm_stages
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -5398,23 +5414,23 @@ drop policy if exists "conversations_agent_delete" on public.conversations;
 
 create policy "conversations_agent_insert" on public.conversations
   for insert with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
 create policy "conversations_agent_update" on public.conversations
   for update using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   ) with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
 create policy "conversations_agent_delete" on public.conversations
   for delete using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
@@ -5437,20 +5453,20 @@ create policy "messages_select" on public.messages
 create policy "messages_insert" on public.messages
   for insert with check (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 create policy "messages_update" on public.messages
   for update using (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 create policy "messages_delete" on public.messages
   for delete using (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 -- Forward-fix do G4-01: fn_conversation_assign (0031/0032) passa a SECURITY
@@ -5582,7 +5598,7 @@ create policy "crm_leads_select" on public.crm_leads
 
 create policy "crm_leads_insert" on public.crm_leads
   for insert with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
@@ -5590,13 +5606,13 @@ create policy "crm_leads_insert" on public.crm_leads
   );
 create policy "crm_leads_update" on public.crm_leads
   for update using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
              or public.fn_can_view_lead(organization_id, owner_user_id)))
   ) with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
@@ -5604,7 +5620,7 @@ create policy "crm_leads_update" on public.crm_leads
   );
 create policy "crm_leads_delete" on public.crm_leads
   for delete using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent')
         and (public.fn_role_at_least(organization_id, 'manager')
@@ -5806,12 +5822,12 @@ create policy "webhook_sources_select" on public.webhook_sources
 
 create policy "webhook_sources_manager_write" on public.webhook_sources
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -5827,12 +5843,12 @@ create policy "automation_rules_select" on public.automation_rules
 
 create policy "automation_rules_manager_write" on public.automation_rules
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -5879,7 +5895,7 @@ create policy "attendant_availability_select" on public.attendant_availability
 drop policy if exists "attendant_availability_insert" on public.attendant_availability;
 create policy "attendant_availability_insert" on public.attendant_availability
   for insert with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
@@ -5888,12 +5904,12 @@ create policy "attendant_availability_insert" on public.attendant_availability
 drop policy if exists "attendant_availability_update" on public.attendant_availability;
 create policy "attendant_availability_update" on public.attendant_availability
   for update using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
   ) with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
@@ -5902,7 +5918,7 @@ create policy "attendant_availability_update" on public.attendant_availability
 drop policy if exists "attendant_availability_delete" on public.attendant_availability;
 create policy "attendant_availability_delete" on public.attendant_availability
   for delete using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
@@ -5943,7 +5959,7 @@ create policy "attendant_availability_select" on public.attendant_availability
 drop policy if exists "attendant_availability_insert" on public.attendant_availability;
 create policy "attendant_availability_insert" on public.attendant_availability
   for insert with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
@@ -5952,12 +5968,12 @@ create policy "attendant_availability_insert" on public.attendant_availability
 drop policy if exists "attendant_availability_update" on public.attendant_availability;
 create policy "attendant_availability_update" on public.attendant_availability
   for update using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
   ) with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
@@ -5966,7 +5982,7 @@ create policy "attendant_availability_update" on public.attendant_availability
 drop policy if exists "attendant_availability_delete" on public.attendant_availability;
 create policy "attendant_availability_delete" on public.attendant_availability
   for delete using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and (user_id = auth.uid()
              or public.fn_role_at_least(organization_id, 'manager')))
@@ -6214,7 +6230,7 @@ create policy "crm_lead_activities_select" on public.crm_lead_activities
 create policy "crm_lead_activities_insert" on public.crm_lead_activities
   for insert with check (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 drop policy if exists "tenant_isolation_crm_lead_links_all" on public.crm_lead_links;
@@ -6235,20 +6251,20 @@ create policy "crm_lead_links_select" on public.crm_lead_links
 create policy "crm_lead_links_insert" on public.crm_lead_links
   for insert with check (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 create policy "crm_lead_links_update" on public.crm_lead_links
   for update using (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 create policy "crm_lead_links_delete" on public.crm_lead_links
   for delete using (
     (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 
@@ -7970,8 +7986,18 @@ $seed$;
 -- não ai_pricing. Com a tabela vazia, computeCost() devolve 0 sem log e o teto
 -- de ai_budgets nunca dispara. Derivado de ai_models: idempotente e
 -- auto-curativo, cobre qualquer modelo futuro do catálogo.
+--
+-- `distinct on (m.model_id)`: ai_models é único por (provider, model_id), então
+-- o MESMO model_id pode existir sob dois provedores (ex.: openrouter e requesty)
+-- e, sem a deduplicação, o INSERT gerava DUAS linhas iguais dentro da mesma
+-- passada e a PK `ai_pricing_pkey` (só `model`) recusava com
+-- `duplicate key ... ai_pricing_pkey`. O `not exists` abaixo não resolve: os
+-- duplicados estão dentro do MESMO select. `distinct on` devolve UMA linha por
+-- model_id, e o `order by m.model_id, m.input_price_per_million_cents asc`
+-- escolhe o provedor de MENOR preço de entrada; empate por saída e depois por
+-- provedor, para a escolha ser determinística.
 insert into public.ai_pricing (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
-select
+select distinct on (m.model_id)
   m.model_id,
   m.input_price_per_million_cents,
   m.output_price_per_million_cents,
@@ -7983,7 +8009,8 @@ where m.deprecated_at is null
   and not exists (
     select 1 from public.ai_pricing p
     where p.model = m.model_id and p.superseded_at is null
-  );
+  )
+order by m.model_id, m.input_price_per_million_cents asc, m.output_price_per_million_cents asc, m.provider asc;
 
 -- Embedding do RAG — não vive em ai_models.
 insert into public.ai_pricing (model, embedding_cents_per_million_tokens, notes)
@@ -10106,6 +10133,20 @@ alter table public.agent_inbox_items
     -- sugerido (plano N1) ou falta preço de catálogo — a Central acompanha
     -- até as duas pendências sumirem, ou até a proposta ser enviada/descartada.
     'proposta_pronta_para_revisao',
+    -- (migration 0501) a organização voltou de uma suspensão e há conversas que
+    -- receberam mensagem enquanto ela estava parada: a IA não respondeu nem vai
+    -- responder sozinha. Um item por reativação, aberto por fn_reativar_organizacao.
+    'org_reativada',
+    -- (migration 0500) O Jev percebeu, numa mensagem em que a regra de hoje não
+    -- viu nada, um pedido para falar com uma pessoa ou para parar de receber
+    -- mensagens, e a empresa escolheu "Avisar a equipe". Um kind por pedido, e
+    -- não `other`: a Central dá rótulo e destino por kind, e o `other` não leva
+    -- a uma conversa (lib/ai/inbox-destino.ts); e o aviso é um por CONVERSA e
+    -- pedido. O Jev só abre o aviso — quem passa a conversa é a regra de hoje
+    -- ou uma pessoa, e quem bloqueia é só o STOP do próprio cliente. NESTA
+    -- lista pelas razões de sempre (#159; a janela do `midia-nao-lida.test.ts`).
+    'jev_pedido_de_humano',
+    'jev_parar_de_receber',
     'other'
   ));
 
@@ -11883,12 +11924,12 @@ create policy org_guardrail_layers_select on public.org_guardrail_layers
 
 create policy org_guardrail_layers_admin_write on public.org_guardrail_layers
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   );
@@ -12421,11 +12462,11 @@ create policy channel_sessions_tenant_write on public.channel_sessions
   for all using (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 -- ---- agentes de IA ----
@@ -12442,11 +12483,11 @@ create policy tenant_isolation_ai_agents_write on public.ai_agents
   for all using (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 -- ---- versões de agente ----
@@ -12480,11 +12521,11 @@ create policy tenant_isolation_ai_budgets_write on public.ai_budgets
   for all using (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 -- ---- roteadores de IA ----
@@ -12884,10 +12925,9 @@ notify pgrst, 'reload schema';
 -- Idempotente: `create or replace function`, revokes e grants declarativos.
 
 create or replace function public.fn_definir_logo_da_organizacao(
-  p_org       uuid,
-  p_actor     uuid,
-  p_path      text,
-  p_path_dark text default null
+  p_org   uuid,
+  p_actor uuid,
+  p_path  text
 ) returns integer
     language plpgsql
     volatile
@@ -12895,9 +12935,8 @@ create or replace function public.fn_definir_logo_da_organizacao(
     set search_path to 'public', 'pg_temp'
 as $$
 declare
-  v_linhas    integer;
-  v_path      text;
-  v_path_dark text;
+  v_linhas integer;
+  v_path   text;
 begin
   if p_org is null or p_actor is null then
     raise exception 'logo_da_organizacao_argumento_nulo'
@@ -12905,20 +12944,18 @@ begin
   end if;
 
   v_path := nullif(btrim(coalesce(p_path, '')), '');
-  v_path_dark := nullif(btrim(coalesce(p_path_dark, '')), '');
 
-  -- PREFIXO ASSEVERADO DENTRO DO BANCO — mesmo gate da versão anterior.
+  -- O PREFIXO ASSEVERADO DENTRO DO BANCO — o gate que sobrevive ao segundo
+  -- chamador. A rota monta o caminho a partir da organização resolvida do
+  -- cookie, mas "a rota monta certo" é promessa de UM chamador. Sem esta linha,
+  -- um caminho de outro escopo (o `platform/...` que qualquer pessoa lê no HTML
+  -- da tela de login) entraria como logo da organização — e o delete-on-replace
+  -- da rota, rodando como `service_role`, apagaria o logo da instalação inteira
+  -- na troca seguinte.
   if v_path is not null
      and v_path !~ ('^' || p_org::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$')
   then
     raise exception 'logo_da_organizacao_caminho_fora_do_escopo'
-      using errcode = '22023';
-  end if;
-
-  if v_path_dark is not null
-     and v_path_dark !~ ('^' || p_org::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$')
-  then
-    raise exception 'logo_da_organizacao_caminho_dark_fora_do_escopo'
       using errcode = '22023';
   end if;
 
@@ -12939,28 +12976,19 @@ begin
       using errcode = '42501';
   end if;
 
-  -- Merge no CAMPO — mantém `logo_path` preservado se `p_path` for null,
-  -- e faz o mesmo para `logo_path_dark`.
+  -- Merge no CAMPO. `jsonb_set` direto em '{branding,logo_path}' NÃO serviria:
+  -- com `branding` ausente, `create_missing` só cria a ÚLTIMA chave e o caminho
+  -- intermediário faltando devolve o jsonb original intocado — silenciosamente.
   update public.organizations o
      set settings = case
-           when v_path is null and v_path_dark is null
-             then jsonb_set(
-                    coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path' - 'logo_path_dark', true)
            when v_path is null
              then jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path'
-                      || jsonb_build_object('logo_path_dark', v_path_dark), true)
-           when v_path_dark is null
-             then jsonb_set(
-                    coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path_dark'
-                      || jsonb_build_object('logo_path', v_path), true)
+                    coalesce(o.settings -> 'branding', '{}'::jsonb) - 'logo_path', true)
            else jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
                     coalesce(o.settings -> 'branding', '{}'::jsonb)
-                      || jsonb_build_object('logo_path', v_path, 'logo_path_dark', v_path_dark), true)
+                      || jsonb_build_object('logo_path', v_path), true)
          end
    where o.id = p_org;
 
@@ -12969,8 +12997,8 @@ begin
 end;
 $$;
 
-comment on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text) is
-  'Grava (ou apaga) organizations.settings.branding.logo_path e logo_path_dark com merge no CAMPO. Assevera prefixo por organization_id. Papel insuficiente levanta 42501. Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/api/v1/marca/logo/route.ts.';
+comment on function public.fn_definir_logo_da_organizacao(uuid, uuid, text) is
+  'Grava (ou apaga) organizations.settings.branding.logo_path com merge no CAMPO — não toca em app_name, accent_hex nem nas demais chaves de settings. Assevera que o caminho começa pelo proprio organization_id: caminho de outro escopo levanta 22023. Papel insuficiente levanta 42501. Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/api/v1/marca/logo/route.ts.';
 
 -- ── O FORWARD-FIX DA 0157 ───────────────────────────────────────────────────
 --
@@ -13033,15 +13061,11 @@ begin
            -- "Limpar" com logo gravado NÃO apaga o logo: o campo tem controle
            -- próprio na tela, e limpar nome+cor responde a OUTRA pergunta.
            when v_limpar and coalesce(o.settings #>> '{branding,logo_path}', '') = ''
-                and coalesce(o.settings #>> '{branding,logo_path_dark}', '') = ''
              then coalesce(o.settings, '{}'::jsonb) - 'branding'
            when v_limpar
              then jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
-                    jsonb_build_object(
-                      'logo_path', o.settings #> '{branding,logo_path}',
-                      'logo_path_dark', o.settings #> '{branding,logo_path_dark}'
-                    ), true)
+                    jsonb_build_object('logo_path', o.settings #> '{branding,logo_path}'), true)
            -- `p_marca || preservado`: o lado DIREITO vence em `||`, então o
            -- `logo_path` gravado sobrevive à substituição do objeto.
            -- `jsonb_strip_nulls` SÓ no fragmento preservado — nunca em `p_marca`,
@@ -13049,10 +13073,7 @@ begin
            else jsonb_set(
                     coalesce(o.settings, '{}'::jsonb), '{branding}',
                     p_marca || jsonb_strip_nulls(
-                      jsonb_build_object(
-                        'logo_path', o.settings #> '{branding,logo_path}',
-                        'logo_path_dark', o.settings #> '{branding,logo_path_dark}'
-                      )), true)
+                      jsonb_build_object('logo_path', o.settings #> '{branding,logo_path}')), true)
          end
    where o.id = p_org;
 
@@ -13062,7 +13083,7 @@ end;
 $$;
 
 comment on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb) is
-  'Grava organizations.settings.branding com merge ATÔMICO, PRESERVANDO branding.logo_path e branding.logo_path_dark (escritores próprios). Devolve linhas afetadas: 0 = a organização não existe. Chamador: app/actions/settings/updateMarcaDaOrganizacao.ts.';
+  'Grava organizations.settings.branding com merge ATÔMICO (jsonb_set), sem tocar nas demais chaves do jsonb (llm, routing, visibility_mode, atrito, ai_dispatch_mode, canonical_conversation_tags, lost_reasons_extra, plan) e PRESERVANDO branding.logo_path, que tem escritor próprio (fn_definir_logo_da_organizacao, migration 0158). Devolve linhas afetadas: 0 = a organização não existe. Papel insuficiente levanta 42501. Chamador: app/actions/settings/updateMarcaDaOrganizacao.ts.';
 
 -- OS DOIS REVOKES EM CADA FUNÇÃO (CLAUDE.md, item 9) — origens DISTINTAS de
 -- EXECUTE, e tratar uma só deixa a função exposta com o gate verde:
@@ -13073,9 +13094,9 @@ comment on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb) is
 --       toda função criada DEPOIS dele — isto é, para todo apêndice.
 -- `from authenticated` pelo motivo de (B) e mais um: as duas são VOLÁTEIS.
 -- Definer volátil alcançável por qualquer usuário logado é escrita cross-tenant.
-revoke execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text)
+revoke execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text)
   from public, anon, authenticated;
-grant  execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text, text)
+grant  execute on function public.fn_definir_logo_da_organizacao(uuid, uuid, text)
   to service_role;
 
 revoke execute on function public.fn_definir_marca_da_organizacao(uuid, uuid, jsonb)
@@ -13173,8 +13194,22 @@ end; $$;
 comment on function public.fn_mark_conversation_message is
   'Atualiza agregados da conversa: inbound incrementa unread; outbound zera (respondido).';
 
--- Nota: o backfill de unread_count_for_assignee da migration 0161 foi removido do baseline
--- para evitar que re-execuções a cada deploy sobrescrevam mensagens lidas manualmente pelo atendente.
+-- Corrige contadores stale: inbound desde a última resposta do atendente/IA.
+update public.conversations c
+set unread_count_for_assignee = coalesce((
+  select count(*)::integer
+  from public.messages m
+  where m.conversation_id = c.id
+    and m.direction = 'inbound'
+    and m.sent_at > coalesce(c.last_outbound_at, '-infinity'::timestamptz)
+), 0)
+where unread_count_for_assignee <> coalesce((
+  select count(*)::integer
+  from public.messages m
+  where m.conversation_id = c.id
+    and m.direction = 'inbound'
+    and m.sent_at > coalesce(c.last_outbound_at, '-infinity'::timestamptz)
+), 0);
 
 notify pgrst, 'reload schema';
 
@@ -14616,45 +14651,7 @@ alter table public.platform_branding
 -- reconhece `= ANY (ARRAY[...])` e estoura sobre regex. Mesma razão de
 -- `platform_branding_accent_hex`.
 
-
--- ---- logo da marca: coluna DARK (migration 9001) ----
---
--- `logo_path_dark` é o logo para o tema escuro. NULL = usa `logo_path` nos dois
--- temas (backward compat). O CHECK é idêntico ao de `logo_path`.
-
-alter table public.platform_branding
-  add column if not exists logo_path_dark text;
-
-comment on column public.platform_branding.logo_path_dark is
-  'Caminho do arquivo de logo para o tema ESCURO em storage/brand-logos, sempre platform/<uuid>.<png|jpg>. NULL = usa logo_path (light) nos dois temas. Escrito por app/api/v1/marca/logo/route.ts com variant=dark.';
-
-update public.platform_branding
-   set logo_path_dark = null
- where logo_path_dark is not null
-   and logo_path_dark !~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$';
-
-alter table public.platform_branding
-  drop constraint if exists platform_branding_logo_path_dark;
-alter table public.platform_branding
-  add constraint platform_branding_logo_path_dark check (
-    logo_path_dark is null
-    or logo_path_dark ~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$'
-  );
-
 notify pgrst, 'reload schema';
-
-
--- ---- derruba o overload legado de fn_definir_logo_da_organizacao (migration 9002) ----
---
--- A 9001 criou `fn_definir_logo_da_organizacao(p_org,p_actor,p_path,p_path_dark)`
--- com `create or replace` sobre a versão de 3 argumentos da 0158. Assinatura
--- diferente NÃO substitui: cria um SEGUNDO overload. Quem chama com 3 parâmetros
--- (código pré-9001, o cenário de rollback) faz o PostgREST devolver 300 PGRST203
--- "Could not choose the best candidate" — o logo da organização para de gravar.
--- Este `drop` mantém só a versão de 4; quem chamar com 3 resolve por `default null`.
--- No baseline só existe a de 4, então aqui é no-op para quem instala do zero; o
--- alvo real é o clone que atualiza de um baseline pré-9001, onde a de 3 existe.
-drop function if exists public.fn_definir_logo_da_organizacao(uuid, uuid, text);
 
 
 -- ---- o teto de IA que vincula (migration 0159) ----
@@ -15825,12 +15822,12 @@ create policy calendar_event_types_select on public.calendar_event_types
 drop policy if exists calendar_event_types_write on public.calendar_event_types;
 create policy calendar_event_types_write on public.calendar_event_types
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -15847,12 +15844,12 @@ create policy calendar_appointments_select on public.calendar_appointments
 drop policy if exists calendar_appointments_write on public.calendar_appointments;
 create policy calendar_appointments_write on public.calendar_appointments
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
@@ -15869,12 +15866,12 @@ create policy calendar_availability_exceptions_select on public.calendar_availab
 drop policy if exists calendar_availability_exceptions_write on public.calendar_availability_exceptions;
 create policy calendar_availability_exceptions_write on public.calendar_availability_exceptions
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and (user_id = auth.uid() or public.fn_role_at_least(organization_id, 'manager')))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and (user_id = auth.uid() or public.fn_role_at_least(organization_id, 'manager')))
   );
@@ -16991,11 +16988,11 @@ create policy tenant_isolation_ai_knowledge_sources_write on public.ai_knowledge
   for all using (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'manager'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'manager'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 drop policy if exists tenant_isolation_ai_faq_items_all on public.ai_faq_items;
@@ -17027,11 +17024,11 @@ create policy tenant_isolation_ai_kbv_write on public.ai_knowledge_versions
   for all using (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 drop policy if exists tenant_isolation_ai_chunks_all on public.ai_chunks;
@@ -17047,11 +17044,11 @@ create policy tenant_isolation_ai_chunks_write on public.ai_chunks
   for all using (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   ) with check (
     (organization_id in (select public.fn_user_org_ids())
       and public.fn_role_at_least(organization_id, 'admin'))
-    or public.fn_is_platform_admin()
+    or public.fn_is_platform_admin_full()
   );
 
 revoke all on table public.ai_knowledge_sources  from anon;
@@ -17512,12 +17509,12 @@ create policy catalog_products_select on public.catalog_products
 drop policy if exists catalog_products_write on public.catalog_products;
 create policy catalog_products_write on public.catalog_products
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -18189,12 +18186,12 @@ create policy crm_tasks_select on public.crm_tasks
 drop policy if exists crm_tasks_write on public.crm_tasks;
 create policy crm_tasks_write on public.crm_tasks
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
@@ -22650,24 +22647,6 @@ notify pgrst, 'reload schema';
 alter table public.agent_inbox_items
   add column if not exists resolved_at timestamptz;
 
--- ---- realtime conversation_notes (migration 9011; era 0232, renumerada em 2026-09-28) ----
--- Adicionado à publicação para que a UI de inbox receba atualizações em tempo real
-do $$ begin
-  if exists (select 1 from pg_publication where pubname='supabase_realtime') then
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname='supabase_realtime' and schemaname='public' and tablename='conversation_notes'
-    ) then
-      alter publication supabase_realtime add table public.conversation_notes;
-    end if;
-  end if;
-end $$;
-
--- ---- attendant_availability.last_heartbeat_at (migration 0039) ----
--- Bancos com tabela criada antes da 0039 não ganham a coluna com `create table if not exists`.
-alter table public.attendant_availability
-  add column if not exists last_heartbeat_at timestamptz;
-
 -- ---- roteamento por canal e reservas (migration 0228) ----
 -- 0228 — responsáveis por canal, claim automático serializado e conexão recuperável.
 -- Independente da 0227: assignment dispara os triggers vigentes, nunca escreve drafts.
@@ -23672,99 +23651,11 @@ grant execute on function public.fn_reserve_channel_connection(uuid,uuid,text,te
 
 notify pgrst,'reload schema';
 
--- ---- agenda: profissionais externos (migration 9003) ----
--- O dono externo: o dentista sem login. `providers` existe como registro de
--- domínio com jornada própria (`schedule`, molde de attendant_availability), e
--- `calendar_appointments` passa a aceitar `provider_id` MUTUAMENTE exclusivo
--- com `owner_user_id`. Aditiva e idempotente — nada a curar, colunas novas são
--- NULLABLE e relaxar `user_id` em calendar_availability_exceptions só ABAIXA.
-create table if not exists public.providers (
-  id uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
-  name text not null,
-  specialties text[] not null default '{}',
-  active boolean not null default true,
-  schedule jsonb not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists idx_providers_org on public.providers (organization_id);
-create index if not exists idx_providers_specialties on public.providers using gin (specialties);
-
-alter table public.providers enable row level security;
-
-drop policy if exists providers_select on public.providers;
-create policy providers_select on public.providers
-  for select using (
-    public.fn_is_platform_admin()
-    or (organization_id in (select public.fn_user_org_ids()))
-  );
-
-drop policy if exists providers_write on public.providers;
-create policy providers_write on public.providers
-  using (
-    public.fn_is_platform_admin()
-    or ((organization_id in (select public.fn_user_org_ids()))
-        and public.fn_role_at_least(organization_id, 'manager'))
-  )
-  with check (
-    public.fn_is_platform_admin()
-    or ((organization_id in (select public.fn_user_org_ids()))
-        and public.fn_role_at_least(organization_id, 'manager'))
-  );
-
-revoke all on public.providers from anon;
-
-alter table public.calendar_appointments
-  add column if not exists provider_id uuid references public.providers(id) on delete set null;
-
-alter table public.calendar_appointments
-  drop constraint if exists calendar_appointments_dono_unico;
-alter table public.calendar_appointments
-  add constraint calendar_appointments_dono_unico
-  check (owner_user_id is null or provider_id is null);
-
-alter table public.calendar_availability_exceptions
-  alter column user_id drop not null;
-
-alter table public.calendar_availability_exceptions
-  add column if not exists provider_id uuid references public.providers(id) on delete cascade;
-
-alter table public.calendar_availability_exceptions
-  drop constraint if exists calendar_exceptions_dono_unico;
-alter table public.calendar_availability_exceptions
-  add constraint calendar_exceptions_dono_unico
-  check (user_id is null or provider_id is null);
-
-create unique index if not exists calendar_exceptions_provider_dia_faixa_key
-  on public.calendar_availability_exceptions (organization_id, provider_id, exception_date, start_minute)
-  where provider_id is not null;
-
-drop trigger if exists trg_providers_updated_at on public.providers;
-create trigger trg_providers_updated_at
-  before update on public.providers
-  for each row execute function public.fn_set_updated_at();
-
-notify pgrst, 'reload schema';
-
--- ---- limite de tamanho do nome de sessão WAHA (migration 9005) ----
--- O WAHA valida o nome da sessão com @MaxLength(54). A migration 0228/0230 gerava
--- 'org_' || 32 chars (uuid sem hífen) || '_' || 32 chars (uuid sem hífen) = 69 caracteres,
--- estourando o teto e causando HTTP 400 no WAHA e 502 Bad Gateway no CRM.
--- O novo formato gera 25 caracteres: 'org_' (4) + 8 chars org + '_' (1) + 12 chars random hex.
-update public.channel_sessions
-   set waha_session_name = 'org_' || left(replace(organization_id::text, '-', ''), 8) || '_' || left(replace(gen_random_uuid()::text, '-', ''), 12)
- where length(waha_session_name) > 54;
-
--- ---- nome de sessão WAHA cabe no teto do WAHA (migration 9008) ----
+-- ---- nome de sessão WAHA cabe no teto do WAHA (migration 0233) ----
 -- O `devlikeapro/waha:latest-2026.7.2` valida `name` de sessão com @MaxLength(54);
 -- `org_<32>_<32>` = 69 e todo `POST /api/sessions` de canal novo tomava 400. O
 -- prefixo da org encurta para 8 (`org_<8>_<32>` = 45), alinhado com a busca de
 -- canal de onboarding logo acima no corpo. Idempotente: `create or replace`.
--- NOTA DO MERGE main→dev: a dev já curava isto na 9005 com `org_<8>_<12>`
--- (25 chars) e a `fn_reserve` abaixo gera nesse formato — os dois cabem no
--- teto de 54, então os blocos coexistem sem conflito.
 create or replace function public.fn_reserve_channel_connection(p_org uuid,p_key uuid,p_hash text,p_display_name text default null,p_onboarding boolean default false)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare receipt public.channel_connection_requests; channel public.channel_sessions; token uuid:=gen_random_uuid();
@@ -23797,7 +23688,7 @@ begin
   if channel.id is null then
    insert into public.channel_sessions(organization_id,waha_session_name,display_name,engine,webhook_path_token,
      webhook_secret_encrypted,status,last_status_change_at,consecutive_health_fails,daily_message_limit,metadata)
-   values(p_org,'org_'||left(replace(p_org::text,'-',''),8)||'_'||left(replace(gen_random_uuid()::text,'-',''),12),p_display_name,'NOWEB',
+   values(p_org,'org_'||left(replace(p_org::text,'-',''),8)||'_'||replace(gen_random_uuid()::text,'-',''),p_display_name,'NOWEB',
      replace(gen_random_uuid()::text,'-',''),'\x00'::bytea,'STARTING',now(),0,250,
      '{"ai_gate":"allowlist","ai_gate_mode":"pre_go_live","ai_test_phone_numbers":[]}'::jsonb
      || case when p_onboarding then '{"onboarding":true}'::jsonb else '{}'::jsonb end) returning * into channel;
@@ -23811,8 +23702,6 @@ begin
    and id<>receipt.id and (state='processing' and lease_until>now())) then raise exception 'connection_in_progress' using errcode='55P03';end if;
  update public.channel_connection_requests set state='processing',lease_token=token,lease_until=now()+interval '5 minutes',
   remote_created=false,updated_at=now() where organization_id=p_org and id=receipt.id;
- -- Não ressuscita antes da pós-condição remota. Arquivado permanece invisível
- -- até finish; falha conserva identidade e estado FAILED para reparo.
  update public.channel_sessions set status='STARTING',status_reason='connection_pending',last_status_change_at=now()
   where organization_id=p_org and id=channel.id returning * into channel;
  return jsonb_build_object('replay',false,'channel',to_jsonb(channel),'receipt_id',receipt.id,'lease_token',token);
@@ -23820,8 +23709,6 @@ end;
 $$;
 revoke all on function public.fn_reserve_channel_connection(uuid,uuid,text,text,boolean) from public,anon;
 grant execute on function public.fn_reserve_channel_connection(uuid,uuid,text,text,boolean) to authenticated;
-
-notify pgrst,'reload schema';
 
 -- Auto-curativo: canal WAHA com nome fora do teto que nunca pareou nem está de
 -- pé recebe um nome curto. Sessão que o WAHA nunca aceitou; renomear é seguro.
@@ -23908,12 +23795,12 @@ create policy team_invites_select on public.team_invites
 drop policy if exists team_invites_write on public.team_invites;
 create policy team_invites_write on public.team_invites
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   );
@@ -24517,12 +24404,12 @@ create policy org_voice_calls_select on public.org_voice_calls
 
 create policy org_voice_calls_admin_write on public.org_voice_calls
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'admin'))
   );
@@ -27172,7 +27059,7 @@ create policy calendar_locations_select on public.calendar_locations
 drop policy if exists calendar_locations_insert on public.calendar_locations;
 create policy calendar_locations_insert on public.calendar_locations
   for insert with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'agent'))
   );
@@ -27193,7 +27080,9 @@ as $$
 declare
   v_canonical text[] := array['requested_by_customer','price','no_response','product_unavailable',
                               'cancelled_by_store','cancelled_by_customer','payment_failed','other',
-                              'moved_to_another_pipeline'];
+                              'moved_to_another_pipeline',
+                              -- migration 0513 (#2049): quem respondeu PARAR. Conta como perda.
+                              'opted_out_of_messages'];
   v_pipeline_extra text[];
 begin
   if new.status = 'lost' then
@@ -28138,9 +28027,10 @@ begin
   end if;
   v_config := coalesce(p_configuration,v_link.configuration,v_manifest->'configuration');
   if v_config is null or jsonb_typeof(v_config) <> 'object'
-    or not (v_config ?& array['density','show_description']) or v_config - array['density','show_description'] <> '{}'::jsonb
+    or not (v_config ?& array['density','show_description']) or v_config - array['density','show_description','theme'] <> '{}'::jsonb
     or v_config->>'density' is null or v_config->>'density' not in ('comfortable','compact')
-    or jsonb_typeof(v_config->'show_description') is distinct from 'boolean' then
+    or jsonb_typeof(v_config->'show_description') is distinct from 'boolean'
+    or (v_config ? 'theme' and (v_config->>'theme' is null or v_config->>'theme' not in ('sage','clay','mist','plum','olive'))) then
     raise exception using errcode='P0001',message='extension_invalid_input';
   end if;
   if p_enabled and not coalesce(v_link.enabled,false) and
@@ -32132,13 +32022,14 @@ create or replace function public.fn_extensions_permissoes_validas(p_permissions
 returns boolean language sql immutable set search_path = public, pg_temp as $$
   select p_permissions is not null
     and jsonb_typeof(p_permissions) = 'array'
-    and jsonb_array_length(p_permissions) between 1 and 6
+    and jsonb_array_length(p_permissions) between 1 and 7
     and not exists (
       select 1 from jsonb_array_elements(p_permissions) e
       where jsonb_typeof(e.value) <> 'string'
          or e.value #>> '{}' not in (
               'navigation.tasks', 'navigation.inbox', 'navigation.kanban',
-              'navigation.contacts', 'navigation.agenda', 'navigation.radar')
+              'navigation.contacts', 'navigation.agenda', 'navigation.radar',
+              'theme.apply')
     )
     and (select count(distinct e.value) from jsonb_array_elements(p_permissions) e)
         = jsonb_array_length(p_permissions);
@@ -33597,13 +33488,22 @@ declare t text;
 begin
   foreach t in array array['financial_accounts', 'payment_methods', 'account_plans'] loop
     execute format('alter table public.%I enable row level security', t);
+    -- 0533: o _all virou par. Leitura com a função pura (support_readonly segue
+    -- lendo); escrita exige scope='full'.
     execute format('drop policy if exists tenant_isolation_%I_all on public.%I', t, t);
+    execute format('drop policy if exists tenant_isolation_%I_read on public.%I', t, t);
     execute format($f$
-      create policy tenant_isolation_%I_all on public.%I
-        for all
+      create policy tenant_isolation_%I_read on public.%I
+        for select
         using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin())
+    $f$, t, t);
+    execute format('drop policy if exists tenant_isolation_%I_write on public.%I', t, t);
+    execute format($f$
+      create policy tenant_isolation_%I_write on public.%I
+        for all
+        using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full())
         with check (
-          public.fn_is_platform_admin()
+          public.fn_is_platform_admin_full()
           or (organization_id in (select public.fn_user_org_ids())
               and public.fn_role_at_least(organization_id, 'manager'))
         )
@@ -34113,13 +34013,22 @@ begin
   foreach t in array array['sales', 'sale_items', 'commission_rules', 'commissions',
                            'financial_entries', 'loyalty_ledger'] loop
     execute format('alter table public.%I enable row level security', t);
+    -- 0533: o _all virou par. Leitura com a função pura (support_readonly segue
+    -- lendo); escrita exige scope='full'.
     execute format('drop policy if exists tenant_isolation_%I_all on public.%I', t, t);
+    execute format('drop policy if exists tenant_isolation_%I_read on public.%I', t, t);
     execute format($f$
-      create policy tenant_isolation_%I_all on public.%I
-        for all
+      create policy tenant_isolation_%I_read on public.%I
+        for select
         using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin())
+    $f$, t, t);
+    execute format('drop policy if exists tenant_isolation_%I_write on public.%I', t, t);
+    execute format($f$
+      create policy tenant_isolation_%I_write on public.%I
+        for all
+        using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full())
         with check (
-          public.fn_is_platform_admin()
+          public.fn_is_platform_admin_full()
           or (organization_id in (select public.fn_user_org_ids())
               and public.fn_role_at_least(organization_id, 'agent'))
         )
@@ -34454,11 +34363,16 @@ create unique index if not exists financial_entries_recorrencia_competencia_idx
 
 alter table public.recurring_entries enable row level security;
 drop policy if exists tenant_isolation_recurring_entries_all on public.recurring_entries;
-create policy tenant_isolation_recurring_entries_all on public.recurring_entries
+drop policy if exists tenant_isolation_recurring_entries_read on public.recurring_entries;
+create policy tenant_isolation_recurring_entries_read on public.recurring_entries
+  for select
+  using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin());
+drop policy if exists tenant_isolation_recurring_entries_write on public.recurring_entries;
+create policy tenant_isolation_recurring_entries_write on public.recurring_entries
   for all
-  using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin())
+  using (organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full())
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or (organization_id in (select public.fn_user_org_ids())
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -35079,7 +34993,7 @@ returns boolean language sql stable security definer set search_path=public as $
   join public.organizations o on o.id=a.organization_id and o.status='active'
   where cs.archived_at is null and a.meeting_delivery->>'channel_session_id'=cs.id::text and j.organization_id=p_org and j.id=p_job and j.kind='transactional_delivery' and j.status='running' and j.locked_by=p_worker and j.locked_at=p_acquired_at
    and a.contact_id=j.contact_id and not c.is_anonymized and not c.is_blocked and a.status<>'cancelled' and (a.location_kind<>'google_meet' or (a.meeting_state='ready' and a.meeting_url is not null))
-   and a.meeting_request_id::text=j.payload->>'meeting_request_id' and a.meeting_delivery->>'generation'=j.payload->>'delivery_generation'
+   and a.meeting_request_id::text is not distinct from j.payload->>'meeting_request_id' and a.meeting_delivery->>'generation'=j.payload->>'delivery_generation'
    and a.meeting_delivery_job_id=j.id and a.meeting_delivery->>'state'='queued'
    and exists(select 1 from public.user_organizations where organization_id=p_org and user_id=a.owner_user_id and revoked_at is null)
    and (a.meeting_delivery->'authorized_by'->>'kind'='ai_agent' or
@@ -36485,12 +36399,12 @@ create policy campaigns_select on public.campaigns
 drop policy if exists campaigns_write on public.campaigns;
 create policy campaigns_write on public.campaigns
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -36511,12 +36425,12 @@ create policy campaign_recipients_select on public.campaign_recipients
 drop policy if exists campaign_recipients_write on public.campaign_recipients;
 create policy campaign_recipients_write on public.campaign_recipients
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -36665,12 +36579,12 @@ create policy campaign_templates_select on public.campaign_templates
 drop policy if exists campaign_templates_write on public.campaign_templates;
 create policy campaign_templates_write on public.campaign_templates
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -36690,12 +36604,12 @@ create policy campaign_suppressions_select on public.campaign_suppressions
 drop policy if exists campaign_suppressions_write on public.campaign_suppressions;
 create policy campaign_suppressions_write on public.campaign_suppressions
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -36802,12 +36716,12 @@ create policy campaign_channel_sessions_select on public.campaign_channel_sessio
 drop policy if exists campaign_channel_sessions_write on public.campaign_channel_sessions;
 create policy campaign_channel_sessions_write on public.campaign_channel_sessions
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
@@ -37059,7 +36973,7 @@ begin
   create policy honorarios_contratos_insert
     on public.honorarios_contratos
     for insert
-    with check (public.fn_is_platform_admin()
+    with check (public.fn_is_platform_admin_full()
                 or (organization_id in (select public.fn_user_org_ids())
                     and public.fn_role_at_least(organization_id, 'manager')));
 
@@ -37067,10 +36981,10 @@ begin
   create policy honorarios_contratos_update
     on public.honorarios_contratos
     for update
-    using (public.fn_is_platform_admin()
+    using (public.fn_is_platform_admin_full()
            or (organization_id in (select public.fn_user_org_ids())
                and public.fn_role_at_least(organization_id, 'manager')))
-    with check (public.fn_is_platform_admin()
+    with check (public.fn_is_platform_admin_full()
                 or (organization_id in (select public.fn_user_org_ids())
                     and public.fn_role_at_least(organization_id, 'manager')));
 
@@ -37078,7 +36992,7 @@ begin
   create policy honorarios_contratos_delete
     on public.honorarios_contratos
     for delete
-    using ((public.fn_is_platform_admin()
+    using ((public.fn_is_platform_admin_full()
             or (organization_id in (select public.fn_user_org_ids())
                 and public.fn_role_at_least(organization_id, 'manager')))
            and not exists (select 1 from public.honorarios_parcelas p
@@ -37099,7 +37013,7 @@ begin
   create policy honorarios_parcelas_insert
     on public.honorarios_parcelas
     for insert
-    with check ((public.fn_is_platform_admin()
+    with check ((public.fn_is_platform_admin_full()
                  or (organization_id in (select public.fn_user_org_ids())
                      and public.fn_role_at_least(organization_id, 'manager')))
                 and status <> 'pago' and financial_entry_id is null
@@ -37111,11 +37025,11 @@ begin
   create policy honorarios_parcelas_update
     on public.honorarios_parcelas
     for update
-    using ((public.fn_is_platform_admin()
+    using ((public.fn_is_platform_admin_full()
             or (organization_id in (select public.fn_user_org_ids())
                 and public.fn_role_at_least(organization_id, 'manager')))
            and status <> 'pago')
-    with check ((public.fn_is_platform_admin()
+    with check ((public.fn_is_platform_admin_full()
                  or (organization_id in (select public.fn_user_org_ids())
                      and public.fn_role_at_least(organization_id, 'manager')))
                 and status <> 'pago' and financial_entry_id is null
@@ -37127,7 +37041,7 @@ begin
   create policy honorarios_parcelas_delete
     on public.honorarios_parcelas
     for delete
-    using ((public.fn_is_platform_admin()
+    using ((public.fn_is_platform_admin_full()
             or (organization_id in (select public.fn_user_org_ids())
                 and public.fn_role_at_least(organization_id, 'manager')))
            and status <> 'pago');
@@ -38834,7 +38748,7 @@ declare c public.contacts; support jsonb; v_quando timestamptz;
 begin
  support:=public.fn_support_context();
  if auth.uid() is null or not public.fn_support_write_allowed(p_organization_id)
-  or not (public.fn_role_at_least(p_organization_id,'admin') or (public.fn_is_platform_admin() and support is null)) then
+  or not (public.fn_role_at_least(p_organization_id,'admin') or (public.fn_is_platform_admin_full() and support is null)) then
   raise exception 'contact_anonymize_forbidden' using errcode='42501';
  end if;
  if not public.fn_session_mfa_proven() then raise exception 'contact_anonymize_mfa_required' using errcode='42501';end if;
@@ -43141,6 +43055,1642 @@ create policy followup_flow_versions_delete on public.followup_flow_versions
   using (organization_id in (select public.fn_user_org_ids())
          and public.fn_role_at_least(organization_id, 'manager'));
 
+-- ---- org operante e suspensão tipada (migration 0501) ----
+-- A suspensão que suspende (spec cobrança do revendedor §2.1, §3.1). Corpo e
+-- porquê: a migration 0501. Cópia byte a byte das seções A, B, C0a, C0, C, E, F e G dela; a
+-- seção D (kind 'org_reativada') entra NO LUGAR, no bloco único de
+-- agent_inbox_items_kind_check. Entra ANTES da VARREDURA anon porque cria função.
+
+-- ── A. suspended_kind + fn_org_operante ──────────────────────────────────────
+alter table public.organizations add column if not exists suspended_kind text;
+
+update public.organizations
+   set suspended_kind = 'administrativa'
+ where status = 'suspended'
+   and suspended_kind is null;
+
+alter table public.organizations
+  drop constraint if exists organizations_suspended_kind_check;
+alter table public.organizations
+  add constraint organizations_suspended_kind_check check (suspended_kind in ('administrativa', 'cobranca'));
+
+comment on column public.organizations.suspended_kind is
+  'Por que a organização está suspensa: administrativa (platform admin) ou cobranca (régua de cobrança). Só significa algo com status = suspended: o lgpd-redact-worker troca para redacted sem limpar. Escrito só por fn_suspender_organizacao e fn_reativar_organizacao (migration 0501).';
+
+create or replace function public.fn_org_operante(p_org uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select coalesce((select o.status = 'active' from public.organizations o where o.id = p_org), false);
+$$;
+
+revoke execute on function public.fn_org_operante(uuid) from public, anon, authenticated;
+grant execute on function public.fn_org_operante(uuid) to service_role;
+
+-- ── B. o estado da organização só muda pelo servidor ─────────────────────────
+-- `orgs_write_platform_admin` aceita qualquer `fn_is_platform_admin()`, que
+-- ignora o scope, e `authenticated` tem GRANT ALL: sem isto um support_readonly
+-- reativaria uma suspensa, trocaria o tipo da suspensão, gravaria uma data de
+-- anonimização (`redacted_at`, escrita só pelo lgpd-redact-worker) ou criaria
+-- org isenta pelo PostgREST. Todo escritor legítimo é service_role ou função definer, onde
+-- `current_user` é o dono da função. Molde: `fn_meet_stamp`.
+create or replace function public.fn_organizacao_estado_so_pelo_servidor()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if current_user not in ('authenticated', 'anon') then
+    return new;
+  end if;
+  if tg_op = 'INSERT' then
+    raise exception 'organizacao_nasce_so_pelo_servidor'
+      using errcode = '42501',
+            detail = 'Organização nasce por rota de servidor (service_role ou função definer), nunca pela sessão.';
+  end if;
+  if new.status is distinct from old.status
+     or new.suspended_kind is distinct from old.suspended_kind
+     or new.suspended_at is distinct from old.suspended_at
+     or new.suspended_reason is distinct from old.suspended_reason
+     or new.suspended_by is distinct from old.suspended_by
+     or new.redacted_at is distinct from old.redacted_at
+     or new.created_by is distinct from old.created_by then
+    raise exception 'estado_da_organizacao_so_pelo_servidor'
+      using errcode = '42501',
+            detail = 'Status, suspensão, anonimização e autoria mudam só por fn_suspender_organizacao, fn_reativar_organizacao ou rota de servidor.';
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_organizacao_estado_so_pelo_servidor() from public, anon, authenticated;
+
+drop trigger if exists trg_organizacao_estado_so_pelo_servidor on public.organizations;
+create trigger trg_organizacao_estado_so_pelo_servidor
+  before insert or update on public.organizations
+  for each row execute function public.fn_organizacao_estado_so_pelo_servidor();
+
+-- ── C0a. o turno de envio que sai sem rodar ─────────────────────────────────
+-- O turno de envio de uma inscrição parada num nó `action` saiu sem ter rodado.
+-- O evento diz isso ao motor, que enfileira um turno novo quando a organização
+-- volta a operar (EVENTO_TURNO_DESCARTADO em lib/followup/node-handlers.ts).
+-- Sem ele, os rechecks da reativação esgotavam o dead-man e matavam a inscrição
+-- com `action_turn_never_completed` e um `followup_dead` de motivo falso. Duas
+-- origens, uma regra: a C0 (turno `pending` falhado pela suspensão) e o worker
+-- (turno que JÁ RODAVA na suspensão, com o envio barrado por
+-- `OrgNaoOperanteError` — a C0 não toca `running`). A chave não termina em
+-- `:<número>`: não conta como passo para fn_followup_job_current. Idempotente
+-- pela chave; devolve se gravou. Sem guarda de status da org: a reativação
+-- chama a C0 com a org já `active`.
+create or replace function public.fn_followup_turno_descartado(p_org uuid, p_job uuid)
+returns boolean
+language sql
+security invoker
+set search_path = ''
+as $$
+  with gravado as (
+    insert into public.followup_enrollment_events
+      (organization_id, enrollment_id, node_id, event_type, payload, idempotency_key)
+    select p_org, e.id, e.current_node_id, 'turn_discarded',
+           jsonb_build_object('job_id', j.id, 'motivo', 'org_nao_operante'),
+           coalesce(j.payload->>'source_step_key', j.id::text) || ':descartado'
+      from public.job_queue j
+      join public.followup_enrollments e
+        on e.organization_id = p_org
+       and e.id::text = j.payload->>'followup_enrollment_id'
+       and e.current_node_id = j.payload->>'node_id'
+       and e.status in ('active', 'waiting_reply', 'dormente')
+     where j.id = p_job
+       and j.organization_id = p_org
+       and j.kind = 'followup_turn'
+       and j.payload->>'purpose' = 'send_message'
+    on conflict (enrollment_id, idempotency_key) where idempotency_key is not null do nothing
+    returning 1
+  )
+  select exists (select 1 from gravado);
+$$;
+
+revoke execute on function public.fn_followup_turno_descartado(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.fn_followup_turno_descartado(uuid, uuid) to service_role;
+
+-- ── C0. a fila que a organização parada descarta ────────────────────────────
+-- Falhar o job `pending` por fora não basta: o estado que dependia dele só é
+-- assentado pelo acerto normal (fn_reply_settle, fn_meet_delivery_settle), que
+-- nunca roda para um job que não saiu da fila. Sem isto, o rascunho aprovado
+-- ficava 'aguardando envio' e o link do Meet nunca saía, sem aviso. Precedente:
+-- fn_reply_redact, que falha job e rascunho juntos. Chamada pelas duas funções
+-- de estado; nenhum papel a executa direto.
+create or replace function public.fn_org_parada_descarta_fila(p_org uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_entregas    uuid[];
+  v_turnos      uuid[];
+  v_compromisso uuid;
+begin
+  with falhados as (
+    update public.job_queue
+       set status = 'failed', last_error = 'org_nao_operante'
+     where organization_id = p_org and status = 'pending'
+    returning id, kind, payload
+  ),
+  rascunhos as (
+    update public.ai_reply_drafts d
+       set status = 'failed', error_code = 'org_suspensa', updated_at = now()
+      from falhados f
+     where d.organization_id = p_org and d.send_job_id = f.id
+       and f.kind = 'approved_reply' and d.status = 'approved'
+    returning d.id
+  )
+  select coalesce(array_agg(f.id) filter (where f.kind = 'transactional_delivery'), '{}'),
+         coalesce(array_agg(f.id) filter (where f.kind = 'followup_turn'), '{}')
+    into v_entregas, v_turnos
+    from falhados f;
+
+  -- O turno de envio que saiu da fila sem rodar avisa o motor (C0a).
+  perform public.fn_followup_turno_descartado(p_org, t.id) from unnest(v_turnos) as t(id);
+
+  for v_compromisso in
+    update public.calendar_appointments a
+       set meeting_delivery = a.meeting_delivery
+             || jsonb_build_object('state', 'failed', 'error', 'org_suspensa', 'settled_at', now())
+     where a.organization_id = p_org
+       and a.meeting_delivery_job_id = any(v_entregas)
+    returning a.id
+  loop
+    perform public.fn_meet_notice(p_org, v_compromisso, 'failed');
+  end loop;
+end;
+$$;
+
+revoke execute on function public.fn_org_parada_descarta_fila(uuid) from public, anon, authenticated, service_role;
+
+-- ── C. fn_suspender_organizacao: uma transação, fila parada ──────────────────
+-- Conserta a rota que lia, gravava e emitia o evento sem await em três passos.
+-- `failed` e não `dead` nos jobs: é o terminal de veto (queue.ts); `dead` abre
+-- aviso `job_dead`. A mensagem `queued` vira `failed` para o redrive não a
+-- mandar quando alguém olhar de novo. Suspensão com tipo NULO (imagem anterior
+-- à 0501, depois de rollback) vale como administrativa.
+create or replace function public.fn_suspender_organizacao(
+  p_org uuid, p_kind text, p_motivo text, p_ator uuid
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_kind   text;
+begin
+  if p_kind is null or p_kind not in ('administrativa', 'cobranca') then
+    raise exception 'tipo_de_suspensao_invalido' using errcode = '22023';
+  end if;
+
+  select o.status, coalesce(o.suspended_kind, 'administrativa')
+    into v_status, v_kind
+    from public.organizations o
+   where o.id = p_org
+     for update;
+  if not found then
+    raise exception 'organization_not_found' using errcode = 'P0002';
+  end if;
+
+  if v_status = 'suspended' then
+    if v_kind = p_kind then
+      return jsonb_build_object('changed', false, 'motivo', 'ja_suspensa');
+    end if;
+    if p_kind = 'cobranca' then
+      return jsonb_build_object('changed', false, 'motivo', 'administrativa_prevalece');
+    end if;
+    -- cobranca → administrativa: troca o tipo e mantém o início da suspensão.
+    update public.organizations
+       set suspended_kind = 'administrativa',
+           suspended_reason = p_motivo,
+           suspended_by = p_ator
+     where id = p_org;
+  elsif v_status = 'active' then
+    update public.organizations
+       set status = 'suspended',
+           suspended_kind = p_kind,
+           suspended_reason = p_motivo,
+           suspended_at = now(),
+           suspended_by = p_ator
+     where id = p_org;
+  else
+    -- redacted / archived: inalterados, já não operam.
+    return jsonb_build_object('changed', false, 'motivo', 'org_encerrada');
+  end if;
+
+  perform public.fn_org_parada_descarta_fila(p_org);
+
+  update public.messages
+     set status = 'failed', error_code = 'org_suspensa'
+   where organization_id = p_org and status = 'queued';
+
+  insert into public.event_log (organization_id, event_type, entity_kind, entity_id, payload)
+  values (p_org, 'tenant.suspended', 'organization', p_org,
+          jsonb_build_object('tenant_id', p_org, 'kind', p_kind,
+                             'suspended_by', p_ator, 'reason', p_motivo));
+
+  return jsonb_build_object('changed', true);
+end;
+$$;
+
+revoke execute on function public.fn_suspender_organizacao(uuid, text, text, uuid) from public, anon, authenticated;
+grant execute on function public.fn_suspender_organizacao(uuid, text, text, uuid) to service_role;
+
+-- ── E. fn_reativar_organizacao: volta sem rajada ─────────────────────────────
+-- Exige o tipo: `/reactivate` desfaz só a administrativa; a de cobrança sai por
+-- pagamento, prazo ou isenção (PR 2 em diante). Nada é reprocessado: jobs
+-- `pending` que sobraram viram `failed`, e as conversas que receberam mensagem
+-- durante a suspensão viram UM item na Central (sem referência) para uma
+-- pessoa revisar.
+create or replace function public.fn_reativar_organizacao(
+  p_org uuid, p_kind_exigido text, p_ator uuid
+) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status    text;
+  v_kind      text;
+  v_desde     timestamptz;
+  v_conversas integer := 0;
+begin
+  if p_kind_exigido is null or p_kind_exigido not in ('administrativa', 'cobranca') then
+    raise exception 'tipo_de_suspensao_invalido' using errcode = '22023';
+  end if;
+
+  select o.status, coalesce(o.suspended_kind, 'administrativa'), o.suspended_at
+    into v_status, v_kind, v_desde
+    from public.organizations o
+   where o.id = p_org
+     for update;
+  if not found then
+    raise exception 'organization_not_found' using errcode = 'P0002';
+  end if;
+
+  if v_status <> 'suspended' then
+    return jsonb_build_object('changed', false, 'motivo', 'nao_suspensa');
+  end if;
+  if v_kind <> p_kind_exigido then
+    return jsonb_build_object('changed', false, 'motivo',
+      case v_kind when 'cobranca' then 'suspensao_de_cobranca' else 'suspensao_administrativa' end);
+  end if;
+
+  update public.organizations
+     set status = 'active',
+         suspended_kind = null,
+         suspended_at = null,
+         suspended_reason = null,
+         suspended_by = null
+   where id = p_org;
+
+  perform public.fn_org_parada_descarta_fila(p_org);
+
+  if v_desde is not null then
+    select count(*) into v_conversas
+      from public.conversations c
+     where c.organization_id = p_org
+       and not c.is_group
+       and c.last_inbound_at >= v_desde;
+  end if;
+
+  if v_conversas > 0 then
+    insert into public.agent_inbox_items (organization_id, kind, severity, title, body)
+    values (p_org, 'org_reativada', 'warn',
+            'A conta foi reativada — há conversas para revisar',
+            -- Só o fato: o que fazer é a orientação do aviso na tela
+            -- (lib/ai/inbox-destino.ts, org_reativada), que sabe das abas.
+            case when v_conversas = 1
+              then '1 conversa recebeu mensagem enquanto a conta estava suspensa.'
+              else format('%s conversas receberam mensagem enquanto a conta estava suspensa.', v_conversas)
+            end);
+  end if;
+
+  insert into public.event_log (organization_id, event_type, entity_kind, entity_id, payload)
+  values (p_org, 'tenant.reactivated', 'organization', p_org,
+          jsonb_build_object('tenant_id', p_org, 'kind', v_kind,
+                             'reactivated_by', p_ator, 'conversas_com_mensagem', v_conversas));
+
+  return jsonb_build_object('changed', true);
+end;
+$$;
+
+revoke execute on function public.fn_reativar_organizacao(uuid, text, uuid) from public, anon, authenticated;
+grant execute on function public.fn_reativar_organizacao(uuid, text, uuid) to service_role;
+
+-- ── F. o claim do follow-up não vê a organização parada ──────────────────────
+-- Sem isto o motor seguia avançando fluxos da org suspensa, enfileirava turnos e
+-- pagava o LLM de classificação. Definição VIGENTE da 0308 (espera longa dorme),
+-- copiada do baseline, com UMA mudança: a CTE `orgs` só aceita organização
+-- `active` (a régua de fn_org_operante, escrita como `exists` para o planner).
+-- A inscrição da org parada não é tocada — nem o lease —, e volta ao rodízio na
+-- reativação. Revoke e grant iguais aos da 0308.
+create or replace function fn_claim_due_followup_enrollments(p_limit int, p_lease_seconds int)
+returns setof followup_enrollments
+language sql
+security definer
+set search_path = public
+as $$
+  with orgs as (
+    -- Sem a condição de claim aqui de propósito: o lateral abaixo a aplica, e uma
+    -- organização cujos vencidos estão todos com lease apenas devolve zero linhas.
+    select distinct organization_id
+      from followup_enrollments
+     where status in ('active','waiting_reply','dormente')
+       and next_eval_at <= now()
+       -- Organização parada (suspensa, redigida, arquivada) não roda follow-up
+       -- (migration 0501).
+       and exists (select 1 from public.organizations o
+                    where o.id = followup_enrollments.organization_id
+                      and o.status = 'active')
+  ),
+  fila as (
+    select f.id, f.next_eval_at, f.posicao_na_org
+      from orgs
+      cross join lateral (
+        select d.id,
+               d.next_eval_at,
+               row_number() over (order by d.next_eval_at) as posicao_na_org
+          from followup_enrollments d
+         where d.organization_id = orgs.organization_id
+           and d.status in ('active','waiting_reply','dormente')
+           and d.next_eval_at <= now()
+           and (d.claimed_until is null or d.claimed_until < now())
+         order by d.next_eval_at
+         limit p_limit
+      ) f
+  ),
+  escolhidos as (
+    -- O rodízio: posição 1 de todas as organizações, depois a 2 de todas, etc.
+    -- Empate na mesma posição vai para quem esperou mais.
+    select id from fila order by posicao_na_org, next_eval_at limit p_limit
+  ),
+  travados as (
+    select e.id from followup_enrollments e
+     where e.id in (select id from escolhidos)
+     for update skip locked
+  )
+  update followup_enrollments e
+     set claimed_until = now() + make_interval(secs => p_lease_seconds),
+         updated_at = now()
+   where e.id in (select id from travados)
+     -- A condição de lease É REPETIDA AQUI, e não é redundante com a CTE `fila`.
+     -- Sem ela, duas conexões simultâneas reclamam as MESMAS linhas: a segunda
+     -- espera o lock da primeira, e quando ele sai o Postgres (READ COMMITTED)
+     -- reavalia só o WHERE do UPDATE — que não olhava `claimed_until` — e grava
+     -- por cima. O `skip locked` da CTE não salva: as duas materializam a mesma
+     -- lista antes de qualquer lock existir. Medido: interseção de 5 em 5 no
+     -- invariante de concorrência (followup-schema.test.ts).
+     and (e.claimed_until is null or e.claimed_until < now())
+  returning e.*;
+$$;
+
+revoke execute on function fn_claim_due_followup_enrollments(int, int) from public, anon, authenticated;
+grant execute on function fn_claim_due_followup_enrollments(int, int) to service_role;
+
+-- ── G. o evento turn_discarded é só do servidor ──────────────────────────────
+-- A C0 grava `turn_discarded` para o motor enfileirar um turno novo na
+-- reativação. A policy `followup_enrollment_events_insert` (0490) deixa
+-- `manager` inserir pela sessão, e a chave `…:descartado` não termina em
+-- `:<n>`: sem isto, um manager forjava o evento pelo PostgREST e o motor
+-- enfileirava um 2º turno de envio. Definição VIGENTE da 0488 com UMA mudança:
+-- o ramo da trilha também recusa `event_type = 'turn_discarded'` quando há
+-- `auth.uid()`. O servidor (service_role, funções de estado) não tem
+-- `auth.uid()` e segue gravando.
+create or replace function public.fn_followup_generation_write()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ -- #1862 — DELETE que chega em CASCATA não é escrita de follow-up. Este gatilho
+ -- é BEFORE ROW: o DELETE vindo de `on delete cascade` roda sob o gatilho da
+ -- chave estrangeira, com `pg_trigger_depth() > 1`. Passa QUALQUER cascata, não
+ -- só a da ficha: apagar o contato, a inscrição (followup_enrollments), o fluxo
+ -- (followup_flow_pointers) ou a organização leva junto os registros internos.
+ -- O turno que sobra sem inscrição/evento falha fechado em
+ -- fn_followup_job_current. A profundidade não distingue cascata de DELETE
+ -- feito por outro gatilho: hoje nenhum gatilho apaga nestas duas tabelas, e
+ -- quem criar um herda esta passagem. O DELETE DIRETO (profundidade 1, com
+ -- `auth.uid()`) continua caindo na recusa abaixo — a 42501 não afrouxa.
+ if tg_op='DELETE' and pg_trigger_depth()>1 then return old; end if;
+ if tg_table_name='job_queue' then
+  if auth.uid() is not null and ((tg_op<>'DELETE' and new.kind='followup_turn') or (tg_op<>'INSERT' and old.kind='followup_turn')) then
+   raise exception 'followup_job_internal' using errcode='42501';
+  end if;
+  if tg_op='UPDATE' and old.kind='followup_turn' then
+   if new.organization_id<>old.organization_id or new.contact_id is distinct from old.contact_id or new.kind<>old.kind
+    or new.payload->'followup_enrollment_id' is distinct from old.payload->'followup_enrollment_id'
+    or new.payload->'node_id' is distinct from old.payload->'node_id'
+    or new.payload->'source_step_key' is distinct from old.payload->'source_step_key'
+   then raise exception 'followup_job_origin_immutable' using errcode='42501'; end if;
+  end if;
+ elsif auth.uid() is not null and (
+   (tg_op<>'DELETE' and (new.idempotency_key ~ ':[0-9]+$' or new.event_type='turn_discarded'))
+   or (tg_op<>'INSERT' and (old.idempotency_key ~ ':[0-9]+$' or old.event_type='turn_discarded'))) then
+  raise exception 'followup_step_internal' using errcode='42501';
+ end if;
+ if tg_op='DELETE' then return old; end if;
+ return new;
+end; $$;
+
+revoke all on function public.fn_followup_generation_write() from public,anon,authenticated;
+
+
+-- ---- a cascata do BANCO alcança lead_notes, tool_calls, lead_state e social_identity (migration 0494) ----
+-- Follow-up do #1958 (issue #1964). A dorsa `fn_redigir_conversas_ao_anonimizar`
+-- (gatilho da virada de is_anonymized, desenho da 0391) passou a redigir também:
+--   lead_notes.headline/body (+embedding), ai_agent_runs.tool_calls (preserva o
+--   nome da ferramenta), lead_state.next_action/qualification e
+--   contacts.social_identity — filtrando organização E contato e guardando o
+--   marcador de "já redigido" que a cascata de app usa, para a varredura diária
+--   não reescrever o que já está anonimizado. O apêndice entra ANTES do bloco da
+--   VARREDURA anon (0116), que proíbe `create function` depois dela.
+create or replace function public.fn_redigir_conversas_ao_anonimizar()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $f$
+declare
+  v_variantes text[];
+  v_lid text;
+  v_msgs_de_grupo uuid[];
+begin
+  insert into public.storage_redaction_queue (organization_id, bucket, object_path)
+  select distinct new.organization_id, 'whatsapp-media', m.media_storage_path
+    from public.messages m
+   where m.organization_id = new.organization_id
+     and m.conversation_id in (
+       select c.id from public.conversations c
+        where c.contact_id = new.id and c.organization_id = new.organization_id)
+     and m.media_storage_path is not null
+     and length(m.media_storage_path) > 0
+  on conflict (bucket, object_path) do nothing;
+
+  update public.messages set
+    body = '[mensagem anonimizada]',
+    media_url = null,
+    media_mime = null,
+    media_size_bytes = null,
+    media_storage_path = null,
+    metadata = '{}'::jsonb,
+    updated_at = now()
+  where organization_id = new.organization_id
+    and conversation_id in (
+      select c.id from public.conversations c
+       where c.contact_id = new.id and c.organization_id = new.organization_id);
+
+  update public.conversations set
+    metadata = '{}'::jsonb,
+    last_message_preview = null,
+    last_handoff_reason = null,
+    updated_at = now()
+  where contact_id = new.id and organization_id = new.organization_id;
+
+  update public.lead_checkpoints set
+    rolling_summary = '[resumo anonimizado]',
+    commitments = '[]'::jsonb,
+    objections = '[]'::jsonb,
+    next_action = null,
+    declaracao = null
+  where contact_id = new.id and organization_id = new.organization_id;
+
+  update public.lead_notes set
+    headline = '(anonimizado)',
+    body = '(anonimizado)',
+    embedding = null,
+    updated_at = now()
+  where organization_id = new.organization_id
+    and contact_id = new.id
+    and (headline is distinct from '(anonimizado)'
+         or body is distinct from '(anonimizado)'
+         or embedding is not null);
+
+  update public.ai_agent_runs set
+    tool_calls = public.fn_lgpd_redigir_tool_calls(ai_agent_runs.tool_calls)
+  where ai_agent_runs.organization_id = new.organization_id
+    and ai_agent_runs.contact_id = new.id
+    and exists (
+      select 1 from jsonb_array_elements(ai_agent_runs.tool_calls) s
+       where coalesce(s->>'redacted', 'false')::boolean is not true
+    );
+
+  update public.lead_state set
+    next_action = null,
+    qualification = '{}'::jsonb,
+    updated_at = now()
+  where organization_id = new.organization_id
+    and contact_id = new.id
+    and (next_action is not null
+         or coalesce(qualification, '{}'::jsonb) <> '{}'::jsonb);
+
+  update public.contacts set
+    social_identity = null,
+    updated_at = now()
+  where id = new.id
+    and organization_id = new.organization_id
+    and social_identity is not null;
+
+  v_variantes := coalesce(public.fn_telefone_variantes(coalesce(old.phone_number, new.phone_number)), '{}');
+  v_lid := coalesce(old.wa_lid, new.wa_lid);
+
+  select coalesce(array_agg(m.id), '{}')
+    into v_msgs_de_grupo
+    from public.messages m
+   where m.organization_id = new.organization_id
+     and m.metadata ? 'group_sender'
+     and (
+       regexp_replace(coalesce(m.metadata->'group_sender'->>'phone', ''), '\D', '', 'g') = any(v_variantes)
+       or (v_lid is not null and m.metadata->'group_sender'->>'lid' = v_lid)
+     );
+
+  if cardinality(v_msgs_de_grupo) > 0 then
+    insert into public.storage_redaction_queue (organization_id, bucket, object_path)
+    select distinct new.organization_id, 'whatsapp-media', m.media_storage_path
+      from public.messages m
+     where m.organization_id = new.organization_id
+       and m.id = any(v_msgs_de_grupo)
+       and m.media_storage_path is not null
+       and length(m.media_storage_path) > 0
+    on conflict (bucket, object_path) do nothing;
+
+    update public.conversations set
+      last_message_preview = null,
+      updated_at = now()
+    where organization_id = new.organization_id
+      and id in (select m.conversation_id from public.messages m
+                  where m.organization_id = new.organization_id and m.id = any(v_msgs_de_grupo));
+
+    update public.messages set
+      body = '[mensagem anonimizada]',
+      media_url = null,
+      media_mime = null,
+      media_size_bytes = null,
+      media_storage_path = null,
+      metadata = '{}'::jsonb,
+      updated_at = now()
+    where organization_id = new.organization_id
+      and id = any(v_msgs_de_grupo);
+  end if;
+
+  return new;
+end
+$f$;
+
+revoke all on function public.fn_redigir_conversas_ao_anonimizar() from public;
+revoke execute on function public.fn_redigir_conversas_ao_anonimizar() from anon;
+revoke execute on function public.fn_redigir_conversas_ao_anonimizar() from authenticated;
+
+create or replace function public.fn_lgpd_redigir_tool_calls(p_tool_calls jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = public, pg_temp
+as $t$
+  select coalesce(jsonb_agg(t.step_json order by t.ord), '[]'::jsonb)
+    from (
+      select jsonb_strip_nulls(jsonb_build_object(
+               'step', case when jsonb_typeof(s.step -> 'step') = 'number'
+                            then (s.step ->> 'step')::jsonb end,
+               'tool_name', case when jsonb_typeof(s.step -> 'tool_name') = 'string'
+                                 then to_jsonb(s.step ->> 'tool_name') end,
+               'redacted', true,
+               'tool_calls', coalesce((
+                 select jsonb_agg(jsonb_build_object('tool_name', coalesce(c ->> 'tool_name', 'unknown')))
+                   from jsonb_array_elements(s.step -> 'tool_calls') c
+               ), '[]'::jsonb)
+             )) as step_json,
+             s.ord
+        from jsonb_array_elements(coalesce(p_tool_calls, '[]'::jsonb)) with ordinality s(step, ord)
+    ) t;
+$t$;
+
+
+revoke execute on function public.fn_lgpd_redigir_tool_calls(jsonb) from public, anon, authenticated;
+
+notify pgrst, 'reload schema';
+-- ---- anonimizar apaga também a transcrição da mídia (migration 0497) ----
+-- Achado na triagem do #1988 (@AlecLimaDev). `messages.media_derived_text`
+-- (transcrição/OCR do media-derive-worker, 0058) sobrevivia a toda anonimização.
+-- Uma linha (`media_derived_text = null`) em cada UPDATE de messages dos dois
+-- corpos, que partem do corpo ATUAL: o gatilho da 0494 (bloco logo acima) e a
+-- cascata da 0483. Corpo IDÊNTICO ao da migration 0497 (gate
+-- `apendice-do-baseline-nao-diverge-da-cadeia`). Entra ANTES do bloco da
+-- VARREDURA anon (0116), que proíbe `create function` depois dela. A cura no fim
+-- é idempotente pelo `is not null` — o update.sh reaplica sem reescrever.
+create or replace function public.fn_redigir_conversas_ao_anonimizar()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $f$
+declare
+  v_variantes text[];
+  v_lid text;
+  v_msgs_de_grupo uuid[];
+begin
+  insert into public.storage_redaction_queue (organization_id, bucket, object_path)
+  select distinct new.organization_id, 'whatsapp-media', m.media_storage_path
+    from public.messages m
+   where m.organization_id = new.organization_id
+     and m.conversation_id in (
+       select c.id from public.conversations c
+        where c.contact_id = new.id and c.organization_id = new.organization_id)
+     and m.media_storage_path is not null
+     and length(m.media_storage_path) > 0
+  on conflict (bucket, object_path) do nothing;
+
+  update public.messages set
+    body = '[mensagem anonimizada]',
+    media_url = null,
+    media_mime = null,
+    media_size_bytes = null,
+    media_storage_path = null,
+    media_derived_text = null,
+    metadata = '{}'::jsonb,
+    updated_at = now()
+  where organization_id = new.organization_id
+    and conversation_id in (
+      select c.id from public.conversations c
+       where c.contact_id = new.id and c.organization_id = new.organization_id);
+
+  update public.conversations set
+    metadata = '{}'::jsonb,
+    last_message_preview = null,
+    last_handoff_reason = null,
+    updated_at = now()
+  where contact_id = new.id and organization_id = new.organization_id;
+
+  update public.lead_checkpoints set
+    rolling_summary = '[resumo anonimizado]',
+    commitments = '[]'::jsonb,
+    objections = '[]'::jsonb,
+    next_action = null,
+    declaracao = null
+  where contact_id = new.id and organization_id = new.organization_id;
+
+  -- ── issue #1964 — lead_notes: a memória do agente sobre o contato ─────────
+  update public.lead_notes set
+    headline = '(anonimizado)',
+    body = '(anonimizado)',
+    embedding = null,
+    updated_at = now()
+  where organization_id = new.organization_id
+    and contact_id = new.id
+    and (headline is distinct from '(anonimizado)'
+         or body is distinct from '(anonimizado)'
+         or embedding is not null);
+
+  -- ── issue #1964 — ai_agent_runs.tool_calls: preserva o nome e redige o resto
+  -- A transformação espelha `redigirToolCalls` (lib/lgpd/cascata.ts): cada
+  -- passo vira `{ step?, tool_name?, redacted: true, tool_calls: [{ tool_name }] }`.
+  -- Fica QUAIS ferramentas rodaram e em que passo; sai o texto do modelo, os
+  -- argumentos e os resultados. Guard no WHERE: só corre quando há passo sem
+  -- `redacted`, então o `[]` de nascença e a run já redigida não são tocados.
+  update public.ai_agent_runs set
+    tool_calls = public.fn_lgpd_redigir_tool_calls(ai_agent_runs.tool_calls)
+  where ai_agent_runs.organization_id = new.organization_id
+    and ai_agent_runs.contact_id = new.id
+    and exists (
+      select 1 from jsonb_array_elements(ai_agent_runs.tool_calls) s
+       where coalesce(s->>'redacted', 'false')::boolean is not true
+    );
+
+  -- ── issue #1964 — lead_state: a próxima ação e a qualificação da lead ─────
+  update public.lead_state set
+    next_action = null,
+    qualification = '{}'::jsonb,
+    updated_at = now()
+  where organization_id = new.organization_id
+    and contact_id = new.id
+    and (next_action is not null
+         or coalesce(qualification, '{}'::jsonb) <> '{}'::jsonb);
+
+  -- ── issue #1964 — contacts.social_identity ───────────────────────────────
+  -- O índice único parcial `where social_identity is not null` torna anular
+  -- seguro (a linha sai do índice sem violar unicidade). Guard no WHERE para a
+  -- varredura não reescrever o que já está anonimizado.
+  update public.contacts set
+    social_identity = null,
+    updated_at = now()
+  where id = new.id
+    and organization_id = new.organization_id
+    and social_identity is not null;
+
+  -- Mensagens de grupo escritas pelo titular (0482, ver o cabeçalho daquele bloco).
+  v_variantes := coalesce(public.fn_telefone_variantes(coalesce(old.phone_number, new.phone_number)), '{}');
+  v_lid := coalesce(old.wa_lid, new.wa_lid);
+
+  select coalesce(array_agg(m.id), '{}')
+    into v_msgs_de_grupo
+    from public.messages m
+   where m.organization_id = new.organization_id
+     and m.metadata ? 'group_sender'
+     and (
+       regexp_replace(coalesce(m.metadata->'group_sender'->>'phone', ''), '\D', '', 'g') = any(v_variantes)
+       or (v_lid is not null and m.metadata->'group_sender'->>'lid' = v_lid)
+     );
+
+  if cardinality(v_msgs_de_grupo) > 0 then
+    insert into public.storage_redaction_queue (organization_id, bucket, object_path)
+    select distinct new.organization_id, 'whatsapp-media', m.media_storage_path
+      from public.messages m
+     where m.organization_id = new.organization_id
+       and m.id = any(v_msgs_de_grupo)
+       and m.media_storage_path is not null
+       and length(m.media_storage_path) > 0
+    on conflict (bucket, object_path) do nothing;
+
+    update public.conversations set
+      last_message_preview = null,
+      updated_at = now()
+    where organization_id = new.organization_id
+      and id in (select m.conversation_id from public.messages m
+                  where m.organization_id = new.organization_id and m.id = any(v_msgs_de_grupo));
+
+    update public.messages set
+      body = '[mensagem anonimizada]',
+      media_url = null,
+      media_mime = null,
+      media_size_bytes = null,
+      media_storage_path = null,
+      media_derived_text = null,
+      metadata = '{}'::jsonb,
+      updated_at = now()
+    where organization_id = new.organization_id
+      and id = any(v_msgs_de_grupo);
+  end if;
+
+  return new;
+end
+$f$;
+
+-- As DUAS origens de EXECUTE (item 9 do CLAUDE.md): o grant a PUBLIC da criação
+-- e o grant nominal a anon do ALTER DEFAULT PRIVILEGES do baseline.
+revoke all on function public.fn_redigir_conversas_ao_anonimizar() from public;
+revoke execute on function public.fn_redigir_conversas_ao_anonimizar() from anon;
+revoke execute on function public.fn_redigir_conversas_ao_anonimizar() from authenticated;
+
+
+create or replace function public.fn_lgpd_cascade_redact_contact(p_organization_id uuid, p_contact_id uuid, p_request_id uuid) returns jsonb
+    language plpgsql security definer
+    set search_path to 'public', 'extensions', 'pg_temp'
+    as $$
+declare
+  v_already bool;
+  v_counts jsonb := '{}'::jsonb;
+  v_media_paths text[] := '{}';
+  v_anon_label text;
+  v_count int;
+  v_variantes text[] := '{}';
+begin
+  perform public.fn_service_lock(p_organization_id,p_contact_id);
+  select is_anonymized into v_already
+    from contacts
+    where id = p_contact_id and organization_id = p_organization_id;
+
+  if not found then
+    raise exception 'contact not found' using errcode = 'P0002';
+  end if;
+
+  if v_already then
+    return jsonb_build_object('already_anonymized', true, 'counts', v_counts, 'media_paths', v_media_paths);
+  end if;
+
+  v_anon_label := 'Cliente Anonimizado #' || substring(p_contact_id::text from 1 for 8);
+
+  select coalesce(public.fn_telefone_variantes(phone_number), '{}')
+    into v_variantes
+    from contacts
+    where id = p_contact_id and organization_id = p_organization_id;
+
+  select coalesce(array_agg(distinct media_storage_path) filter (where media_storage_path is not null), '{}')
+    into v_media_paths
+    from messages
+    where organization_id = p_organization_id
+      and conversation_id in (
+        select id from conversations
+          where contact_id = p_contact_id and organization_id = p_organization_id
+      );
+
+  -- 1. contacts (irreversible)
+  update contacts set
+    name = v_anon_label,
+    display_name = v_anon_label,
+    email = null,
+    phone_number = null,
+    cpf_encrypted = null,
+    cpf_hash = null,
+    birthdate = null,
+    is_anonymized = true,
+    anonymized_at = now(),
+    consent = '{}'::jsonb,
+    source_metadata = '{}'::jsonb,
+    tags = '{}'::text[],
+    updated_at = now()
+  where id = p_contact_id and organization_id = p_organization_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('contacts', v_count);
+
+  -- 2. conversations metadata + preview strip
+  update conversations set
+    metadata = '{}'::jsonb,
+    last_message_preview = null,
+    last_handoff_reason = null,
+    updated_at = now()
+  where contact_id = p_contact_id and organization_id = p_organization_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('conversations', v_count);
+
+  -- 3. messages: redact body + null media + strip metadata (preserve status/timestamps/conversation_id)
+  update messages set
+    body = '[mensagem anonimizada]',
+    media_url = null,
+    media_mime = null,
+    media_size_bytes = null,
+    media_storage_path = null,
+    media_derived_text = null,
+    metadata = '{}'::jsonb,
+    updated_at = now()
+  where organization_id = p_organization_id
+    and conversation_id in (
+      select id from conversations
+        where contact_id = p_contact_id and organization_id = p_organization_id
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('messages', v_count);
+
+  -- 4. crm_lead_activities — strip payload, metadata E reason (migration 0071).
+  update crm_lead_activities set
+    payload = '{}'::jsonb,
+    metadata = '{}'::jsonb,
+    reason = null
+  where organization_id = p_organization_id
+    and (
+      contact_id = p_contact_id
+      or lead_id in (
+        select lead_id from crm_lead_links
+          where target_kind = 'contact'
+            and target_id = p_contact_id
+            and organization_id = p_organization_id
+      )
+      or lead_id in (
+        select id from crm_leads
+          where contact_id = p_contact_id and organization_id = p_organization_id
+      )
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('activities', v_count);
+
+  -- 5. crm_leads — strip title/description/custom_fields/source_metadata/tags but PRESERVE pipeline/stage/value
+  update crm_leads set
+    title = v_anon_label,
+    description = null,
+    custom_fields = '{}'::jsonb,
+    source_metadata = '{}'::jsonb,
+    tags = '{}'::text[],
+    updated_at = now()
+  where organization_id = p_organization_id
+    and (
+      contact_id = p_contact_id
+      or id in (
+        select lead_id from crm_lead_links
+          where target_kind = 'contact'
+            and target_id = p_contact_id
+            and organization_id = p_organization_id
+      )
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('leads', v_count);
+
+  -- 6. orders — PRESERVE values + status + timestamps. Strip personal fields from payload jsonb
+  --    and replace customer_external_id with null (FK-safe; soft de-link). Keep contact_id null.
+  update orders set
+    payload = (coalesce(payload, '{}'::jsonb))
+      - 'customer'
+      - 'customer_name'
+      - 'customer_email'
+      - 'customer_phone'
+      - 'shipping_address'
+      - 'billing_address'
+      - 'contact_identification',
+    customer_external_id = null,
+    contact_id = null,
+    is_anonymized = true,
+    updated_at = now()
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('orders', v_count);
+
+  -- 6b. crm_proposals (migration 0477, #1504) — PRESERVA número, valores,
+  -- itens, datas e status; redige só o que identifica a PESSOA. Ver o
+  -- cabeçalho desta migration para o porquê de cada coluna.
+  -- O PDF que o cliente recebeu (bucket `propostas`, `<org>/<proposta>.pdf`)
+  -- tem o nome dele impresso: redigir as colunas e deixar o arquivo seria
+  -- anonimizar a linha e manter o documento. Vai para a mesma fila de expurgo
+  -- da mídia (passo 7), com o bucket CERTO — a mensagem que levou o PDF
+  -- aponta para o mesmo caminho, mas o passo 7 só enfileira `whatsapp-media`.
+  -- Lido ANTES de o passo seguinte zerar `pdf_path`.
+  insert into storage_redaction_queue (organization_id, request_id, bucket, object_path)
+  select p_organization_id, p_request_id, 'propostas', pdf_path
+    from crm_proposals
+   where organization_id = p_organization_id
+     and contact_id = p_contact_id
+     and pdf_path is not null and length(pdf_path) > 0
+     -- só arquivo DESTA organização: o expurgo nunca alcança o PDF de outra
+     and pdf_path like p_organization_id::text || '/%'
+  on conflict (bucket, object_path) do nothing;
+  update crm_proposals set
+    destinatario_nome = v_anon_label,
+    briefing_json = '{}'::jsonb,
+    resumo_comercial = null,
+    -- o texto do documento como foi montado e como foi editado à mão: é o
+    -- conteúdo do PDF, com o mesmo nome dentro.
+    rendered_snapshot = null,
+    secoes_editadas = null,
+    pdf_path = null,
+    updated_at = now()
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('crm_proposals', v_count);
+
+  -- CAMPANHAS: o que foi DITO à pessoa e o endereço para onde foi.
+  update campaign_recipients set
+    rendered_body = null,
+    recipient_address = null,
+    variables = '{}'::jsonb,
+    last_error_detail = null,
+    updated_at = now()
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('campaign_recipients', v_count);
+
+  -- LISTA DE EXCLUSÃO: solta o vínculo e apaga a cauda do telefone.
+  update campaign_suppressions set
+    address_tail = null,
+    reason = null,
+    contact_id = null
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('campaign_suppressions', v_count);
+
+  -- 6c. sales — a comanda. PRESERVA valor, status e datas, e NÃO desliga o
+  --     contato (ver racional completo no baseline, bloco desta função).
+  update sales set
+    notes = null,
+    cancel_reason = case when cancel_reason is null then null else '[redigido]' end,
+    reverse_reason = case when reverse_reason is null then null else '[redigido]' end,
+    updated_at = now()
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('sales', v_count);
+
+  -- 6d. conversation_notes (migration 0483, F3 da #1863) — a nota interna é
+  -- texto escrito SOBRE a pessoa durante o atendimento, e o anexo dela é mídia
+  -- ancorada na conversa: os dois entram no alcance do titular. A 0477 já
+  -- mostrou o desenho (arquivo vai para a fila ANTES de a coluna ser zerada).
+  -- O bucket é `internal-media`, e não o do passo 7: a nota nunca sobe no
+  -- `whatsapp-media` (é o bucket do canal do CLIENTE), e enfileirar o caminho
+  -- num bucket onde ele não está deixaria a remoção apontando para o nada —
+  -- a mesma falha de não ter anonimizado, um endereço mais para a direita.
+  -- Por isso os caminhos de nota também NÃO entram em `v_media_paths`: essa
+  -- lista só existe para o passo 7, que enfileira `whatsapp-media`.
+  insert into storage_redaction_queue (organization_id, request_id, bucket, object_path)
+  select p_organization_id, p_request_id, 'internal-media', n.media_storage_path
+    from conversation_notes n
+   where n.organization_id = p_organization_id
+     and n.conversation_id in (
+       select id from conversations
+        where contact_id = p_contact_id and organization_id = p_organization_id
+     )
+     and n.media_storage_path is not null and length(n.media_storage_path) > 0
+     and n.media_storage_path like p_organization_id::text || '/%'
+  on conflict (bucket, object_path) do nothing;
+  update conversation_notes set
+    body = '[nota interna anonimizada]',
+    media_storage_path = null,
+    media_mime = null,
+    media_size_bytes = null
+  where organization_id = p_organization_id
+    and conversation_id in (
+      select id from conversations
+       where contact_id = p_contact_id and organization_id = p_organization_id
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('conversation_notes', v_count);
+
+  -- 7. enqueue media for async deletion (idempotent via unique (bucket, object_path))
+  if array_length(v_media_paths, 1) > 0 then
+    insert into storage_redaction_queue (organization_id, request_id, bucket, object_path)
+    select p_organization_id, p_request_id, 'whatsapp-media', path
+      from unnest(v_media_paths) as path
+      where path is not null and length(path) > 0
+    on conflict (bucket, object_path) do nothing;
+  end if;
+
+  -- 7b. voice_calls — o TELEFONE de quem falou ao telefone (migration 0235).
+  update voice_calls set
+    peer_phone = v_anon_label,
+    owner_user_id = null,
+    created_by = null,
+    updated_at = now()
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('voice_calls', v_count);
+
+  update prospecting_candidates set suppression_salt = gen_random_bytes(32)
+  where organization_id = p_organization_id
+    and (contact_id = p_contact_id
+         or (phone is not null
+             and regexp_replace(phone, '\D', '', 'g') = any (v_variantes)))
+    and suppression_salt is null;
+  update prospecting_candidates set
+    suppression_place = hmac(convert_to(place_id, 'UTF8'), suppression_salt, 'sha256'),
+    suppression_phone = case when phone is null then null
+      else hmac(convert_to(phone, 'UTF8'), suppression_salt, 'sha256') end,
+    place_id = 'redacted:' || id::text,
+    phone = null,
+    data = jsonb_build_object('key', 'redacted:' || id::text,
+      'name', v_anon_label, 'phone', null, 'website', null,
+      'category', null, 'address', null, 'maps_url', null,
+      'rating', null, 'reviews', null, 'emails', '[]'::jsonb, 'socials', '[]'::jsonb),
+    status = 'skipped', service_boundary = null, error = null, updated_at = now()
+  where organization_id = p_organization_id
+    and (contact_id = p_contact_id
+         or (phone is not null
+             and regexp_replace(phone, '\D', '', 'g') = any (v_variantes)));
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('prospecting_candidates', v_count);
+
+  -- agent_cases — o que a IA escreveu SOBRE a pessoa quando travou (migration 0280).
+  update agent_cases set
+    title = v_anon_label,
+    summary = '[resumo anonimizado]',
+    blocker = '[bloqueio anonimizado]',
+    context_snapshot = '{}'::jsonb
+  where organization_id = p_organization_id
+    and conversation_id in (
+      select id from conversations
+        where contact_id = p_contact_id and organization_id = p_organization_id
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('agent_cases', v_count);
+
+  -- agent_case_events — a linha do tempo do caso (migration 0280).
+  update agent_case_events set
+    body = null,
+    metadata = '{}'::jsonb
+  where organization_id = p_organization_id
+    and case_id in (
+      select id from agent_cases
+        where organization_id = p_organization_id
+          and conversation_id in (
+            select id from conversations
+              where contact_id = p_contact_id and organization_id = p_organization_id
+          )
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('agent_case_events', v_count);
+
+  -- demandas — o assunto do pedido (migration 0280).
+  update demandas set
+    assunto = null
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('demandas', v_count);
+
+  -- agent_inbox_items — o aviso que leva o texto do caso para a Central (migration 0280/0292).
+  update agent_inbox_items set
+    status = 'resolved',
+    resolved_at = now(),
+    body = 'Contato anonimizado.',
+    ref_id = null
+  where organization_id = p_organization_id
+    and kind in ('handoff', 'case_stale', 'aviso_de_caso_nao_entregue')
+    and (
+      (ref_kind = 'contact' and ref_id = p_contact_id)
+      or (ref_kind = 'conversation' and ref_id in (
+            select id from conversations
+              where contact_id = p_contact_id and organization_id = p_organization_id
+          ))
+      or (ref_kind = 'agent_case' and ref_id in (
+            select id from agent_cases
+              where organization_id = p_organization_id
+                and conversation_id in (
+                  select id from conversations
+                    where contact_id = p_contact_id and organization_id = p_organization_id
+                )
+          ))
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('agent_inbox_items', v_count);
+
+  -- agent_case_chat_messages — a consulta interna da equipe à IA SOBRE o caso (migration 0281).
+  update agent_case_chat_messages set
+    body = null,
+    redacted_at = now()
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id
+    and redacted_at is null;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('agent_case_chat_messages', v_count);
+
+  -- passagens_de_atendimento — o BRIEFING é sobre a pessoa (migration 0291).
+  update passagens_de_atendimento set
+    body       = v_anon_label,
+    title      = null,
+    notes      = null,
+    content    = null,
+    tentativas = '[]'::jsonb
+  where organization_id = p_organization_id and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('passagens_de_atendimento', v_count);
+
+  -- entregas_de_aviso_de_caso — o registro do aviso ao suporte (migration 0292).
+  update entregas_de_aviso_de_caso set
+    erro_detalhe = null
+  where organization_id = p_organization_id
+    and case_id in (
+      select id from agent_cases
+        where organization_id = p_organization_id
+          and conversation_id in (
+            select id from conversations
+              where contact_id = p_contact_id and organization_id = p_organization_id
+          )
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('entregas_de_aviso_de_caso', v_count);
+
+  -- channel_session_groups.subject — o NOME do grupo, e a FK contact_id aponta
+  -- para o placeholder do grupo (contacts.kind = 'whatsapp_group'), nunca para
+  -- o titular real sendo anonimizado neste caminho — mas a FK para contacts e o
+  -- nome da coluna casam o padrão automático do escopo (migration 0482), e
+  -- nulificar não perde nada operacional: número, conversa e liga/desliga ficam.
+  update public.channel_session_groups set
+    subject = null
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('channel_session_groups', v_count);
+
+  -- 8. dense audit row
+  insert into api_audit_log (organization_id, action, actor_user_id, resource_type, resource_id, metadata, bypassed_rls)
+  values (
+    p_organization_id,
+    'lgpd.redact_executed',
+    null,
+    'contact',
+    p_contact_id,
+    jsonb_build_object(
+      'cascaded_to', v_counts,
+      'media_queued', coalesce(array_length(v_media_paths, 1), 0),
+      'request_id', p_request_id
+    ),
+    true
+  );
+
+  return jsonb_build_object(
+    'already_anonymized', false,
+    'counts', v_counts,
+    'media_paths', v_media_paths
+  );
+end;
+$$;
+
+revoke all on function public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid) from public, anon, authenticated;
+grant execute on function public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid) to service_role;
+
+-- Cura: mensagens já anonimizadas que guardaram a transcrição.
+update public.messages set
+  media_derived_text = null,
+  updated_at = now()
+where body = '[mensagem anonimizada]'
+  and media_derived_text is not null;
+
+-- ---- os avisos do Jev na Central: um por conversa e pedido, e fecham sozinhos (migration 0500) ----
+--
+-- Os dois kinds entraram no bloco ÚNICO de `agent_inbox_items_kind_check` (o
+-- do `capabilities_missing`, migration 0105), não aqui: um segundo bloco da
+-- mesma constraint é o defeito do #159. Daqui para baixo, o texto é o MESMO da
+-- migration 0500 (partes 2 e 3), com o racional inteiro lá.
+-- 2. UM AVISO POR CONVERSA E PEDIDO, NO BANCO. Índice único parcial em
+--    (organização, kind, conversa) para os dois kinds do Jev, SEM status — o
+--    precedente é o `agent_inbox_routing_unique` do `routing_unassigned`. Com o
+--    status fora do índice, o "Reabrir" nunca encontra um segundo aberto, e o
+--    pedido novo sobre o mesmo aviso o REABRE em vez de abrir outro (o gravador,
+--    lib/ai/decisao/pedidos.ts, faz o insert e trata o 23505). A busca antes da
+--    escrita, que havia antes, deixava dois drenos simultâneos abrirem dois.
+--    Antes do índice, os repetidos saem (fica o aberto, e o mais novo): só o
+--    banco de quem rodou este PR antes do conserto os tem, mas o `update.sh`
+--    de qualquer clone não pode quebrar aqui.
+delete from public.agent_inbox_items a
+ using (
+   select id, row_number() over (
+            partition by organization_id, kind, ref_id
+            order by (status = 'open') desc, created_at desc, id desc
+          ) as n
+     from public.agent_inbox_items
+    where kind in ('jev_pedido_de_humano','jev_parar_de_receber')
+ ) d
+ where a.id = d.id and d.n > 1;
+create unique index if not exists agent_inbox_jev_pedido_unico
+  on public.agent_inbox_items (organization_id, kind, ref_id)
+  where kind in ('jev_pedido_de_humano','jev_parar_de_receber');
+
+-- 3. O AVISO FECHA QUANDO O PEDIDO FOI ATENDIDO, por qualquer caminho.
+--    A conversa saiu dos estados abertos (encerrada): os dois avisos.
+--    A conversa ficou com uma pessoa — alguém assumiu, ou ela foi PASSADA:
+--    `performHumanHandoff` (a regra de hoje, o descadastro ambíguo, a
+--    ferramenta `request_human_handoff` do modelo), o orquestrador do clima e
+--    a atribuição manual gravam `last_handoff_at` e calam o robô
+--    (`bot_silenced_until` no futuro) — fecha SÓ o de falar com uma pessoa.
+--    O de parar de receber segue aberto aí: o texto dele pede que a equipe
+--    assuma E peça ao cliente o PARAR, e fechá-lo no primeiro passo sumiria
+--    com o lembrete de um pedido de descadastro antes do passo que o atende.
+--    No contato: bloqueado (`is_blocked` passa a true — o único escritor é o
+--    STOP do próprio cliente, na entrada da mensagem, lib/channels/pos-entrada.ts;
+--    ninguém da equipe bloqueia à mão), fecha o de parar de receber de todas
+--    as conversas dele.
+--    Gatilhos próprios, e não o de atribuição da 0228: aquele só dispara em
+--    `assigned_to_user_id`/`status`, e a passagem nem sempre muda o status.
+--    Nenhum faz HTTP; os dois filtram a organização da própria linha.
+create or replace function public.fn_fechar_avisos_do_jev_da_conversa()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ if new.status not in('open','pending','claimed','ai_handling') then
+  update public.agent_inbox_items set status='resolved',resolved_at=now()
+   where organization_id=new.organization_id and ref_kind='conversation' and ref_id=new.id
+     and kind in('jev_pedido_de_humano','jev_parar_de_receber') and status<>'resolved';
+ elsif new.assigned_to_user_id is not null
+    or (new.last_handoff_at is not null and new.last_handoff_at is distinct from old.last_handoff_at)
+    or (new.bot_silenced_until > now() and new.bot_silenced_until is distinct from old.bot_silenced_until) then
+  update public.agent_inbox_items set status='resolved',resolved_at=now()
+   where organization_id=new.organization_id and ref_kind='conversation' and ref_id=new.id
+     and kind='jev_pedido_de_humano' and status<>'resolved';
+ end if;
+ return new;
+end;
+$$;
+revoke all on function public.fn_fechar_avisos_do_jev_da_conversa() from public,anon,authenticated;
+drop trigger if exists trg_fechar_avisos_do_jev_da_conversa on public.conversations;
+create trigger trg_fechar_avisos_do_jev_da_conversa
+ after update of assigned_to_user_id,status,bot_silenced_until,last_handoff_at on public.conversations
+ for each row execute function public.fn_fechar_avisos_do_jev_da_conversa();
+
+create or replace function public.fn_fechar_aviso_do_jev_ao_bloquear()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ update public.agent_inbox_items set status='resolved',resolved_at=now()
+  where organization_id=new.organization_id and kind='jev_parar_de_receber' and ref_kind='conversation'
+    and status<>'resolved'
+    and ref_id in(select v.id from public.conversations v where v.organization_id=new.organization_id and v.contact_id=new.id);
+ return new;
+end;
+$$;
+revoke all on function public.fn_fechar_aviso_do_jev_ao_bloquear() from public,anon,authenticated;
+drop trigger if exists trg_fechar_aviso_do_jev_ao_bloquear on public.contacts;
+create trigger trg_fechar_aviso_do_jev_ao_bloquear
+ after update of is_blocked on public.contacts
+ for each row when (new.is_blocked and old.is_blocked is distinct from true)
+ execute function public.fn_fechar_aviso_do_jev_ao_bloquear();
+
+notify pgrst, 'reload schema';
+
+-- ---- a trava de imutabilidade da versão publicada cobre as duas colunas
+-- que ficaram de fora (migration 0503, issue #2003) ----
+-- A lista de `fn_ai_agent_version_content_immutable` é escrita à mão e, desde
+-- o último create or replace (que cobria knowledge_source_ids), ficaram de
+-- fora `proposal_ai_draft_enabled` (flag por-agente que a tela edita) e
+-- `inbound_debounce_ms` (janela de rajada, migration 0498 / PR #1997). A camada
+-- da app devolve 409 mas é a única cerca; esta é a segunda, defense-in-depth,
+-- aberta para a service key. O invariante
+-- `tests/unit/trigger-imutavel-cobre-todas-as-colunas-de-conteudo.test.ts`
+-- compara a ÚLTIMA definição que vale contra o conjunto de conteúdo.
+create or replace function fn_ai_agent_version_content_immutable() returns trigger
+-- search_path fixo na PRÓPRIA definição: um create or replace sem a cláusula
+-- apaga o alter function ... set search_path da 0521 (invariante
+-- tests/invariants/avisos-do-security-advisor.test.ts).
+language plpgsql set search_path = '' as $fn$
+begin
+  if old.status <> 'draft' and (
+       new.system_prompt          is distinct from old.system_prompt
+    or new.provider               is distinct from old.provider
+    or new.model                  is distinct from old.model
+    or new.credential_id          is distinct from old.credential_id
+    or new.tool_ids               is distinct from old.tool_ids
+    or new.trigger_config         is distinct from old.trigger_config
+    or new.channel_session_id     is distinct from old.channel_session_id
+    or new.max_steps              is distinct from old.max_steps
+    or new.token_budget           is distinct from old.token_budget
+    or new.cost_budget_cents      is distinct from old.cost_budget_cents
+    or new.history_message_window is distinct from old.history_message_window
+    or new.history_token_window   is distinct from old.history_token_window
+    or new.handoff_keywords       is distinct from old.handoff_keywords
+    or new.handoff_tool_enabled   is distinct from old.handoff_tool_enabled
+    or new.followup               is distinct from old.followup
+    or new.multimodal_input       is distinct from old.multimodal_input
+    or new.video_frames_enabled   is distinct from old.video_frames_enabled
+    or new.split_messages         is distinct from old.split_messages
+    or new.split_max_chars        is distinct from old.split_max_chars
+    or new.cases_enabled          is distinct from old.cases_enabled
+    or new.operator_enabled       is distinct from old.operator_enabled
+    or new.operator_model         is distinct from old.operator_model
+    or new.operator_tool_ids      is distinct from old.operator_tool_ids
+    or new.pipeline_ids           is distinct from old.pipeline_ids
+    or new.knowledge_source_ids   is distinct from old.knowledge_source_ids
+    or new.proposal_ai_draft_enabled is distinct from old.proposal_ai_draft_enabled
+    or new.inbound_debounce_ms    is distinct from old.inbound_debounce_ms
+    or new.version_number         is distinct from old.version_number
+    or new.agent_id               is distinct from old.agent_id
+    or new.organization_id        is distinct from old.organization_id
+  ) then
+    raise exception 'ai_agent_versions % é imutável (status=%): mudança de conteúdo = versão draft nova; rollback = revert (clona + publica)',
+      old.id, old.status;
+  end if;
+  return new;
+end;
+$fn$;
+
+drop trigger if exists trg_ai_agent_versions_content_immutable on public.ai_agent_versions;
+create trigger trg_ai_agent_versions_content_immutable
+  before update on public.ai_agent_versions
+  for each row execute function fn_ai_agent_version_content_immutable();
+
+-- ---- a recusa permanente do atendimento não pede repetição (migration 0514) ----
+-- `PT409` no lugar de `40001` em `service_stale` de `fn_service_status` (a
+-- revisão esperada não bate: recusa PERMANENTE). `40001` vira HTTP 500 no
+-- PostgREST, e a requisição é reexecutada sem fim — no Supabase self-hosted a
+-- guarda da 0250 não alcança, porque o `sb-request-id` só é carimbado pela
+-- nuvem. `service_contact_changed` segue `40001` (conflito real: repetir passa).
+-- Corpo idêntico ao da definição acima, com um `errcode` trocado. Idempotente.
+
+create or replace function public.fn_service_status(p_org uuid,p_conversation uuid,p_status text,p_expected bigint default null)
+returns public.conversations language plpgsql security definer set search_path=public as $$
+declare c public.conversations; terminal boolean; pre_contact uuid;
+begin
+ if p_status not in ('closed','resolved','archived','open','pending','ai_handling','claimed') then
+  raise exception 'invalid_status' using errcode='22023'; end if;
+ select * into c from public.conversations where id=p_conversation and organization_id=p_org;
+ if not found then raise exception 'service_not_found' using errcode='P0002'; end if;
+ pre_contact:=c.contact_id;
+ perform public.fn_service_lock(p_org,c.contact_id);
+ select * into c from public.conversations where id=p_conversation and organization_id=p_org for no key update;
+ if c.contact_id is distinct from pre_contact then raise exception 'service_contact_changed' using errcode='40001'; end if;
+ if p_expected is not null and c.service_revision<>p_expected then raise exception 'service_stale' using errcode='PT409'; end if;
+ if c.status=p_status then return c; end if;
+ terminal := p_status in ('closed','resolved','archived');
+ update public.conversations set status=p_status,status_changed_at=clock_timestamp(),
+   service_revision=service_revision+case when terminal or c.status in ('closed','resolved','archived') then 1 else 0 end,
+   service_closed_at=case when terminal then clock_timestamp() else service_closed_at end,
+   service_started_at=case when c.status in ('closed','resolved','archived') and not terminal then clock_timestamp() else service_started_at end,
+   bot_silenced_until=case when terminal and last_handoff_at is null then null else bot_silenced_until end,
+   current_demanda_id=case when c.status in ('closed','resolved','archived') and not terminal then null else current_demanda_id end
+  where id=c.id and organization_id=p_org returning * into c;
+ if terminal then
+   update public.demandas set proximo_passo=coalesce(proximo_passo,'Revisar atendimento e registrar o desfecho da demanda')
+    where organization_id=p_org and id=c.current_demanda_id and fechada_em is null;
+ end if;
+ return c;
+end; $$;
+
+revoke execute on function public.fn_service_status(uuid,uuid,text,bigint) from public,anon,authenticated;
+grant execute on function public.fn_service_status(uuid,uuid,text,bigint) to service_role;
+
+-- ---- a anotação simultânea não apaga a outra (migration 0502) ----
+-- 0502 — duas anotações ao mesmo tempo não apagam uma à outra.
+--
+-- ─── O defeito, medido na main de 2026-09-30 ────────────────────────────────
+--
+-- `updateLeadHandler` (`app/api/v1/leads/_handler.ts`) mesclava `custom_fields`
+-- NO APLICATIVO:
+--
+--     const prev = existing.custom_fields …        -- lido no SELECT, lá em cima
+--     patch.custom_fields = { ...prev, ...input.custom_fields };
+--
+-- `existing` vem de uma leitura anterior. Duas escritas simultâneas com chaves
+-- DIFERENTES perdem uma: a segunda leu `prev` antes de a primeira gravar, e
+-- sobrescreve a coluna inteira com a versão velha mais a chave dela. Ninguém
+-- recebe erro. O dado some.
+--
+-- ─── Quem chega a esse ponto ────────────────────────────────────────────────
+--
+-- O handler serve dois caminhos: o `PATCH /api/v1/leads/[id]` (o formulário do
+-- dossiê) e a ferramenta MCP `crm_update_lead` (o assistente, integrações). Os
+-- dois podem escrever a mesma ficha ao mesmo tempo — quem atende salvando na
+-- tela enquanto o assistente anota. A rota `move` NÃO tem este defeito: o
+-- `update` dela exige `updated_at = expected_updated_at`, então uma leitura velha
+-- vira conflito, não dado perdido. O `PATCH` do lead não tem esse controle.
+--
+-- ⚠️ Limite: o formulário do dossiê (`LeadFieldsForm`, `CRMSidePanel`) envia o
+-- objeto `custom_fields` INTEIRO que carregou ao abrir. Uma chave que a ficha
+-- não tinha ao abrir agora sobrevive à gravação dela; uma chave que a ficha já
+-- mostrava ainda volta ao valor velho do formulário. Esta função fecha a
+-- corrida no servidor, não o payload velho do cliente.
+--
+-- ─── Por que uma função, e não uma linha no handler ─────────────────────────
+--
+-- O handler grava pelo PostgREST (`supabase.update()`), e ele não sabe dizer
+-- `custom_fields = coalesce(custom_fields,'{}'::jsonb) || $1::jsonb` — só sabe
+-- mandar um VALOR pronto, que é justamente o valor calculado a partir de uma
+-- leitura velha. A conta tem de acontecer DENTRO do `UPDATE`.
+--
+-- ─── Por que isso basta (medido, não suposto) ──────────────────────────────
+--
+-- Numa ÚNICA instrução `update … set custom_fields = custom_fields || $1`, em
+-- READ COMMITTED (o padrão do PostgREST), a segunda transação ESPERA o commit
+-- da primeira e RECALCULA a expressão sobre a versão nova da linha. Por isso ela
+-- soma sobre o que a primeira gravou, em vez de sobre o que leu antes.
+--
+-- Um `select … for update` antes NÃO é necessário: o invariante
+-- `anotacao-simultanea-nao-apaga-a-outra.test.ts` passou igual com e sem ele.
+-- O que quebra o conserto é o oposto — ler o valor para uma variável e gravar
+-- depois, que reintroduz a leitura velha (o invariante fica vermelho assim).
+-- Em REPEATABLE READ ou SERIALIZABLE a segunda transação recebe 40001 em vez de
+-- sobrescrever: falha alta, nunca dado perdido em silêncio.
+--
+-- ─── O que esta função NÃO faz ──────────────────────────────────────────────
+--
+-- Ela não decide QUEM pode escrever o quê: papel e organização são de quem
+-- chama (o handler resolve a organização de fonte confiável, nunca do body).
+-- Aqui só se garante que nenhuma escrita apague a outra por acidente de relógio.
+-- Misturar as duas coisas faria uma função que ninguém consegue auditar.
+--
+-- `||` em `jsonb` é raso de propósito: campo de funil é chave→valor, sem
+-- aninhamento. Merge profundo mudaria o significado de "apagar um campo".
+--
+-- Idempotente: `create or replace` e revoke/grant reaplicáveis. Sem constraint
+-- nem dado a corrigir.
+
+create or replace function public.fn_lead_anotar_campos(
+  p_org uuid, p_lead uuid, p_campos jsonb
+) returns jsonb language plpgsql security definer set search_path = public, pg_temp as $fn$
+declare
+  resultado jsonb;
+begin
+  if p_campos is null or jsonb_typeof(p_campos) <> 'object' then
+    raise exception 'campos_precisa_ser_objeto' using errcode = '22023';
+  end if;
+
+  -- UMA instrução, sem leitura prévia: a conta `custom_fields || p_campos` é
+  -- refeita sobre a linha vigente quando há escrita concorrente (ver cabeçalho).
+  -- Sem linha (lead inexistente OU de outra organização) nada é gravado e
+  -- `resultado` fica nulo. Silêncio de propósito: quem pede um lead que não é da
+  -- organização dele não recebe confirmação de que ele existe em outro lugar.
+  update public.crm_leads
+     set custom_fields = coalesce(custom_fields, '{}'::jsonb) || p_campos
+   where organization_id = p_org and id = p_lead
+   returning custom_fields into resultado;
+
+  return resultado;
+end $fn$;
+
+-- Função nova em `public` NASCE EXPOSTA, e são DUAS origens de EXECUTE: o
+-- `ALTER DEFAULT PRIVILEGES … GRANT ALL ON FUNCTIONS` do corpo do baseline (que
+-- alcança toda função criada depois dele, para anon, authenticated E
+-- service_role) e o grant a PUBLIC que o Postgres dá a qualquer função ao
+-- criá-la. Revogar só de `public, anon` deixaria esta função — que ESCREVE —
+-- executável por qualquer usuário logado de QUALQUER organização.
+-- `tests/invariants/hardening-definer-varredura.test.ts` cobra as duas origens.
+revoke all on function public.fn_lead_anotar_campos(uuid, uuid, jsonb) from public, anon, authenticated;
+grant execute on function public.fn_lead_anotar_campos(uuid, uuid, jsonb) to service_role;
+
+comment on function public.fn_lead_anotar_campos(uuid, uuid, jsonb) is
+  'Mescla campos personalizados no lead DENTRO do banco, numa única instrução atômica. '
+  'Existe porque o merge no aplicativo perdia escrita concorrente em silêncio. '
+  'Não decide papel nem organização — isso é de quem chama.';
+
+notify pgrst, 'reload schema';
+
+-- ---- conversão da Meta por etapa do funil (migration 0524) ----
+--
+-- Racional inteiro na migration 0524. Cria função, então fica ANTES da varredura de anon.
+create table if not exists public.meta_ads_conversion_rules (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  stage_id uuid not null,
+  event_name text not null,
+  meta_event text not null,
+  enabled boolean not null default true,
+  configured_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  updated_by uuid,
+  constraint meta_ads_conversion_rules_evento_do_livro
+    check (event_name ~ '^MetaEtapa:[0-9a-f-]{36}$'),
+  constraint meta_ads_conversion_rules_evento_conhecido
+    check (meta_event in (
+      'LeadSubmitted', 'QualifiedLead', 'InitiateCheckout', 'AddToCart', 'ViewContent'
+    ))
+);
+
+alter table public.meta_ads_conversion_rules
+  drop constraint if exists meta_ads_conversion_rules_stage_org_fk;
+alter table public.meta_ads_conversion_rules
+  add constraint meta_ads_conversion_rules_stage_org_fk
+  foreign key (organization_id, stage_id)
+  references public.crm_stages (organization_id, id)
+  on delete cascade;
+
+create unique index if not exists meta_ads_conversion_rules_org_stage_uk
+  on public.meta_ads_conversion_rules (organization_id, stage_id);
+create unique index if not exists meta_ads_conversion_rules_org_event_uk
+  on public.meta_ads_conversion_rules (organization_id, event_name);
+
+comment on table public.meta_ads_conversion_rules is
+  'Qual evento padrão da Meta cada etapa do funil envia quando um negócio entra nela. event_name (MetaEtapa:<uuid>) é a chave do livro-razão ad_conversion_dispatches. Server-side only: RLS sem policy e grants revogados de anon/authenticated.';
+comment on column public.meta_ads_conversion_rules.configured_at is
+  'Trava de retroatividade: só movimentos de etapa posteriores enviam. Regravada pelo gatilho quando a etapa ou o evento mudam, ou quando a regra é religada.';
+
+alter table public.meta_ads_conversion_rules enable row level security;
+revoke all on public.meta_ads_conversion_rules from anon, authenticated;
+grant select, insert, update, delete on public.meta_ads_conversion_rules to service_role;
+
+drop trigger if exists trg_meta_ads_conversion_rules_updated_at on public.meta_ads_conversion_rules;
+create trigger trg_meta_ads_conversion_rules_updated_at
+  before update on public.meta_ads_conversion_rules
+  for each row execute function public.fn_set_updated_at();
+
+create or replace function public.fn_marcar_configuracao_regra_meta()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    new.configured_at := coalesce(new.configured_at, now());
+  elsif new.stage_id is distinct from old.stage_id
+     or new.meta_event is distinct from old.meta_event
+     or (new.enabled and not old.enabled) then
+    new.configured_at := now();
+  else
+    new.configured_at := old.configured_at;
+  end if;
+  return new;
+end;
+$$;
+revoke execute on function public.fn_marcar_configuracao_regra_meta() from public, anon, authenticated;
+grant execute on function public.fn_marcar_configuracao_regra_meta() to service_role;
+
+drop trigger if exists trg_marcar_configuracao_regra_meta on public.meta_ads_conversion_rules;
+create trigger trg_marcar_configuracao_regra_meta
+  before insert or update on public.meta_ads_conversion_rules
+  for each row execute function public.fn_marcar_configuracao_regra_meta();
+
+alter table public.ad_conversion_dispatches
+  add column if not exists meta_event_name text;
+
+comment on column public.ad_conversion_dispatches.meta_event_name is
+  'Retrato do evento de etapa da Meta (0524): o nome que saiu no fio. Reenviar usa este, nunca a regra de agora.';
+
+-- O reenvio passa a aceitar os eventos de etapa da Meta, com a mesma exigência
+-- dos do Google: só reenvia o que tem o retrato (quando + qual evento) gravado.
+create or replace function public.fn_solicitar_reenvio_conversao(p_org uuid, p_lead uuid, p_event text)
+returns boolean language plpgsql set search_path = public as $$
+declare v_linha public.ad_conversion_dispatches%rowtype;
+begin
+  if p_event is null or not (
+    p_event in ('Purchase', 'QualifiedLead')
+    or p_event ~ '^Etapa:[0-9a-f-]{36}$'
+    or p_event ~ '^MetaEtapa:[0-9a-f-]{36}$'
+  ) then
+    return false;
+  end if;
+  select * into v_linha from public.ad_conversion_dispatches
+    where organization_id = p_org and lead_id = p_lead and event_name = p_event for update;
+  if not found or v_linha.status = 'sent' then return false; end if;
+  if p_event ~ '^MetaEtapa:' then
+    if v_linha.event_occurred_at is null or v_linha.meta_event_name is null then return false; end if;
+  elsif p_event <> 'Purchase' and (v_linha.event_occurred_at is null or v_linha.google_action_id is null) then
+    return false;
+  end if;
+  if p_event = 'Purchase' and v_linha.remote_request_id is null and not exists (
+    select 1 from public.crm_leads where id = p_lead and organization_id = p_org and status = 'won'
+  ) then return false; end if;
+  if exists (select 1 from public.event_log where organization_id = p_org and entity_id = p_lead
+    and event_type = 'ad_conversion.retry_requested' and status in ('pending', 'processing')
+    and coalesce(payload->>'event_name', 'Purchase') = p_event) then return false; end if;
+  perform public.emit_event('ad_conversion.retry_requested', 'crm_lead', p_lead,
+    jsonb_build_object('event_name', p_event), '{}'::jsonb, p_org);
+  update public.ad_conversion_dispatches set reason = 'reprocessamento_solicitado', attempted_at = now()
+    where id = v_linha.id and organization_id = p_org;
+  return true;
+end;
+$$;
+revoke execute on function public.fn_solicitar_reenvio_conversao(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.fn_solicitar_reenvio_conversao(uuid, uuid, text) to service_role;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
@@ -43217,66 +44767,6 @@ grant execute on function public.fn_encrypt_oauth(text) to service_role;
 grant execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) to service_role;
 grant execute on function public.fn_update_budget_consumption() to service_role;
 
--- ---- reconciliação segura de unread_count_for_assignee pós-redeploy (migration 9006) ----
-update public.conversations
-   set unread_count_for_assignee = 0
- where status in ('closed', 'resolved', 'archived')
-   and unread_count_for_assignee > 0;
-
-update public.conversations
-   set unread_count_for_assignee = 0
- where service_closed_at is not null
-   and unread_count_for_assignee > 0;
-
-
--- ---- catálogo Gemini: remove mortos da 2.x (migration 9007) ----
--- Espelho da migration: `gemini-2.0-flash` desligado pelo Google em 01/06/2026;
--- a família 2.5 aposenta em 20/10/2026. Deprecar some da tela e preserva o
--- histórico de custo — nunca DELETE. Preço do 3.5-flash-lite assumido
--- ($0,15/$1,25; fontes divergem), ver cabeçalho da migration.
-update public.ai_models set deprecated_at = now()
- where provider = 'google'
-   and model_id in ('gemini-2.0-flash',
-                    'gemini-2.5-flash',
-                    'gemini-2.5-flash-lite',
-                    'gemini-2.5-pro')
-   and deprecated_at is null;
-
-insert into public.ai_models
-  (provider, model_id, display_name, description, context_window,
-   input_price_per_million_cents, output_price_per_million_cents,
-   supports_tools, supports_vision, released_at)
-values
-  ('google', 'gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite',
-   'Substituto oficial do 2.0-flash; o piso de custo da geração 3 para alto volume.',
-   1000000, 25, 150, true, true, '2026-05-07'),
-  ('google', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite',
-   'Alto volume e baixa latência na geração 3.',
-   1000000, 15, 125, true, true, '2026-07-21')
-on conflict (provider, model_id) do update set
-  display_name = excluded.display_name,
-  description = excluded.description,
-  context_window = excluded.context_window,
-  input_price_per_million_cents = excluded.input_price_per_million_cents,
-  output_price_per_million_cents = excluded.output_price_per_million_cents,
-  supports_tools = excluded.supports_tools,
-  supports_vision = excluded.supports_vision,
-  released_at = excluded.released_at,
-  deprecated_at = null;
-
-insert into public.ai_pricing
-  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
-values
-  ('gemini-3.1-flash-lite', 25, 150, 'catálogo 9007'),
-  ('gemini-3.5-flash-lite', 15, 125, 'catálogo 9007 — $0,15/$1,25 assumido, fontes divergem ($0,30/$2,50 em outras); rever')
-on conflict (model) do update set
-  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
-  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
-  notes = excluded.notes,
-  superseded_at = null;
-
-
-
 
 -- ---- Criador provisório sai na entrega (migration 0237) ----
 -- As duas funções acima já saíram com a regra; aqui fica só a COLUNA, que é
@@ -43292,9 +44782,6 @@ comment on column public.user_organizations.provisional_until_handover is
   'quando o tenant foi criado para OUTRA pessoa (owner_email <> e-mail de quem '
   'cria). Nunca deduzir este valor depois: a ausência dele foi o que fez a '
   'primeira versão desta regra expulsar alguém da própria empresa.';
-
-notify pgrst, 'reload schema';
-
 -- ---- política de cadastro da instalação (migration 0253) ----
 create table if not exists public.platform_settings (
   id           smallint    primary key default 1,
@@ -43993,6 +45480,90 @@ do $f$ begin perform public.fn_reaplicar_modulos_instalados(); end $f$;
 -- tabela já com RLS e isolamento.
 do $f$ begin perform public.fn_proteger_tabelas_de_organizacao(); end $f$;
 
+-- ---- fix(2000): platform admin `support_readonly` não escreve (migration 0508) ----
+-- `fn_is_platform_admin()` ignora o scope, então uma policy de ESCRITA montada com
+-- ela deixava um platform admin `support_readonly` alterar organizations/settings
+-- pelo PostgREST. O corpo já nasce com `fn_is_platform_admin_full()` (que exige
+-- `scope = 'full'`); este apêndice é o self-heal idempotente para bancos que já têm
+-- as policies na forma antiga. Leitura (`for select`) CONTINUA com `fn_is_platform_admin()`
+-- — support_readonly segue lendo, só não escreve mais.
+
+drop policy if exists "api_tokens_admin_only" on "public"."api_tokens";
+drop policy if exists "api_tokens_tenant_read" on "public"."api_tokens";
+create policy "api_tokens_tenant_read" on "public"."api_tokens" for select using (public.fn_role_at_least("organization_id",'admin') or public.fn_is_platform_admin());
+drop policy if exists "api_tokens_admin_write" on "public"."api_tokens";
+create policy "api_tokens_admin_write" on "public"."api_tokens" for all using (public.fn_role_at_least("organization_id",'admin') or public.fn_is_platform_admin_full()) with check (public.fn_role_at_least("organization_id",'admin') or public.fn_is_platform_admin_full());
+
+drop policy if exists "nuvemshop_products_tenant" on "public"."nuvemshop_products";
+drop policy if exists "nuvemshop_products_read" on "public"."nuvemshop_products";
+create policy "nuvemshop_products_read" on "public"."nuvemshop_products" for select using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin());
+drop policy if exists "nuvemshop_products_tenant_write" on "public"."nuvemshop_products";
+create policy "nuvemshop_products_tenant_write" on "public"."nuvemshop_products" for all using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full()) with check ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full());
+
+drop policy if exists "platform_admin_only_incidents" on "public"."incidents";
+drop policy if exists "incidents_tenant_read" on "public"."incidents";
+create policy "incidents_tenant_read" on "public"."incidents" for select using (public.fn_is_platform_admin());
+drop policy if exists "incidents_admin_write" on "public"."incidents";
+create policy "incidents_admin_write" on "public"."incidents" for all using (public.fn_is_platform_admin_full()) with check (public.fn_is_platform_admin_full());
+
+drop policy if exists "tenant_isolation_ai_invocations_all" on "public"."ai_invocations";
+drop policy if exists "tenant_isolation_ai_invocations_read" on "public"."ai_invocations";
+create policy "tenant_isolation_ai_invocations_read" on "public"."ai_invocations" for select using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin());
+drop policy if exists "tenant_isolation_ai_invocations_write" on "public"."ai_invocations";
+create policy "tenant_isolation_ai_invocations_write" on "public"."ai_invocations" for all using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full()) with check ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full());
+
+drop policy if exists "tenant_isolation_contacts_all" on "public"."contacts";
+drop policy if exists "tenant_isolation_contacts_read" on "public"."contacts";
+create policy "tenant_isolation_contacts_read" on "public"."contacts" for select using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin());
+drop policy if exists "tenant_isolation_contacts_write" on "public"."contacts";
+create policy "tenant_isolation_contacts_write" on "public"."contacts" for all using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full()) with check ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full());
+
+drop policy if exists "warmup_tenant_isolation_all" on "public"."channel_session_warmup";
+drop policy if exists "warmup_tenant_isolation_read" on "public"."channel_session_warmup";
+create policy "warmup_tenant_isolation_read" on "public"."channel_session_warmup" for select using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin());
+drop policy if exists "warmup_tenant_isolation_write" on "public"."channel_session_warmup";
+create policy "warmup_tenant_isolation_write" on "public"."channel_session_warmup" for all using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full()) with check ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full());
+
+drop policy if exists "orgs_write_platform_admin" on "public"."organizations";
+drop policy if exists "orgs_write_platform_admin" on "public"."organizations";
+create policy "orgs_write_platform_admin" on "public"."organizations" for all using (public.fn_is_platform_admin_full()) with check (public.fn_is_platform_admin_full());
+
+drop policy if exists "audit_log_insert_tenant_member" on "public"."api_audit_log";
+drop policy if exists "audit_log_insert_tenant_member" on "public"."api_audit_log";
+create policy "audit_log_insert_tenant_member" on "public"."api_audit_log" for insert to authenticated with check ((("organization_id" is null) or ("organization_id" in (select public.fn_user_org_ids())) or public.fn_is_platform_admin_full()));
+
+drop policy if exists "lgpd_requests_admin_write" on "public"."lgpd_requests";
+drop policy if exists "lgpd_requests_admin_write" on "public"."lgpd_requests";
+create policy "lgpd_requests_admin_write" on "public"."lgpd_requests" for all using (public.fn_is_platform_admin_full() or ("organization_id" in (select public.fn_user_org_ids()) and public.fn_role_at_least("organization_id",'admin'))) with check (public.fn_is_platform_admin_full() or ("organization_id" in (select public.fn_user_org_ids()) and public.fn_role_at_least("organization_id",'admin')));
+
+drop policy if exists "merge_queue_manager_write" on "public"."merge_queue";
+drop policy if exists "merge_queue_manager_write" on "public"."merge_queue";
+create policy "merge_queue_manager_write" on "public"."merge_queue" for all using (public.fn_is_platform_admin_full() or ("organization_id" in (select public.fn_user_org_ids()) and public.fn_role_at_least("organization_id",'manager'))) with check (public.fn_is_platform_admin_full() or ("organization_id" in (select public.fn_user_org_ids()) and public.fn_role_at_least("organization_id",'manager')));
+
+drop policy if exists "tenant_integrations_admin_write" on "public"."tenant_integrations";
+drop policy if exists "tenant_integrations_admin_write" on "public"."tenant_integrations";
+create policy "tenant_integrations_admin_write" on "public"."tenant_integrations" for all using (public.fn_is_platform_admin_full() or ("organization_id" in (select public.fn_user_org_ids()) and public.fn_role_at_least("organization_id",'manager'))) with check (public.fn_is_platform_admin_full() or ("organization_id" in (select public.fn_user_org_ids()) and public.fn_role_at_least("organization_id",'manager')));
+
+drop policy if exists "orders_tenant_write" on "public"."orders";
+drop policy if exists "orders_tenant_write" on "public"."orders";
+create policy "orders_tenant_write" on "public"."orders" for all using ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full()) with check ("organization_id" in (select public.fn_user_org_ids()) or public.fn_is_platform_admin_full());
+
+drop policy if exists "user_orgs_delete" on "public"."user_organizations";
+drop policy if exists "user_orgs_delete" on "public"."user_organizations";
+create policy "user_orgs_delete" on "public"."user_organizations" for delete using (public.fn_role_at_least("organization_id",'admin') or public.fn_is_platform_admin_full());
+
+drop policy if exists "user_orgs_insert" on "public"."user_organizations";
+drop policy if exists "user_orgs_insert" on "public"."user_organizations";
+create policy "user_orgs_insert" on "public"."user_organizations" for insert with check (public.fn_role_at_least("organization_id",'admin') or public.fn_is_platform_admin_full());
+
+drop policy if exists "user_orgs_update" on "public"."user_organizations";
+drop policy if exists "user_orgs_update" on "public"."user_organizations";
+create policy "user_orgs_update" on "public"."user_organizations" for update using (public.fn_role_at_least("organization_id",'admin') or public.fn_is_platform_admin_full());
+
+-- ---- grants da função nova (espelha o bloco da fn_is_platform_admin) ----
+revoke execute on function public.fn_is_platform_admin_full() from public, anon;
+grant execute on function public.fn_is_platform_admin_full() to authenticated, service_role;
+
 -- ---- travas do modo somente leitura do suporte, depois de toda tabela (migration 0274) ----
 --
 -- ⚠️ ESTA CHAMADA É O ÚLTIMO BLOCO DO ARQUIVO. Tabela nova, coluna
@@ -44321,34 +45892,6 @@ on conflict (id) do update
       file_size_limit    = excluded.file_size_limit,
       allowed_mime_types = excluded.allowed_mime_types;
 
--- ---- logo escuro unifica o nome (migration 9009) ----
--- A dev guardava em `logo_path_dark` (9001); a main criou `logo_dark_path`
--- (0406) e o código lê só o novo. Cópia uma vez, só onde falta; coluna antiga
--- mantida para rollback. Idempotente.
-update public.platform_branding
-   set logo_dark_path = logo_path_dark
- where logo_dark_path is null
-   and logo_path_dark is not null;
-
-update public.organizations o
-   set settings = jsonb_set(
-     coalesce(o.settings, '{}'::jsonb),
-     '{branding,logo_dark_path}',
-     to_jsonb(o.settings #>> '{branding,logo_path_dark}'),
-     true
-   )
- where o.settings #>> '{branding,logo_path_dark}' is not null
-   and o.settings #>> '{branding,logo_dark_path}' is null;
-
-notify pgrst, 'reload schema';
-
--- ---- derruba o overload de 4 args do logo da org (migration 9010) ----
--- A 0406 recriou a de 3 args como wrapper do tema; a de 4 da dev (9001) ficou
--- de pé ao lado e a chamada de 3 virou PGRST203. Cai a de 4 (morta), fica a de
--- 3 (caminho vivo). Idempotente.
-drop function if exists public.fn_definir_logo_da_organizacao(uuid, uuid, text, text);
-
-notify pgrst, 'reload schema';
 -- ---- ícone da aba: coluna da instalação (migration 0443) ----
 -- 0443 — Ícone da aba (favicon) opcional da instalação, subido em /admin/marca.
 -- Aditiva: sem arquivo, a aba segue com o ícone desenhado por `app/icon.tsx`
@@ -44409,15 +45952,39 @@ create policy "conversation_notes_select" on public.conversation_notes
     )
   );
 
--- ⚠️ A política de ESCRITA precisa da MESMA condição: policies são OR e
--- `conversation_notes_write` é `for all`, que concede SELECT junto — sem isto
--- a policy nova de SELECT é anulada. O teste `F2: ... não lê a nota` pegou
--- exatamente isso (devolveu 1 em vez de 0) antes do conserto.
+-- ⚠️ A política de ESCRITA precisa da MESMA condição de visibilidade: policies
+-- são OR e `for all` concede SELECT junto — sem isto a policy nova de SELECT é
+-- anulada. O teste `F2: ... não lê a nota` pegou exatamente isso (devolveu 1 em
+-- vez de 0) antes do conserto (0478).
+--
+-- Desde a 0509 a escrita é por OPERAÇÃO (formato 0464/0489/0490, issue #1870):
+-- entre quem VÊ a conversa, editar e apagar são só do AUTOR (`created_by_user_id`)
+-- ou de manager+ da organização — a policy `for all` não distinguia o autor e
+-- qualquer agent podia mexer na nota de um colega pelo PostgREST. Molde da
+-- rota DELETE, que já era autor+/manager+ no app.
 drop policy if exists "conversation_notes_write" on public.conversation_notes;
-create policy "conversation_notes_write" on public.conversation_notes
-  for all using (
+drop policy if exists "conversation_notes_insert" on public.conversation_notes;
+create policy "conversation_notes_insert" on public.conversation_notes
+  for insert
+  with check (
     organization_id in (select public.fn_user_org_ids())
     and public.fn_role_at_least(organization_id, 'agent')
+    and created_by_user_id = auth.uid()
+    and exists (
+      select 1 from public.conversations c
+      where c.organization_id = conversation_notes.organization_id
+        and c.id = conversation_notes.conversation_id
+        and public.fn_can_view_conversation(c.organization_id, c.assigned_to_user_id)
+    )
+  );
+
+drop policy if exists "conversation_notes_update" on public.conversation_notes;
+create policy "conversation_notes_update" on public.conversation_notes
+  for update
+  using (
+    organization_id in (select public.fn_user_org_ids())
+    and public.fn_role_at_least(organization_id, 'agent')
+    and (created_by_user_id = auth.uid() or public.fn_role_at_least(organization_id, 'manager'))
     and exists (
       select 1 from public.conversations c
       where c.organization_id = conversation_notes.organization_id
@@ -44428,6 +45995,22 @@ create policy "conversation_notes_write" on public.conversation_notes
   with check (
     organization_id in (select public.fn_user_org_ids())
     and public.fn_role_at_least(organization_id, 'agent')
+    and (created_by_user_id = auth.uid() or public.fn_role_at_least(organization_id, 'manager'))
+    and exists (
+      select 1 from public.conversations c
+      where c.organization_id = conversation_notes.organization_id
+        and c.id = conversation_notes.conversation_id
+        and public.fn_can_view_conversation(c.organization_id, c.assigned_to_user_id)
+    )
+  );
+
+drop policy if exists "conversation_notes_delete" on public.conversation_notes;
+create policy "conversation_notes_delete" on public.conversation_notes
+  for delete
+  using (
+    organization_id in (select public.fn_user_org_ids())
+    and public.fn_role_at_least(organization_id, 'agent')
+    and (created_by_user_id = auth.uid() or public.fn_role_at_least(organization_id, 'manager'))
     and exists (
       select 1 from public.conversations c
       where c.organization_id = conversation_notes.organization_id
@@ -44616,6 +46199,106 @@ forçado. Inventar é pior do que demorar um instante a mais para responder.
 end
 $pub$;
 
+-- ---- janela de RESPOSTA separada da janela de DISPARO (migration 0495) ----
+-- O agente passa a poder responder a quem escreveu fora do horário comercial sem
+-- abrir junto o disparo em massa, a prospecção e a retomada de conversa parada.
+-- As duas coisas eram regidas por UM par (`window_start_hour`/`window_end_hour`).
+--
+-- Colunas soltas, não jsonb: `window_*_hour` é coluna desde a 0010 e a tela de
+-- Conexões já os edita; um `resposta_knobs` jsonb nasceria sem CHECK forte e
+-- divergiria do vizinho na mesma tabela.
+--
+-- ⚠️ Sem DEFAULT: NULL = a resposta herda a janela de disparo, coluna a coluna,
+-- que é o comportamento de antes. Quem só atualiza não muda de operação.
+
+-- A primeira versão desta migration (PR #1983, fechado sem merge) chamava as
+-- colunas `reengajar_*`. Quem já a aplicou tem os dados lá: renomeia em vez de
+-- criar coluna nova ao lado, e a constraint de nome velho sai junto.
+do $renomear_reengajar$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'reengajar_start_hour')
+     and not exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'resposta_start_hour') then
+    alter table public.channel_knobs rename column reengajar_start_hour to resposta_start_hour;
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'reengajar_end_hour')
+     and not exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'channel_knobs'
+                and column_name = 'resposta_end_hour') then
+    alter table public.channel_knobs rename column reengajar_end_hour to resposta_end_hour;
+  end if;
+end
+$renomear_reengajar$;
+
+alter table public.channel_knobs
+  drop constraint if exists channel_knobs_reengajar_horas_validas;
+
+alter table public.channel_knobs
+  add column if not exists resposta_start_hour smallint,
+  add column if not exists resposta_end_hour smallint;
+
+comment on column public.channel_knobs.resposta_start_hour is
+  'Início da janela de RESPOSTA do agente (h, hora local da org). NULL = usa window_start_hour (comportamento anterior).';
+comment on column public.channel_knobs.resposta_end_hour is
+  'Fim da janela de RESPOSTA do agente (h, exclusivo; 24 = meia-noite). NULL = usa window_end_hour.';
+
+-- 0..24. `end` pode ser 24 (meia-noite seguinte) porque `insideWindow` compara
+-- `wall.h < windowEndHour` e a hora local nunca passa de 23.
+-- ⚠️ O `drop … if exists` ANTES do `add` é o que torna isto reaplicável: o
+-- `update.sh` roda o apêndice inteiro em toda atualização, e `add constraint`
+-- sem guarda quebra com 'already exists' no segundo clone que atualizar. É o
+-- gate `tests/unit/baseline-reaplicavel.test.ts` que cobra esta forma.
+alter table public.channel_knobs
+  drop constraint if exists channel_knobs_resposta_horas_validas;
+alter table public.channel_knobs
+  add constraint channel_knobs_resposta_horas_validas
+  check (
+    (resposta_start_hour is null or resposta_start_hour between 0 and 23)
+    and (resposta_end_hour is null or resposta_end_hour between 1 and 24)
+  );
+
+-- ---- atraso humano configurável por conexão (migration 0499) ----
+-- 0499 — os quatro números do atraso humano ANTES da primeira bolha
+-- (`atraso-humano.ts`) viram knob por conexão (issue #653): NOTAR, POR_CARACTERE,
+-- MINIMO e MAXIMO, todos NULL = default em defaults.ts (900/22/1200/7500 — os
+-- valores de antes, regressão zero). Nascem em `channel_knobs`, a mesma tabela
+-- dos knobs de pacing por conexão (0010 e 0495); nada de tabela nova. O jitter
+-- entre bolhas não ganha coluna: ele já é `throttle_ms` + `jitter_max_ms`.
+-- Reaplicável: `add column if not exists` e `drop constraint if exists` antes
+-- do `add constraint` — o `update.sh` roda o apêndice inteiro a cada atualização.
+alter table public.channel_knobs
+  add column if not exists atraso_notar_ms integer,
+  add column if not exists ms_por_caractere integer,
+  add column if not exists atraso_minimo_ms integer,
+  add column if not exists atraso_maximo_ms integer;
+
+comment on column public.channel_knobs.atraso_notar_ms is
+  'Parcela fixa do atraso humano (ms): ver a notificação e abrir a conversa. NULL = default (900).';
+comment on column public.channel_knobs.ms_por_caractere is
+  'Taxa de digitação do atraso humano (ms por caractere). NULL = default (22).';
+comment on column public.channel_knobs.atraso_minimo_ms is
+  'Piso do atraso humano (ms). NULL = default (1200).';
+comment on column public.channel_knobs.atraso_maximo_ms is
+  'Teto do atraso humano (ms). NULL = default (7500).';
+
+alter table public.channel_knobs
+  drop constraint if exists channel_knobs_atraso_humano_saneamento;
+
+alter table public.channel_knobs
+  add constraint channel_knobs_atraso_humano_saneamento
+  check (
+    (atraso_notar_ms   is null or (atraso_notar_ms   between 0 and 600000))
+    and (ms_por_caractere is null or (ms_por_caractere between 0 and 1000))
+    and (atraso_minimo_ms is null or (atraso_minimo_ms between 0 and 600000))
+    and (atraso_maximo_ms is null or (atraso_maximo_ms between 0 and 600000))
+    and (atraso_maximo_ms is null or atraso_minimo_ms is null or atraso_maximo_ms >= atraso_minimo_ms)
+  );
+
 -- ---- dedupe de event_dead atômico: índice único parcial (migration 0491) ----
 -- 0491 — o aviso `event_dead` não abre em dobro com dois drenos concorrentes
 -- (issue #880). O dedupe era uma pergunta seguida de uma escrita: `lib/event-log/
@@ -44657,3 +46340,193 @@ update public.agent_inbox_items i
 create unique index if not exists agent_inbox_event_dead_aberto_unico
   on public.agent_inbox_items (organization_id, kind, title)
   where status = 'open' and kind = 'event_dead';
+
+-- ---- janela de rajada configurável por agente (migration 0498) ----
+-- 0498 (#1856, de @webtecnica): a janela que junta mensagens do MESMO contato
+-- numa resposta sai da env global `INBOUND_DEBOUNCE_MS` e vira campo da versão
+-- do agente. NULL = usa a env da instalação (quem só atualiza não muda nada);
+-- 0 desliga; teto 60s. Par drop/add da CHECK para o `update.sh` reaplicar sem
+-- 'already exists'. Sem função nova (nada a revogar de anon).
+alter table public.ai_agent_versions
+  drop constraint if exists ai_agent_versions_inbound_debounce_ms_check;
+
+alter table public.ai_agent_versions
+  add column if not exists inbound_debounce_ms integer;
+
+comment on column public.ai_agent_versions.inbound_debounce_ms is
+  'Janela de coalescência de rajada inbound em ms para ESTE agente. NULL = usa o INBOUND_DEBOUNCE_MS da instalação; 0 = desliga a coalescência; teto 60s.';
+
+alter table public.ai_agent_versions
+  add constraint ai_agent_versions_inbound_debounce_ms_check
+  check (inbound_debounce_ms is null or (inbound_debounce_ms >= 0 and inbound_debounce_ms <= 60000));
+
+-- ---- a chave de mapas da organização (migration 0504) ----
+-- Pino do WhatsApp → rua/cidade/região aproximados (lib/mapas/). Server-side only.
+create table if not exists public.map_provider_credentials (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  provider text not null default 'google_maps',
+  api_key_encrypted bytea not null,
+  -- Para a tela reconhecer QUAL chave está gravada sem ver a chave.
+  api_key_last4 text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  updated_by uuid,
+  constraint map_provider_credentials_provider_conhecido
+    check (provider in ('google_maps'))
+);
+
+-- Uma chave por provedor por organização: trocar é gravar de novo (upsert).
+create unique index if not exists map_provider_credentials_org_provider_uk
+  on public.map_provider_credentials (organization_id, provider);
+
+comment on table public.map_provider_credentials is
+  'Chave de mapas da organização (hoje: Google Geocoding API), usada para transformar o pino de localização do WhatsApp em rua/cidade/região aproximados. Opcional. Server-side only: RLS ligada sem policies e grants revogados de anon/authenticated. A chave nunca volta ao browser.';
+comment on column public.map_provider_credentials.api_key_encrypted is
+  'Cifrado por fn_encrypt_oauth (pgp_sym/aes256), a mesma cifra de channel_sessions e ad_platform_connections.';
+
+alter table public.map_provider_credentials enable row level security;
+revoke all on public.map_provider_credentials from anon, authenticated;
+grant select, insert, update, delete on public.map_provider_credentials to service_role;
+
+drop trigger if exists trg_map_provider_credentials_updated_at on public.map_provider_credentials;
+create trigger trg_map_provider_credentials_updated_at
+  before update on public.map_provider_credentials
+  for each row execute function public.fn_set_updated_at();
+
+-- ---- avisos do Security Advisor: search_path fixo e definer só do servidor (migration 0521) ----
+-- Cópia das instruções da migration 0521 (o porquê está no cabeçalho dela). Só ALTER/REVOKE:
+-- não cria função, então pode ficar depois da VARREDURA anon.
+alter function public.fn_agent_versions_immutable() set search_path = '';
+alter function public.fn_ai_agent_version_content_immutable() set search_path = '';
+alter function public.fn_contato_anonimizado_limpa_campos_personalizados() set search_path = '';
+alter function public.fn_degraus_de_lembrete_validos(integer[]) set search_path = '';
+alter function public.fn_corpos_de_lembrete_validos(jsonb) set search_path = '';
+alter function public.fn_lancamento_pago_e_imutavel() set search_path = '';
+alter function public.fn_resolve_inbound_number(text) set search_path = '';
+
+revoke execute on function public.fn_resolve_inbound_number(text) from public, anon, authenticated;
+grant execute on function public.fn_resolve_inbound_number(text) to service_role;
+
+do $$
+declare
+  f regprocedure;
+begin
+  for f in
+    select p.oid::regprocedure
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = 'rls_auto_enable'
+  loop
+    execute format('revoke execute on function %s from public, anon, authenticated', f);
+  end loop;
+end
+$$;
+
+-- 0520 (#1095, de @webtecnica): o gancho de TEMA. A permissão `theme.apply`
+-- entra no conjunto fechado (`fn_extensions_permissoes_validas`, bloco acima) e
+-- a configuração do vínculo passa a admitir UMA chave opcional `theme` = a
+-- paleta escolhida pela organização. Par drop/add da CHECK para o `update.sh`
+-- reaplicar sem 'already exists' — quem aplica SÓ o baseline é justamente quem
+-- mais precisa desta definição, porque ali a cadeia de migrations não roda.
+alter table public.organization_extensions
+  drop constraint if exists organization_extensions_configuration_check;
+
+alter table public.organization_extensions
+  add constraint organization_extensions_configuration_check
+  check (
+    jsonb_typeof(configuration) = 'object'
+    and configuration ?& array['density','show_description']
+    and configuration - array['density','show_description','theme'] = '{}'::jsonb
+    and configuration->>'density' is not null
+    and configuration->>'density' in ('comfortable','compact')
+    and jsonb_typeof(configuration->'show_description') = 'boolean'
+    and (
+      not (configuration ? 'theme')
+      or configuration->>'theme' in ('sage','clay','mist','plum','olive')
+    )
+  );
+
+-- ---- o audit log é só-inclusão para TODO papel que não seja o dono (migration 0525) ----
+--
+-- A 0258 tirou UPDATE, DELETE e TRUNCATE de `api_audit_log` numa lista FIXA de
+-- papéis: public, anon, authenticated e service_role. Papel criado pelo
+-- operador ficava de fora — e o README do self-host manda criar um, o
+-- `agent_worker`, com `grant select, insert, update, delete on all tables`.
+-- O `update.sh` re-aplicava a 0258 sem alcançar esse papel.
+--
+-- Este bloco troca a lista por uma regra: todo papel com grant DIRETO de
+-- UPDATE, DELETE ou TRUNCATE em `api_audit_log`, exceto o dono da tabela,
+-- perde os três. Com o nome que o operador tiver dado ao papel. INSERT e
+-- SELECT ficam — o worker grava auditoria e a lê.
+--
+-- O dono fica de fora porque o privilégio dele é implícito (revogar não o
+-- alcança) e porque o expurgo legítimo, `fn_expurgar_auditoria_vencida`
+-- (0167), é `security definer` dele, assim como as FKs `on delete set null`.
+--
+-- Idempotente: na segunda passada o laço não acha ninguém. Roda a cada
+-- `update.sh`, então uma instalação que já seguiu a receita antiga se cura na
+-- próxima atualização. Sem função nova (nada a revogar de anon).
+
+do $$
+declare
+  v_papel text;
+begin
+  for v_papel in
+    select distinct case when a.grantee = 0 then 'public' else quote_ident(r.rolname) end
+      from pg_class c
+      cross join lateral aclexplode(c.relacl) a
+      left join pg_roles r on r.oid = a.grantee
+     where c.oid = 'public.api_audit_log'::regclass
+       and a.grantee <> c.relowner
+       and a.privilege_type in ('UPDATE', 'DELETE', 'TRUNCATE')
+  loop
+    execute format('revoke update, delete, truncate on table public.api_audit_log from %s', v_papel);
+  end loop;
+end
+$$;
+
+-- ---- seleção de empresas na prospecção, issue #1896 (migration 0506) ----
+-- O operador escolhe quais empresas da busca entram na fila. Padrão TUDO
+-- marcado: quem só atualiza continua com a mesma fila de antes.
+alter table public.prospecting_candidates
+  add column if not exists selected boolean not null default true;
+
+-- ---- dedupe de midia_nao_lida atômico: índice único parcial (migration 0527) ----
+with repetidas as (
+  select id,
+         row_number() over (
+           partition by organization_id, kind
+           order by created_at asc, id asc
+         ) as ordem
+    from public.agent_inbox_items
+   where status = 'open'
+     and kind = 'midia_nao_lida'
+)
+update public.agent_inbox_items i
+   set status = 'resolved',
+       resolved_at = now()
+  from repetidas r
+ where i.id = r.id
+   and r.ordem > 1;
+
+create unique index if not exists agent_inbox_midia_nao_lida_aberto_unico
+  on public.agent_inbox_items (organization_id, kind)
+  where status = 'open' and kind = 'midia_nao_lida';
+
+-- ---- origem do negócio segue o canal da conversa (migration 0531) ----
+-- Negócio que nasceu de conversa do Instagram/Facebook gravado com
+-- source = 'whatsapp' passa a ter o canal da conversa. Critério e o que não se
+-- toca: cabeçalho da migration 0531. Idempotente.
+update public.crm_leads l
+   set source = c.channel
+  from public.crm_lead_activities a
+  join public.conversations c
+    on c.organization_id = a.organization_id
+   and c.id = a.source_id
+ where a.organization_id = l.organization_id
+   and a.lead_id = l.id
+   and a.type = 'lead_created'
+   and a.source_module = 'canal.ingest'
+   and c.channel <> 'whatsapp'
+   and l.source = 'whatsapp';
