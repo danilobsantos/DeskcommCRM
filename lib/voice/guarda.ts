@@ -75,7 +75,19 @@ export async function exigirVozLigada(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any>,
   organizationId: string,
-  opts: { requestId?: string } = {},
+  /**
+   * `instalacaoOferece` existe para não haver DUAS fontes do mesmo fato.
+   *
+   * As rotas que chamam esta guarda já resolveram `getWacallsClient()` e já
+   * devolveram 503 quando ele é nulo — nesse ponto a instalação **comprovadamente**
+   * oferece voz. Reler `env.WACALLS_API_BASE_URL` aqui seria perguntar de novo,
+   * por um caminho diferente, e é assim que duas respostas divergem: um teste
+   * que dubla o cliente e não dubla o env ganha um 503 de "instalação não
+   * oferece" numa rota cujo cliente existe.
+   *
+   * O default continua sendo o env, para quem chamar sem saber.
+   */
+  opts: { requestId?: string; instalacaoOferece?: boolean } = {},
 ): Promise<Response | null> {
   let escolha: EscolhaDeVoz;
   try {
@@ -94,7 +106,10 @@ export async function exigirVozLigada(
     );
   }
 
-  const estado = estadoDaVoz(escolha, instalacaoOfereceVoz(env.WACALLS_API_BASE_URL));
+  const estado = estadoDaVoz(
+    escolha,
+    opts.instalacaoOferece ?? instalacaoOfereceVoz(env.WACALLS_API_BASE_URL),
+  );
   if (estado.ligada) return null;
 
   if (estado.motivo === "instalacao_nao_oferece") {

@@ -45,6 +45,7 @@
 
 import { DEFAULT_APP_NAME } from "@/lib/branding";
 import { env } from "@/lib/env";
+import { valorDaInstalacao } from "@/lib/instalacao/config";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -57,8 +58,15 @@ import { camadaDaInstalacao, camadaDoAmbiente, resolverMarca } from "./resolve";
 
 export type MarcaDeSaida = {
   readonly nome: string;
+  /**
+   * `null` = não há logo configurado, e quem renderiza NÃO desenha nada no
+   * lugar. Ficou sem leitor nenhum desde que este seam nasceu — os dois
+   * consumidores entraram nesta onda: o topo do convite de time
+   * (`lib/email/templates/invite.ts`) e a casca das telas de acesso
+   * (`app/(public)/layout.tsx`).
+   */
   readonly logoUrl: string | null;
-  readonly logoUrlDark: string | null;
+  readonly logoDarkUrl?: string | null;
   /** `#hex` sempre — o formato que cliente de e-mail e @react-pdf entendem. */
   readonly accent: string;
   /** Preto ou branco, já com o piso de contraste aplicado. */
@@ -111,7 +119,6 @@ function padraoDoProduto(): MarcaDeSaida {
   return {
     nome: DEFAULT_APP_NAME,
     logoUrl: null,
-    logoUrlDark: null,
     accent: ACCENT_DO_PRODUTO,
     accentFg: melhorFrenteSobre(ACCENT_DO_PRODUTO),
     origens: { nome: "padrao", cor: "padrao" },
@@ -192,11 +199,19 @@ export async function marcaDaSaida(organizationId: string | null): Promise<Marca
     return {
       nome: marca.name,
       logoUrl: marca.logoUrl,
-      logoUrlDark: marca.logoUrlDark,
+      ...(marca.logoDarkUrl ? { logoDarkUrl: marca.logoDarkUrl } : {}),
       accent,
+      // Nunca `#ffffff` fixo: `melhorFrenteSobre` (`contraste.ts:79`) já
+      // decide preto ou branco pelo contraste real. Uma marca amarela colada
+      // pelo revendedor produziria texto branco ilegível no botão — e é
+      // exatamente a marca que se cola sem avisar ninguém.
       accentFg: derivada?.claro.accentFg ?? melhorFrenteSobre(accent),
       origens: {
         nome: marca.origens.nome,
+        // Sem derivação a cor EXIBIDA é a do produto, mesmo que alguma camada
+        // tenha declarado uma semente. Reportar a camada aqui faria o
+        // diagnóstico dizer "a cor veio do banco" enquanto o botão está verde
+        // do produto.
         cor: derivada ? marca.origens.cor : "padrao",
       },
     };
@@ -216,12 +231,16 @@ export async function marcaDaSaida(organizationId: string | null): Promise<Marca
  * de conta suspensa, quem suspendeu foi o revendedor — mandar o cliente dele
  * escrever para nós entrega o cliente e não resolve o problema dele.
  *
- * Só o `.env` por enquanto. A coluna que permitiria trocar isto pela tela
- * (`platform_branding.support_email`) exige migration + apêndice no
- * `baseline.sql`, e schema não entra nesta mudança — está declarado no handoff
- * desta fase. Quando entrar, esta função ganha a linha do banco ACIMA do
- * ambiente, na mesma ordem que a marca já usa.
+ * O que a nota anterior aqui pedia — "quando a coluna entrar, esta função ganha
+ * a linha do banco ACIMA do ambiente, na mesma ordem que a marca já usa" — é o
+ * que esta versão faz. A migration 0341 trouxe `platform_config`, que guarda uma
+ * linha por variável em vez de uma coluna por campo, e o resolvedor devolve a
+ * ordem certa: banco acima, arquivo de instalação embaixo.
+ *
+ * Virou `async` porque o banco exige espera. O alcance foi medido antes: são
+ * duas páginas de servidor, ambas já assíncronas.
  */
-export function emailDeSuporte(): string {
-  return env.SUPPORT_EMAIL.trim();
+export async function emailDeSuporte(): Promise<string> {
+  const { valor } = await valorDaInstalacao("SUPPORT_EMAIL");
+  return (valor ?? "").trim();
 }

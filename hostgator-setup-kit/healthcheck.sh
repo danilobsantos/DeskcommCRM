@@ -4,11 +4,26 @@ source "$(dirname "$0")/_common.sh"
 enter_project
 
 step "Containers"
-dc ps
+# MEDIDO (#1955): com o resolver do Docker saturado (`dial udp 8.8.4.4:53:
+# i/o timeout`), o `docker ps` também travava — e o healthcheck ficava preso em
+# "▶ Containers" para sempre, justamente na tela que o dono abre para descobrir
+# o que aconteceu. Com prazo ele diz que o Docker não respondeu e o resto do
+# diagnóstico continua rodando.
+if com_prazo 45 docker compose $(dc_files) ps; then
+  :
+else
+  c_red "⛔ O Docker não respondeu em 45s. Ou o daemon está travado, ou o resolver"
+  c_red "   está saturado (journalctl -u docker -n 100 | tail). Enquanto isso, os"
+  c_red "   comandos de docker continuam travando: reinicie o Docker com"
+  c_red "   systemctl restart docker."
+fi
 
 step "Saúde interna do app (/api/v1/health)"
 # Roda de dentro da rede do compose (a rota não é exposta publicamente sem TLS).
-out="$(dc exec -T app node -e "
+# Mesmo prazo do `ps` acima, pelo mesmo motivo (#1955): um `docker exec` com o
+# resolver saturado travava aqui também, e este era o segundo ponto em que o
+# healthcheck ficava sem resposta nenhuma.
+out="$(com_prazo 30 docker compose $(dc_files) exec -T app node -e "
 fetch('http://127.0.0.1:3000/api/v1/health').then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})
 " 2>/dev/null || echo '')"
 if [ -n "$out" ]; then
@@ -56,8 +71,10 @@ step "E-mails de acesso (confirmar conta e redefinir senha)"
 # O conserto é apontar `GOTRUE_MAILER_TEMPLATES_*` para a rota do app. Como o
 # GoTrue não é serviço deste compose (o kit sobe app, worker, scheduler, waha,
 # redis, srh e caddy — o Supabase próprio fica FORA), o kit não tem como
-# escrever essa configuração. O que ele pode, e é o que faz aqui, é MEDIR o
-# estado e dizer as duas linhas exatas. Silêncio aqui seria o `return` mudo que
+# escrever essa configuração. A exceção é o modo single-server, em que o
+# Supabase é do kit: lá o install-single-server.sh e o update.sh gravam as duas
+# chaves (gravar_modelos_do_gotrue, _common.sh — #2109). Para o resto, o que o
+# kit pode, e é o que faz aqui, é MEDIR o estado e dizer as duas linhas exatas. Silêncio aqui seria o `return` mudo que
 # o invariante 6(c) do Sistema Vivo proíbe.
 case "${NEXT_PUBLIC_SUPABASE_URL:-}" in
   https://*.supabase.co*)

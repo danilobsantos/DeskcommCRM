@@ -1,10 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -181,7 +182,12 @@ type Arquivamento = {
 // varre o texto-fonte, então `sm:${...}` montado por interpolação NÃO gera CSS.
 // E o prefixo é o certo de qualquer jeito — no celular a linha empilha e largura
 // fixa espremeria os controles.
-const LARGURA = { ordem: "sm:w-[76px]", papel: "sm:w-56", arquivar: "sm:w-[104px]" } as const;
+const LARGURA = {
+  chance: "sm:w-[124px]",
+  ordem: "sm:w-[76px]",
+  papel: "sm:w-56",
+  arquivar: "sm:w-[104px]",
+} as const;
 
 /**
  * O texto de cada rótulo, em UM lugar só — porque ele aparece em DOIS.
@@ -192,6 +198,7 @@ const LARGURA = { ordem: "sm:w-[76px]", papel: "sm:w-56", arquivar: "sm:w-[104px
  */
 export const ROTULO = {
   nome: "Nome da coluna (clique para renomear)",
+  chance: "Chance de fechamento (0 a 100)",
   ordem: "Ordem",
   papel: "O que acontece nesta coluna",
 } as const;
@@ -350,6 +357,7 @@ export function StagesSection({
       >
         <span className="w-6 shrink-0" />
         <span className="min-w-0 flex-1">{t(ROTULO.nome)}</span>
+        <span className={`${LARGURA.chance} shrink-0`}>{t(ROTULO.chance)}</span>
         <span className={`${LARGURA.ordem} shrink-0 text-center`}>{t(ROTULO.ordem)}</span>
         <span className={`${LARGURA.papel} shrink-0`}>{t(ROTULO.papel)}</span>
         <span className={`${LARGURA.arquivar} shrink-0`} />
@@ -384,6 +392,21 @@ export function StagesSection({
                     etapa={etapa}
                     desabilitado={ocupado}
                     aoConfirmar={(nome) => aplicar(etapa.id, { name: nome })}
+                  />
+                </div>
+
+                {/* A calibração da previsão (issue #1535). Ganho e perda valem
+                    100 e 0 NA REGRA, então o campo fica desabilitado ali —
+                    digitar um número seria uma promessa que a regra ignora. */}
+                <div className={`${LARGURA.chance} shrink-0 space-y-1`}>
+                  <span className="block text-xs font-medium text-text-muted sm:hidden">
+                    {t(ROTULO.chance)}
+                  </span>
+                  <ProbabilidadeDaEtapa
+                    key={`prob-${etapa.id}-${etapa.win_probability ?? "sem"}`}
+                    etapa={etapa}
+                    desabilitado={ocupado}
+                    aoConfirmar={(valor) => aplicar(etapa.id, { win_probability: valor })}
                   />
                 </div>
 
@@ -466,6 +489,23 @@ export function StagesSection({
                 </Button>
               </div>
 
+              {/* #1532: a janela de "esfriando" é configuração da etapa, não
+                  coluna do quadro — ela mora aqui, na segunda linha, com
+                  rótulo próprio. Ganhar uma coluna no cabeçalho exigiria
+                  medir `LARGURA` em dois lugares e apertar uma linha que já
+                  carrega nome, chance, ordem, papel e arquivar. */}
+              <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                <span className="font-medium">
+                  {t("Janela de esfriando (vazio = 24 h de padrão)")}
+                </span>
+                <JanelaDaEtapa
+                  key={`janela-${etapa.id}-${etapa.expected_duration_hours ?? "padrao"}`}
+                  etapa={etapa}
+                  desabilitado={ocupado}
+                  aoConfirmar={(valor) => aplicar(etapa.id, { expected_duration_hours: valor })}
+                />
+              </div>
+
               {/* Uma coluna que apareceu no quadro sem o dono ter criado precisa
                   dizer de onde veio — senão o assistente muda o funil e a única
                   pista fica no log que nenhuma tela lê. */}
@@ -474,6 +514,20 @@ export function StagesSection({
                 em={etapa.last_change_at ?? null}
                 className={`etapa-autoria-${etapa.id}`}
               />
+
+              {/* Numa venda com pagamento na entrega o momento que pede ação é o
+                  pedido confirmado, não o ganho — e quem sabe qual etapa é essa é
+                  a organização. Ver a migration 0440. */}
+              <label className="flex items-center gap-2 text-xs text-text-muted">
+                <Switch
+                  checked={etapa.avisar_na_central === true}
+                  onCheckedChange={(v) => aplicar(etapa.id, { avisar_na_central: v })}
+                  disabled={ocupado}
+                  aria-label={`${t("Avisar a equipe na Central quando um negócio entrar em")} «${etapa.name}»`}
+                  data-testid={`avisar-${etapa.id}`}
+                />
+                {t("Avisar a equipe na Central quando um negócio entrar aqui")}
+              </label>
 
               {passo && (
                 <p className="text-xs text-text-muted" data-testid={`passo-de-${etapa.id}`}>
@@ -692,6 +746,218 @@ export function StagesSection({
 }
 
 /**
+ * A janela de "esfriando" da etapa, editada no lugar em DIAS e HORAS (#1532).
+ *
+ * A coluna é `crm_stages.expected_duration_hours` em HORAS, mas ninguém pensa
+ * "72 horas" — pensa "3 dias". A conversão acontece AQUI, na ponta: o PATCH
+ * manda horas inteiras, e a régua (1 a 8760) é a mesma da rota.
+ *
+ * Mesmo contrato do nome e da chance: salva ao CONFIRMAR, nunca a cada tecla.
+ * VAZIO nos dois campos = sem janela configurada, e limpar é um valor
+ * legítimo — a etapa volta ao padrão de 24 h/72 h do radar
+ * (`resolveStageWindow`), que é o estado de quem nunca mexeu nisso.
+ *
+ * O blur NÃO salva quando o foco só está passando para o outro campo do
+ * PAR: sem isto, digitar "2" dias e Tab para as horas gravaria 48 h por um
+ * instante — dois PATCHes e um valor que ninguém digitou.
+ */
+function JanelaDaEtapa({
+  etapa,
+  desabilitado,
+  aoConfirmar,
+}: {
+  etapa: EtapaDoFunil;
+  desabilitado: boolean;
+  aoConfirmar: (valor: number | null) => void;
+}) {
+  const t = useT();
+  const gravada = etapa.expected_duration_hours ?? null;
+  const rascunhoDe = (horas: number | null, pedaco: "dias" | "horas") => {
+    if (horas == null) return "";
+    return pedaco === "dias" ? String(Math.floor(horas / 24)) : String(horas % 24);
+  };
+  const [dias, setDias] = useState(rascunhoDe(gravada, "dias"));
+  const [hora, setHora] = useState(rascunhoDe(gravada, "horas"));
+  const diasRef = useRef<HTMLInputElement>(null);
+  const horaRef = useRef<HTMLInputElement>(null);
+  // Escape chama `blur()`, e o blur confirma — com o rascunho DESTA renderização,
+  // não com o restaurado (o setState ainda não aplicou). Sem esta marca, Escape
+  // gravava o que devia descartar.
+  const descartando = useRef(false);
+
+  function restaurar() {
+    setDias(rascunhoDe(gravada, "dias"));
+    setHora(rascunhoDe(gravada, "horas"));
+  }
+
+  function confirmar() {
+    if (descartando.current) {
+      descartando.current = false;
+      return;
+    }
+    const brutoDias = dias.trim();
+    const brutoHoras = hora.trim();
+    // Vazio NOS DOIS = limpar = voltar ao padrão de 24 h. Um dos dois
+    // preenchido vale como o outro sendo zero ("2 dias" não é "2 dias + nada").
+    if (brutoDias === "" && brutoHoras === "") {
+      if (gravada !== null) aoConfirmar(null);
+      return;
+    }
+    const d = brutoDias === "" ? 0 : Number(brutoDias);
+    const h = brutoHoras === "" ? 0 : Number(brutoHoras);
+    const total = d * 24 + h;
+    if (!Number.isInteger(d) || !Number.isInteger(h) || d < 0 || h < 0 || total < 1 || total > 8760) {
+      restaurar();
+      toast.error(t("A janela de esfriando vai de 1 hora a 8760 horas (365 dias)."));
+      return;
+    }
+    if (total === gravada) return;
+    aoConfirmar(total);
+  }
+
+  /** Só confirma quando o foco SAI do par — ver o docstring acima. */
+  function aoTeclar(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") event.currentTarget.blur();
+    if (event.key === "Escape") {
+      descartando.current = true;
+      restaurar();
+      event.currentTarget.blur();
+    }
+  }
+
+  const rotulo = t("Janela de esfriando");
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Input
+        ref={diasRef}
+        type="number"
+        min={0}
+        step={1}
+        inputMode="numeric"
+        value={dias}
+        disabled={desabilitado}
+        placeholder="0"
+        aria-label={`${rotulo} — ${t("dias")} — «${etapa.name}»`}
+        data-testid={`janela-dias-${etapa.id}`}
+        onChange={(e) => setDias(e.target.value)}
+        onBlur={(e) => {
+          if (e.relatedTarget === horaRef.current) return;
+          confirmar();
+        }}
+        onKeyDown={aoTeclar}
+        className="w-[76px]"
+      />
+      <span aria-hidden>{t("dias")}</span>
+      <Input
+        ref={horaRef}
+        type="number"
+        min={0}
+        step={1}
+        inputMode="numeric"
+        value={hora}
+        disabled={desabilitado}
+        placeholder="0"
+        aria-label={`${rotulo} — ${t("horas")} — «${etapa.name}»`}
+        data-testid={`janela-horas-${etapa.id}`}
+        onChange={(e) => setHora(e.target.value)}
+        onBlur={(e) => {
+          if (e.relatedTarget === diasRef.current) return;
+          confirmar();
+        }}
+        onKeyDown={aoTeclar}
+        className="w-[64px]"
+      />
+      <span aria-hidden>{t("horas")}</span>
+    </span>
+  );
+}
+
+/**
+ * A probabilidade de ganho da etapa, editada no lugar (0–100).
+ *
+ * Mesmo contrato do nome: salva ao CONFIRMAR (Enter ou sair do campo), nunca a
+ * cada tecla. Vazio = sem calibração — e limpar é um valor legítimo, não um
+ * apagão acidental: a previsão passa a reportar a etapa no balde "sem
+ * probabilidade" em vez de somar zero.
+ *
+ * `key` na linha de cima remonta o campo quando o valor GRAVADO muda, então uma
+ * edição de outra aba não fica escondida atrás de um rascunho velho.
+ */
+function ProbabilidadeDaEtapa({
+  etapa,
+  desabilitado,
+  aoConfirmar,
+}: {
+  etapa: EtapaDoFunil;
+  desabilitado: boolean;
+  aoConfirmar: (valor: number | null) => void;
+}) {
+  const t = useT();
+  const [rascunho, setRascunho] = useState(
+    etapa.win_probability == null ? "" : String(etapa.win_probability),
+  );
+  // Ganho e perda valem 100 e 0 na regra (`lib/leads/previsao.ts`): o número
+  // gravado ali seria lido por ninguém e entenderia mal quem lê a tela.
+  const fixa = etapa.is_won || etapa.is_lost;
+  // Escape chama `blur()`, e o blur confirma — com o rascunho DESTA renderização,
+  // não com o restaurado (o setState ainda não aplicou). Sem esta marca, Escape
+  // gravava o que devia descartar; o mesmo conserto do JanelaDaEtapa (#2161).
+  const descartando = useRef(false);
+
+  function confirmar() {
+    if (descartando.current) {
+      descartando.current = false;
+      return;
+    }
+    const bruto = rascunho.trim().replace(/%$/, "");
+    if (bruto === "") {
+      if (etapa.win_probability != null) aoConfirmar(null);
+      else setRascunho("");
+      return;
+    }
+    const numero = Number(bruto);
+    if (!Number.isInteger(numero) || numero < 0 || numero > 100) {
+      setRascunho(etapa.win_probability == null ? "" : String(etapa.win_probability));
+      toast.error(t("A chance de fechamento vai de 0 a 100."));
+      return;
+    }
+    if (numero === etapa.win_probability) return;
+    aoConfirmar(numero);
+  }
+
+  return (
+    <Input
+      type="number"
+      min={0}
+      max={100}
+      step={1}
+      inputMode="numeric"
+      value={rascunho}
+      disabled={desabilitado || fixa}
+      placeholder={fixa ? (etapa.is_won ? "100" : "0") : "—"}
+      title={
+        fixa
+          ? t("Etapa de fechamento ou de perda: a chance vale 100 e 0 na regra, sem calibração.")
+          : t(ROTULO.chance)
+      }
+      aria-label={`${t(ROTULO.chance)} «${etapa.name}»`}
+      data-testid={`probabilidade-${etapa.id}`}
+      onChange={(e) => setRascunho(e.target.value)}
+      onBlur={confirmar}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          descartando.current = true;
+          setRascunho(etapa.win_probability == null ? "" : String(etapa.win_probability));
+          e.currentTarget.blur();
+        }
+      }}
+      className="w-full"
+    />
+  );
+}
+
+/**
  * O nome da etapa, editado no lugar.
  *
  * ⚠️ SALVA AO CONFIRMAR (Enter ou sair do campo), NUNCA A CADA TECLA: um PATCH
@@ -712,8 +978,16 @@ function NomeDaEtapa({
 }) {
   const t = useT();
   const [rascunho, setRascunho] = useState(etapa.name);
+  // Escape chama `blur()`, e o blur confirma — com o rascunho DESTA renderização,
+  // não com o restaurado (o setState ainda não aplicou). Sem esta marca, Escape
+  // gravava o que devia descartar; o mesmo conserto do JanelaDaEtapa (#2161).
+  const descartando = useRef(false);
 
   function confirmar() {
+    if (descartando.current) {
+      descartando.current = false;
+      return;
+    }
     const nome = rascunho.trim();
     if (!nome || nome === etapa.name) {
       setRascunho(etapa.name);
@@ -734,6 +1008,7 @@ function NomeDaEtapa({
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
+          descartando.current = true;
           setRascunho(etapa.name);
           e.currentTarget.blur();
         }

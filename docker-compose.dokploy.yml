@@ -23,10 +23,11 @@ services:
 
   app:
     mem_limit: 768m
+    # Só pull, nunca build no servidor: o Dokploy executa a fase de build para
+    # todo serviço com seção `build:`, ignorando as imagens conecta-* do GHCR.
+    # Build local continua possível via -f docker-compose.build.yml.
     image: ${APP_IMAGE:-ghcr.io/danilobsantos/conecta-app:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    pull_policy: ${APP_PULL_POLICY:-always}
     restart: unless-stopped
     env_file: .env
     depends_on:
@@ -81,9 +82,7 @@ services:
   worker:
     mem_limit: 512m
     image: ${WORKER_IMAGE:-ghcr.io/danilobsantos/conecta-worker:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
+    pull_policy: ${WORKER_PULL_POLICY:-always}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -102,7 +101,7 @@ services:
 
   waha:
     mem_limit: 1280m
-    image: ${WAHA_IMAGE:-devlikeapro/waha:latest-2026.7.2}
+    image: ${WAHA_IMAGE:-devlikeapro/waha:latest-2026.9.2}
     restart: unless-stopped
     environment:
       WAHA_API_KEY: "${WAHA_API_KEY:-waha_secret_token_123456}"
@@ -148,9 +147,7 @@ services:
 
   scheduler:
     image: ${SCHEDULER_IMAGE:-ghcr.io/danilobsantos/conecta-scheduler:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile.scheduler
+    pull_policy: ${SCHEDULER_PULL_POLICY:-always}
     restart: unless-stopped
     depends_on:
       app:

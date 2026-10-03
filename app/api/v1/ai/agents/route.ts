@@ -11,15 +11,17 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
  *                              agent kind='mcp_agent' + ai_agent_versions v1 draft
  *                              numa sequência ordenada (rollback se versão falhar).
  *
- * Auth: cookie session. organization_id resolvido do JWT — nunca do body.
+ * Auth: sessão de navegador OU Bearer `dsk_...` (api_tokens), resolvidos por
+ * `lib/api/auth-dual.ts`. `organization_id` sai do JWT (sessão) ou da LINHA DO
+ * TOKEN — nunca do body.
  */
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
+import { resolveAuthDual, tetoDeEscritaDoToken } from "@/lib/api/auth-dual";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { requireRole } from "@/lib/auth/require-role";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { mcpAgentDraftRecords } from "@/lib/ai/agents/create-draft";
 import { mensagemDoEscopo, validarEscopoDaVersao } from "@/lib/ai/agents/escopo";
 import { agentCreateSchema } from "@/lib/ai/guardrails-schema";
 import { agentMcpCreateSchema } from "@/lib/ai/agents/validation";
@@ -47,7 +49,7 @@ const AGENT_COLUMNS_COM_VERSAO =
   ", versao_publicada:ai_agent_versions!ai_agents_published_version_id_fkey(provider, model)";
 
 const VERSION_COLUMNS =
-  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,provisioning_origin";
+  "id, organization_id, agent_id, version_number, system_prompt, provider, model, credential_id, tool_ids, trigger_config, channel_session_id, max_steps, token_budget, cost_budget_cents, history_message_window, history_token_window, handoff_keywords, handoff_tool_enabled, proposal_ai_draft_enabled, cases_enabled, split_messages, split_max_chars, followup, operator_enabled, operator_model, operator_tool_ids, status, published_at, superseded_at, created_at, created_by,pipeline_ids,knowledge_source_ids,provisioning_origin,inbound_debounce_ms";
 
 // ---------------------------------------------------------------------------
 // GET — list
@@ -56,17 +58,21 @@ const VERSION_COLUMNS =
 export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
 
-  const authz = await requireRole("manager", { requestId, resource: "ai_agents" });
+  const authz = await resolveAuthDual(req, {
+    requestId,
+    resource: "ai_agents",
+    role: "manager",
+    scope: "mcp:read",
+  });
   if (!authz.ok) return authz.response;
-  const { org: activeOrg } = authz;
+  const { organizationId, supabase } = authz;
 
   const includeArchived = req.nextUrl.searchParams.get("include_archived") === "true";
 
-  const supabase = await createClient();
   let query = supabase
     .from("ai_agents")
     .select(AGENT_COLUMNS_COM_VERSAO)
-    .eq("organization_id", activeOrg.orgId);
+    .eq("organization_id", organizationId);
 
   if (!includeArchived) {
     query = query.is("archived_at", null);
@@ -88,10 +94,20 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const requestId = randomUUID();
 
-  const authz = await requireRole("admin", { requestId, resource: "ai_agents" });
+  const authz = await resolveAuthDual(req, {
+    requestId,
+    resource: "ai_agents",
+    role: "admin",
+    scope: "mcp:write",
+  });
   if (!authz.ok) return authz.response;
-  const t = (texto: string) => traduzir(texto, authz.user.idioma);
-  const { user: authUser, org: activeOrg } = authz;
+  const t = (texto: string) => traduzir(texto, authz.idioma ?? "pt-BR");
+  const { organizationId, actor } = authz;
+
+  const teto = await tetoDeEscritaDoToken(authz, "ai_agents", requestId);
+  if (teto) return teto;
+
+  const authUserId = actor.type === "user" ? actor.id : null;
 
   let rawBody: unknown;
   try {
@@ -116,96 +132,37 @@ export async function POST(req: NextRequest): Promise<Response> {
       });
     }
     const input = parsed.data;
-    const v = input.version;
 
-    // Insert agent first (no published_version_id yet).
-    const { data: agentRow, error: agentErr } = await admin
+    // Validate scope before the first write; a rejected form leaves no orphan.
+    const escopo = await validarEscopoDaVersao(admin, organizationId, input.version);
+    if (!escopo.ok) return fail("validation_failed", mensagemDoEscopo(escopo), 422, { requestId });
+    const records = mcpAgentDraftRecords({ orgId: organizationId, userId: authUserId ?? "" }, input);
+    const { data: agentRow, error: agentError } = await admin
       .from("ai_agents")
-      .insert({
-        organization_id: activeOrg.orgId,
-        name: input.name,
-        description: input.description ?? null,
-        model: `${v.provider}/${v.model}`,
-        system_prompt: v.system_prompt,
-        is_active: true,
-        is_default: false,
-        kind: "mcp_agent",
-        priority: input.priority,
-        created_by: authUser.id,
-      })
+      .insert({ ...records.agent, created_by: authUserId })
       .select(AGENT_COLUMNS)
       .single();
-
-    if (agentErr || !agentRow) {
+    if (agentError || !agentRow)
       return fail("internal_error", "Erro ao criar agent.", 500, { requestId });
-    }
-
-    // O escopo aponta para coisas que EXISTEM nesta organização. Sem esta
-    // conferência, um id de outra organização (ou de um material apagado) entra no
-    // array, a versão é publicada, e o assistente não acha nada — sem erro, com a
-    // tela mostrando a marcação como se estivesse valendo.
-    const escopo = await validarEscopoDaVersao(admin, activeOrg.orgId, {
-      pipeline_ids: v.pipeline_ids,
-      knowledge_source_ids: v.knowledge_source_ids,
-    });
-    if (!escopo.ok) {
-      return fail("validation_failed", mensagemDoEscopo(escopo), 422, { requestId });
-    }
-    const { data: versionRow, error: versionErr } = await admin
+    const { data: versionRow, error: versionError } = await admin
       .from("ai_agent_versions")
-      .insert({
-        organization_id: activeOrg.orgId,
-        agent_id: agentRow.id,
-        version_number: 1,
-        system_prompt: v.system_prompt,
-        provider: v.provider,
-        model: v.model,
-        credential_id: v.credential_id,
-        tool_ids: v.tool_ids,
-        trigger_config: v.trigger_config ?? undefined,
-        channel_session_id: v.channel_session_id,
-        max_steps: v.max_steps,
-        token_budget: v.token_budget,
-        cost_budget_cents: v.cost_budget_cents,
-        history_message_window: v.history_message_window,
-        history_token_window: v.history_token_window,
-        handoff_keywords: v.handoff_keywords,
-        handoff_tool_enabled: v.handoff_tool_enabled,
-        cases_enabled: v.cases_enabled,
-        split_messages: v.split_messages,
-        split_max_chars: v.split_max_chars,
-        followup: v.followup,
-        // O corpo ACEITAVA estes quatro e o INSERT os descartava: criar um
-        // agente pela API com papel Operador ligado, escopo de funil e acervo
-        // marcado produzia uma versão com todos eles no default do banco —
-        // desligado e vazio. O 201 dizia que tinha dado certo.
-        operator_enabled: v.operator_enabled,
-        operator_model: v.operator_model,
-        operator_tool_ids: v.operator_tool_ids,
-        pipeline_ids: v.pipeline_ids,
-        knowledge_source_ids: v.knowledge_source_ids,
-        status: "draft",
-        created_by: authUser.id,
-      })
+      .insert({ ...records.version, created_by: authUserId })
       .select(VERSION_COLUMNS)
       .single();
-
-    if (versionErr || !versionRow) {
-      // Compensate: agent without v1 is unusable; archive it.
+    if (versionError || !versionRow) {
       await admin
         .from("ai_agents")
         .update({ archived_at: new Date().toISOString() })
+        .eq("organization_id", organizationId)
         .eq("id", agentRow.id);
-      return fail("internal_error", t("Erro ao criar versão inicial."), 500, {
-        requestId,
-        details: { agent_rolled_back: true, db_error: versionErr?.message },
-      });
+      return fail("internal_error", t("Erro ao criar versão inicial."), 500, { requestId });
     }
 
     void audit({
       action: "ai_agent.created",
-      actorUserId: authUser.id,
-      organizationId: activeOrg.orgId,
+      actorUserId: authUserId,
+      actorApiTokenId: authz.apiTokenId ?? null,
+      organizationId,
       resourceType: "ai_agent",
       resourceId: agentRow.id,
       requestId,
@@ -228,14 +185,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   const { data, error } = await admin
     .from("ai_agents")
     .insert({
-      organization_id: activeOrg.orgId,
+      organization_id: organizationId,
       name: input.name,
       description: input.description ?? null,
       model: input.model ?? "anthropic/claude-sonnet-5",
       system_prompt: input.system_prompt,
       is_active: true,
       is_default: false,
-      created_by: authUser.id,
+      created_by: authUserId,
     })
     .select(AGENT_COLUMNS)
     .single();
@@ -243,5 +200,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (error || !data) {
     return fail("internal_error", "Erro ao criar agent.", 500, { requestId });
   }
+
+  void audit({
+    action: "ai_agent.created",
+    actorUserId: authUserId,
+    actorApiTokenId: authz.apiTokenId ?? null,
+    organizationId,
+    resourceType: "ai_agent",
+    resourceId: data.id,
+    requestId,
+    metadata: { kind: "rag_bot" },
+  });
+
   return ok(data, { status: 201, requestId });
 }

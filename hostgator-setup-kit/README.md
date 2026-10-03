@@ -13,7 +13,7 @@ Este kit sobe o **DeskcommCRM** no seu servidor VPS da HostGator. Você tem dois
 > ```
 
 > **Outra hospedagem?** O kit é feito para a HostGator (é a parceria do projeto e o caminho
-> testado de ponta a ponta), mas roda em qualquer VPS com Docker. Se a sua já vem com um
+> testado de ponta a ponta), mas roda em qualquer VPS **x86_64/amd64 ou ARM64/aarch64** com Docker. Se a sua já vem com um
 > **proxy reverso próprio** ocupando as portas 80/443 — caso de Hostinger, Coolify, Dokploy
 > e CapRover —, o instalador **detecta isso sozinho** e publica o CRM através dele, em vez
 > de tentar subir um Caddy que não caberia. Ver
@@ -42,8 +42,8 @@ bash install.sh
 > contrato desse modo. Se preferir instalar por conta própria, responda `n` e rode
 > `curl -fsSL https://get.docker.com | sh` antes.
 
-O instalador pergunta o que precisa (domínio, chaves do Supabase e da Anthropic,
-e-mail/senha do admin), gera o resto e sobe tudo.
+O instalador pergunta o que precisa (domínio, chaves do Supabase, provedor de IA
+— a chave pode ficar para depois —, e-mail/senha do admin), gera o resto e sobe tudo.
 
 > Modo não-interativo: copie `.env.hostgator.example` (do repositório) para `.env`,
 > preencha, e rode `bash install.sh --yes`.
@@ -85,7 +85,7 @@ Owner/Admin. Não dá para hospedar vários clientes numa conta só.
 | VPS (Docker) | HostGator — VPS com Docker (n8n/OpenClaw/GatorClaw). Outras hospedagens com Docker também servem — se a sua já tiver proxy próprio nas portas 80/443, [veja aqui](#vps-que-já-vem-com-proxy-próprio-hostinger-coolify-dokploy) |
 | Domínio | Registro de domínio (aponte um A-record pro IP do VPS) |
 | Banco de dados | Conta grátis no [supabase.com](https://supabase.com) (3 chaves + connection string) |
-| IA | Chave da [Anthropic](https://console.anthropic.com) |
+| IA | Chave da [Anthropic](https://console.anthropic.com) — opcional: dá para instalar sem ela e cadastrar depois pela tela (IA › Credenciais) |
 | WhatsApp | Seu número — conectado por QR code no onboarding |
 | Token do Supabase (opcional) | [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) — com ele o instalador configura sozinho os links dos e-mails de acesso. **Ele não fica salvo:** é usado uma vez e some com o processo |
 
@@ -104,6 +104,11 @@ Owner/Admin. Não dá para hospedar vários clientes numa conta só.
 
 ## Requisitos do VPS
 
+- **Arquitetura x86_64/amd64 ou ARM64/aarch64.** As imagens DeskcommCRM são publicadas para
+  `linux/amd64` e `linux/arm64`; o instalador seleciona a variante oficial ARM64 NOWEB do WAHA.
+  O modo com Supabase self-hosted na mesma VPS também funciona em ARM64: a versão upstream
+  fixada pelo kit (`self-hosted/v0.8.1`) e as imagens dos seus 11 serviços têm manifestos
+  `linux/arm64`. Ao atualizar `SUPABASE_REF`, confira de novo os manifestos de todas as imagens.
 - **4 GB RAM recomendados.** A imagem é pré-buildada, então o servidor não compila nada e a
   stack SOBE com 2 GB — mas operar é outra coisa: são 7 contêineres, e o WAHA consome
   ~150 MB por sessão de WhatsApp além de ~300 MB de overhead do Node. Com 2 GB você roda

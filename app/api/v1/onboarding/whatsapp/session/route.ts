@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ok, fail } from "@/lib/api/wrappers";
-import { loadAuthUser, mfaEmDivida, resolveActiveOrg } from "@/lib/auth/server";
-import { requireRole } from "@/lib/auth/require-role";
+import { loadAuthUser, mfaEmDivida } from "@/lib/auth/server";
+import { orgAtivaDaApi, requireRole } from "@/lib/auth/require-role";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -12,7 +12,9 @@ import { loadOnboardingChannel } from "@/lib/channels/onboarding-session";
 export async function GET(): Promise<Response> {
   const requestId = randomUUID();
   const user = await loadAuthUser(); if (!user) return fail("unauthenticated", "Sessão expirada", 401, { requestId });
-  const org = await resolveActiveOrg(user); if (!org) return fail("tenant_not_found", "Sem organização ativa", 404, { requestId });
+  const ativa = await orgAtivaDaApi(user, requestId);
+  if (!ativa.ok) return ativa.response;
+  const org = ativa.org; if (!org) return fail("tenant_not_found", "Sem organização ativa", 404, { requestId });
   if (await mfaEmDivida()) return fail("mfa_required", "Confirme a verificação em duas etapas.", 403, { requestId });
   const waha = getWahaClient(); if (!waha) return ok({ status: "WAHA_NOT_CONFIGURED", session: null }, { requestId });
   try {
@@ -42,7 +44,9 @@ export async function POST(req: Request): Promise<Response> {
     return ok({ status: result.channel.status, session: result.channel.waha_session_name, channel_session_id: result.channel.id }, { requestId });
   } catch (error) {
     if (error instanceof ChannelConnectionError) return fail(error.code,
-      error.code === "connection_in_progress" ? "A conexão ainda está sendo preparada. Aguarde e tente novamente." : "Não foi possível concluir a conexão. Tente novamente ou repare o número em Conexões.",
+      error.code === "connection_in_progress" ? "A conexão ainda está sendo preparada. Aguarde e tente novamente."
+        : error.code === "connection_session_name_too_long" ? "O identificador desta conexão passou do limite que o WhatsApp aceita. Nada foi criado no WhatsApp — atualize o sistema e tente novamente."
+        : "Não foi possível concluir a conexão. Tente novamente ou repare o número em Conexões.",
       error.status, { requestId, details: error.technical });
     return fail("internal_error", "Não foi possível concluir a conexão. Tente novamente.", 500, { requestId });
   }

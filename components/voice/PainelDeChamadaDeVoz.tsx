@@ -141,7 +141,10 @@ export function PainelDeChamadaDeVoz() {
   if (!estado) return null;
 
   return (
-    <Card className="space-y-4 p-6">
+    // `data-testid` para o e2e conseguir ISOLAR este painel e medir o texto
+    // dele — a tela de Segurança tem outros cartões, e uma varredura de
+    // qualidade que pegasse a página inteira acusaria o vizinho.
+    <Card className="space-y-4 p-6" data-testid="painel-voz">
       <div className="space-y-1">
         <h2 className="text-sm font-semibold">{t("Chamada de voz pelo WhatsApp")}</h2>
         <p className="text-sm text-muted-foreground">

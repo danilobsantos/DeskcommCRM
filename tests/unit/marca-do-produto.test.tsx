@@ -25,6 +25,10 @@ vi.mock("@/hooks/i18n/useT", () => ({ useT: () => (chave: string) => chave }));
 vi.mock("@/components/connections/ConnectionHealthDot", () => ({
   ConnectionHealthDot: () => null,
 }));
+// O contador de casos lê a fila pelo React Query; aqui não há provider, e o
+// número não é o objeto destes casos (o dele mora em contador-de-casos.test.tsx).
+vi.mock("@/components/shell/ContadorDeCasos", () => ({ ContadorDeCasos: () => null }));
+vi.mock("@/components/shell/ContadorDaFila", () => ({ ContadorDaFila: () => null }));
 vi.mock("@/components/shell/VersionFooter", () => ({ VersionFooter: () => null }));
 // A Sidebar lê o tema resolvido para escolher o logo claro/escuro (dual-logo
 // da dev). Sem o provider, `useTheme` lança — mesmo mock dos outros testes
@@ -47,7 +51,7 @@ const org = {
 let contexto: { user: AuthUser; activeOrg: ActiveOrg | null } = { user: usuario, activeOrg: org };
 vi.mock("@/hooks/auth/AuthProvider", () => ({ useAuth: () => contexto }));
 
-const PADRAO: Branding = { name: DEFAULT_APP_NAME, logoUrl: null, logoUrlDark: null, initial: "D" };
+const PADRAO: Branding = { name: DEFAULT_APP_NAME, logoUrl: null, logoDarkUrl: null, initial: "D" };
 
 function renderSidebar(marca: Branding, collapsed: boolean) {
   return render(
@@ -97,7 +101,7 @@ describe("o desenho na barra lateral", () => {
   });
 
   it("com nome da instalação, segue em texto — o desenho do produto não vaza", () => {
-    renderSidebar({ name: "Sistema do Revendedor", logoUrl: null, logoUrlDark: null, initial: "S" }, false);
+    renderSidebar({ name: "Sistema do Revendedor", logoUrl: null, logoDarkUrl: null, initial: "S" }, false);
     expect(screen.getByText("Sistema do Revendedor")).toBeTruthy();
     expect(document.querySelector("svg[role=img]")).toBeNull();
   });
@@ -148,5 +152,24 @@ describe("o favicon segue a mesma regra", () => {
     expect(icone).toMatch(/marcaEhADoProduto\(\{ name: marca\.nome, logoUrl: marca\.logoUrl \}\)/);
     expect(icone).toMatch(/<path d=\{SIMBOLO\.d\}/);
     expect(icone).toMatch(/letraDoIcone\(marca\.nome\)/);
+  });
+});
+
+describe("o cabeçalho do onboarding segue a mesma regra do favicon", () => {
+  const layout = fs.readFileSync(path.join(process.cwd(), "app/onboarding/layout.tsx"), "utf8");
+
+  it("a marca padrão segue com o SVG que acompanha o tema, e o <img> só vale para marca própria", () => {
+    // O `/icon` é um PNG sempre claro: desenhá-lo para a marca padrão punha um
+    // ladrilho creme no tema escuro (PR #1942). A escolha passa pela MESMA regra
+    // de `app/icon.tsx`, e o SVG vem antes do <img>.
+    expect(layout).toMatch(
+      /iconeUrl === ICONE_DESENHADO &&\s*marcaEhADoProduto\(\{ name: marcaDoIcone\.nome, logoUrl: marcaDoIcone\.logoUrl \}\)/,
+    );
+    expect(layout).toMatch(/simboloDoProduto \? \(\s*<SimboloDoProduto[^>]*decorativo/);
+  });
+
+  it("o ícone é decorativo: o nome já está escrito ao lado", () => {
+    const img = layout.slice(layout.indexOf("<img"), layout.indexOf("/>", layout.indexOf("<img")));
+    expect(img).toMatch(/alt=""/);
   });
 });

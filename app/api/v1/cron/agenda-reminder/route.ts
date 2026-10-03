@@ -67,12 +67,15 @@ import { audit } from "@/lib/audit";
 import { ensureConversation } from "@/lib/automation/start-conversation";
 import { adiarAteAJanelaAbrir } from "@/lib/automation/janela-do-canal";
 import { espacarEnvio } from "@/lib/automation/throttle";
-import { env } from "@/lib/env";
 import { tagDeIdioma } from "@/lib/i18n/datas";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { IDIOMA_PADRAO, normalizarIdioma, type Idioma } from "@/lib/i18n/idiomas";
+import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { moldeDoDegrau } from "@/lib/agenda/lembretes";
+import { autorizaCron } from "@/lib/auth/cron-auth";
+import { OrgNaoOperanteError, STATUS_OPERANTE, ehOperante, statusDaOrgEmbutida } from "@/lib/organizacao/operante";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +89,10 @@ interface TipoDoCompromisso {
   name: string;
   reminder_enabled: boolean;
   reminder_minutes_before: number;
+  reminder_extra_offsets_minutes: number[] | null;
   reminder_template_name: string | null;
+  reminder_body: string | null;
+  reminder_bodies: Record<string, string> | null;
   location_details: string | null;
 }
 
@@ -97,7 +103,10 @@ interface CompromissoAVencer {
   title: string;
   starts_at: string;
   location_details: string | null;
+  reminder_sent_offsets_minutes: number[] | null;
   calendar_event_types: TipoDoCompromisso | TipoDoCompromisso[] | null;
+  /** Status da org embutido — quem decide é `ehOperante`, não uma lista de ids. */
+  organizations?: { status?: string | null } | Array<{ status?: string | null }> | null;
 }
 
 /** O join do PostgREST devolve objeto ou array conforme a cardinalidade inferida. */
@@ -110,11 +119,26 @@ function tipoDe(linha: CompromissoAVencer): TipoDoCompromisso | null {
 /**
  * O texto do lembrete.
  *
- * `reminder_template_name` é a outra coluna que a 0177 criou e ninguém leu.
- * Quando ela aponta para um modelo de mensagem da organização, ele vence; sem
- * ela, sai o texto abaixo, que diz as três coisas que a pessoa precisa saber:
- * o que é, quando, e onde.
+ * Sem molde, sai a frase abaixo — o quê, quando e onde. Com molde, as
+ * variáveis `{{nome}}`, `{{primeiro_nome}}`, `{{titulo}}`, `{{tipo}}`,
+ * `{{dia}}`, `{{hora}}`, `{{endereco}}` e `{{quando}}` são preenchidas com
+ * os mesmos dados; chave desconhecida fica no texto, para quem digitou
+ * `{{foo}}` ver o erro em vez de uma mensagem manca.
+ *
+ * `reminder_body` / `reminder_bodies` do tipo vencem por degrau; senão
+ * `reminder_template_name` aponta para um modelo da organização; senão, esta
+ * frase.
  */
+export function aplicarMoldeDoLembrete(
+  molde: string,
+  pecas: Record<string, string>,
+): string {
+  return molde.replace(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g, (literal, raw: string) => {
+    const v = pecas[raw.toLowerCase()];
+    return v === undefined ? literal : v;
+  });
+}
+
 export function montarLembrete(input: {
   nomeDoContato: string | null;
   titulo: string;
@@ -135,6 +159,10 @@ export function montarLembrete(input: {
    * banco — o mesmo desenho de `montarPares` em `lib/metrics/atrito.ts`.
    */
   idioma?: Idioma;
+  /** Texto próprio do tipo. Vazio/nulo = a frase padrão. */
+  molde?: string | null;
+  /** Nome do tipo de atendimento, para `{{tipo}}`. Cai no título se faltar. */
+  tipoNome?: string | null;
 }): string {
   const idioma = input.idioma ?? IDIOMA_PADRAO;
   const t = (texto: string) => traduzir(texto, idioma);
@@ -153,16 +181,29 @@ export function montarLembrete(input: {
     hourCycle: "h23",
   }).format(input.quando);
 
+  const nome = input.nomeDoContato?.trim() ?? "";
+  const pecas: Record<string, string> = {
+    nome,
+    primeiro_nome: nome.split(/\s+/)[0] ?? "",
+    titulo: input.titulo,
+    tipo: (input.tipoNome ?? input.titulo).trim() || input.titulo,
+    dia,
+    hora,
+    endereco: input.local?.trim() ?? "",
+    quando: `${dia} ${t("às")} ${hora}`,
+  };
+
+  const molde = input.molde?.trim();
+  if (molde) return aplicarMoldeDoLembrete(molde, pecas);
+
   // Cada `t()` cobre só a parte FIXA da frase: nome, título, data e endereço
   // são dado do tenant e nunca passam por tradução.
   // A pontuação entra na CHAVE de propósito: em espanhol a exclamação abre a
   // frase ("¡Hola"), e um `t("Oi")` solto com o `!` colado do lado de fora
   // devolveria "Hola, Rose!" — meio traduzido, que é o defeito que o guarda de
   // i18n existe para impedir.
-  const saudacao = input.nomeDoContato
-    ? `${t("Oi,")} ${input.nomeDoContato}!`
-    : t("Oi!");
-  const onde = input.local ? ` ${t("Endereço")}: ${input.local}.` : "";
+  const saudacao = nome ? `${t("Oi,")} ${nome}!` : t("Oi!");
+  const onde = pecas.endereco ? ` ${t("Endereço")}: ${pecas.endereco}.` : "";
   return (
     `${saudacao} ${t("Passando pra lembrar do seu compromisso:")} ` +
     `${input.titulo}, ${dia} ${t("às")} ${hora}.${onde}`
@@ -180,13 +221,41 @@ export function estaNaHora(agora: Date, comeca: Date, antecedenciaMin: number): 
   return comeca.getTime() - antecedenciaMin * 60_000 <= agora.getTime();
 }
 
+/**
+ * Quais degraus de lembrete estão vencidos e ainda não saíram.
+ *
+ * Um tipo pode pedir mais de um aviso — um dia antes e de novo três horas antes,
+ * por exemplo. O degrau principal é `reminder_minutes_before`; os demais vêm de
+ * `reminder_extra_offsets_minutes`.
+ *
+ * ⚠️ **Devolve todos os vencidos, e quem chama manda UMA mensagem só.** Se o
+ * cron ficou parado e dois degraus venceram no intervalo, o certo é avisar uma
+ * vez e dar os dois por cumpridos: mandar dois textos em sequência — mesmo
+ * diferentes — é o que faz a pessoa bloquear o número. O texto é o do degrau
+ * mais próximo do compromisso (o "agora"); o mais antecipado já perdeu a
+ * função quando o mais perto venceu.
+ *
+ * Pura e exportada pelo mesmo motivo que `estaNaHora`: é a regra que decide se
+ * alguém recebe mensagem, e ela precisa ser exercitável sem banco.
+ */
+export function degrausPendentes(input: {
+  agora: Date;
+  comeca: Date;
+  principal: number;
+  extras: number[] | null;
+  jaEnviados: number[] | null;
+}): number[] {
+  const enviados = new Set(input.jaEnviados ?? []);
+  const todos = new Set([input.principal, ...(input.extras ?? [])]);
+  return [...todos]
+    .filter((degrau) => !enviados.has(degrau) && estaNaHora(input.agora, input.comeca, degrau))
+    .sort((a, b) => b - a);
+}
+
 async function handle(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
 
-  const auth = req.headers.get("authorization") ?? "";
-  const fornecido = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length).trim() : "";
-  const aceitos = [env.INTERNAL_CRON_SECRET, env.INTERNAL_SECRET].filter(Boolean);
-  if (aceitos.length === 0 || !fornecido || !aceitos.includes(fornecido)) {
+  if (!autorizaCron(req)) {
     return fail("forbidden", "Cron secret missing or invalid.", 403, { requestId });
   }
 
@@ -199,13 +268,25 @@ async function handle(req: NextRequest): Promise<Response> {
   const { data, error } = await admin
     .from("calendar_appointments")
     .select(
-      "id, organization_id, contact_id, title, starts_at, location_details, " +
-        "calendar_event_types!inner(name, reminder_enabled, reminder_minutes_before, reminder_template_name, location_details)",
+      "id, organization_id, contact_id, title, starts_at, location_details, reminder_sent_offsets_minutes, " +
+        "calendar_event_types!inner(name, reminder_enabled, reminder_minutes_before, reminder_extra_offsets_minutes, reminder_template_name, reminder_body, reminder_bodies, location_details), organizations:organization_id!inner(status)",
     )
     .eq("status", "confirmed")
+    // Org parada sai no banco, ANTES do `limit`: filtrar só em memória a deixaria
+    // ocupar a janela da varredura enquanto a org segue parada.
+    .eq("organizations.status", STATUS_OPERANTE)
     .eq("calendar_event_types.reminder_enabled", true)
     .not("contact_id", "is", null)
-    .is("reminder_sent_at", null)
+    // ⚠️ NÃO se filtra por `reminder_sent_at is null` aqui, e a ausência é a
+    // feature: com ela, o compromisso que recebeu o aviso de um dia nunca
+    // voltaria para receber o de três horas. Quem decide o que falta é
+    // `degrausPendentes`, sobre `reminder_sent_offsets_minutes`.
+    //
+    // O teto da varredura continua sendo o de sempre, e a ordem por `starts_at`
+    // crescente é o que o torna seguro: quando ele corta, corta os compromissos
+    // mais distantes, que só precisam do degrau mais antecipado e voltam nas
+    // próximas rodadas. Os próximos — os únicos com degrau curto vencendo —
+    // estão sempre no começo da lista.
     .gt("starts_at", agora.toISOString())
     .lte("starts_at", new Date(agora.getTime() + MAIOR_ANTECEDENCIA_MS).toISOString())
     .order("starts_at", { ascending: true })
@@ -215,6 +296,12 @@ async function handle(req: NextRequest): Promise<Response> {
     logger.error("[agenda-reminder] consulta falhou", { error: error.message, requestId });
     return fail("internal_error", "Falha ao buscar compromissos.", 500, { requestId });
   }
+
+  // Organização parada (suspensa, redigida, arquivada) não recebe lembrete: é
+  // mensagem que sai para o cliente dela (spec §1.3, "nada roda e nada sai").
+  // O corte já saiu no banco (o embed `!inner` + o filtro de status, acima);
+  // o `ehOperante` mais abaixo é cinto. Nunca uma lista de ids de paradas negada
+  // na URL — ela cortaria em `max_rows` sem aviso.
 
   const linhas = (data ?? []) as unknown as CompromissoAVencer[];
   let enviados = 0;
@@ -231,13 +318,28 @@ async function handle(req: NextRequest): Promise<Response> {
       pular("sem_tipo");
       continue;
     }
-    if (!estaNaHora(agora, new Date(linha.starts_at), tipo.reminder_minutes_before)) {
+    const pendentes = degrausPendentes({
+      agora,
+      comeca: new Date(linha.starts_at),
+      principal: tipo.reminder_minutes_before,
+      extras: tipo.reminder_extra_offsets_minutes,
+      jaEnviados: linha.reminder_sent_offsets_minutes,
+    });
+    if (pendentes.length === 0) {
       pular("ainda_nao");
       continue;
     }
 
     // ⚠️ organization_id SEMPRE da linha do compromisso — ver o cabeçalho.
     const org = linha.organization_id;
+
+    // Antes do contato e da conversa: org parada não abre conversa nem carimba
+    // o compromisso. Na reativação, o degrau que ainda estiver na janela sai
+    // normalmente; o que venceu parado não volta (reativação sem rajada).
+    if (!ehOperante(statusDaOrgEmbutida(linha.organizations))) {
+      pular("org_nao_operante");
+      continue;
+    }
 
     const { data: contato } = await admin
       .from("contacts")
@@ -284,16 +386,8 @@ async function handle(req: NextRequest): Promise<Response> {
       .eq("id", org)
       .maybeSingle();
 
-    let corpo = montarLembrete({
-      nomeDoContato: contato.display_name ?? contato.name ?? null,
-      titulo: linha.title,
-      quando: new Date(linha.starts_at),
-      timezone: organizacao?.timezone ?? "America/Sao_Paulo",
-      local: linha.location_details ?? tipo.location_details ?? null,
-      idioma: normalizarIdioma(organizacao?.locale),
-    });
-
-    if (tipo.reminder_template_name) {
+    let molde = moldeDoDegrau(tipo, Math.min(...pendentes));
+    if (!molde && tipo.reminder_template_name) {
       const { data: modelo } = await admin
         .from("message_templates")
         .select("body")
@@ -301,8 +395,19 @@ async function handle(req: NextRequest): Promise<Response> {
         .or(`shortcut.eq.${tipo.reminder_template_name},title.eq.${tipo.reminder_template_name}`)
         .limit(1)
         .maybeSingle();
-      if (modelo?.body) corpo = modelo.body;
+      if (modelo?.body) molde = modelo.body;
     }
+
+    const corpo = montarLembrete({
+      nomeDoContato: nomeDoContato(contato),
+      titulo: linha.title,
+      quando: new Date(linha.starts_at),
+      timezone: organizacao?.timezone ?? "America/Sao_Paulo",
+      local: linha.location_details ?? tipo.location_details ?? null,
+      idioma: normalizarIdioma(organizacao?.locale),
+      molde,
+      tipoNome: tipo.name,
+    });
 
     await espacarEnvio(canal.id);
 
@@ -324,13 +429,28 @@ async function handle(req: NextRequest): Promise<Response> {
         >[2],
       );
       // Carimba a TENTATIVA — o desfecho da entrega vive na mensagem.
+      //
+      // Carimba TODOS os degraus vencidos, não só o que motivou este texto: os
+      // outros já venceram, e deixá-los pendentes faria a próxima rodada mandar
+      // a mesma mensagem de novo.
       await admin
         .from("calendar_appointments")
-        .update({ reminder_sent_at: new Date().toISOString() })
+        .update({
+          reminder_sent_at: new Date().toISOString(),
+          reminder_sent_offsets_minutes: [
+            ...new Set([...(linha.reminder_sent_offsets_minutes ?? []), ...pendentes]),
+          ],
+        })
         .eq("id", linha.id)
         .eq("organization_id", org);
       enviados += 1;
     } catch (err) {
+      // A org parou entre a leitura da rodada e o envio: não é erro, é a
+      // suspensão (a porta de saída lança OrgNaoOperanteError).
+      if (err instanceof OrgNaoOperanteError) {
+        pular("org_nao_operante");
+        continue;
+      }
       const mensagem = err instanceof Error ? err.message : String(err);
       logger.error("[agenda-reminder] envio falhou", { appointmentId: linha.id, error: mensagem, requestId });
       pular("erro_no_envio");

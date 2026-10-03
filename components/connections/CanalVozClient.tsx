@@ -41,6 +41,11 @@ function errMsg(err: unknown, fallback: string, t: (texto: string) => string): s
 export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boolean }) {
   const t = useT();
   const [estado, setEstado] = useState<Estado | null>(null);
+  // A escolha da ORGANIZAÇÃO, que é outra pergunta que `paired`. Ler aqui é o
+  // que evita o pior desfecho: a tela oferecer "Conectar", a pessoa escanear o
+  // QR com o celular na mão, e só então descobrir que faltava ligar noutra
+  // tela. Fazer alguém agir para descobrir que não podia é pior que dizer antes.
+  const [vozLigada, setVozLigada] = useState<boolean | null>(null);
   const [pareando, setPareando] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -51,6 +56,16 @@ export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boole
       setEstado(r.data);
     } catch {
       setEstado(null);
+    }
+    try {
+      const o = await apiClient.get<{ data: { ligada: boolean } }>("/api/v1/voice/opt-in");
+      setVozLigada(o.data.ligada);
+    } catch {
+      // `null` = não deu para saber. O aviso abaixo só aparece com `false`
+      // EXPLÍCITO: esconder o botão porque uma leitura falhou tiraria o caminho
+      // de quem está com tudo certo. Falha ABERTA na informação; quem fecha a
+      // ação é a rota, que checa de novo no servidor.
+      setVozLigada(null);
     }
   };
 
@@ -64,10 +79,11 @@ export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boole
     setQrDataUrl(null);
     try {
       // A stream tem que estar ABERTA antes de disparar o pareamento: o
-      // WaCalls emite o QR no INSTANTE do `pair` (whatsmeow gera na hora),
-      // não em resposta a quem está ouvindo. Chamar o POST primeiro e só
-      // depois abrir o `EventSource` (ordem anterior) perdia esse primeiro
-      // QR — a tela ficava presa em "Preparando o código…" pra sempre.
+      // WaCalls emite o QR no INSTANTE em que a sessão é criada (whatsmeow
+      // gera na hora), não em resposta a quem está ouvindo. O relay não exige
+      // sessão para abrir — ele reconhece a nossa pelo nome quando ela nasce
+      // (`lib/wacalls/nome-da-sessao.ts`), então não há mais passo de
+      // "preparar" antes: o POST único cria a sessão e o QR chega por aqui.
       let pareamentoDisparado = false;
       const es = new EventSource("/api/v1/voice/events");
       esRef.current = es;
@@ -78,13 +94,25 @@ export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boole
           es.close();
           esRef.current = null;
           setPareando(false);
+          // O QR que talvez já tenha chegado é de uma sessão que a rota desfez.
+          setQrDataUrl(null);
           toast.error(errMsg(err, "Não foi possível iniciar o pareamento.", t));
+          // Recarrega SEMPRE: o 409 `voice_already_paired` é justamente o caso
+          // em que a rota acabou de corrigir o banco (o WaCalls já estava
+          // pareado), e sem reler a tela seguia "Não pareado" com o botão.
+          void carregar();
         });
       };
       es.onmessage = (ev) => {
         const payload = JSON.parse(ev.data) as { type: string; dataUrl?: string };
         if (payload.type === "qr" && payload.dataUrl) {
           setQrDataUrl(payload.dataUrl);
+        } else if (payload.type === "expired") {
+          es.close();
+          esRef.current = null;
+          setPareando(false);
+          setQrDataUrl(null);
+          toast.error(t("O código de pareamento venceu. Clique em parear para gerar outro."));
         } else if (payload.type === "paired") {
           es.close();
           esRef.current = null;
@@ -98,6 +126,12 @@ export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boole
         es.close();
         esRef.current = null;
         setPareando(false);
+        // Sem a stream não chega "venceu" nem "pareado": um QR que ficasse na
+        // tela seria um código morto, e o botão de tentar de novo não voltaria.
+        setQrDataUrl(null);
+        toast.error(t("Não foi possível receber o código de pareamento. Tente novamente."));
+        // A pessoa pode ter escaneado antes de a conexão cair.
+        void carregar();
       };
     } catch (err) {
       toast.error(errMsg(err, "Não foi possível iniciar o pareamento.", t));
@@ -113,6 +147,19 @@ export function CanalVozClient({ wacallsConfigured }: { wacallsConfigured: boole
           {t("Falta o endereço do serviço (")}
           <code>WACALLS_API_BASE_URL</code>
           {t(") nas variáveis de ambiente desta instalação.")}
+        </p>
+      </div>
+    );
+  }
+
+  if (vozLigada === false) {
+    return (
+      <div className="rounded-md border border-border bg-surface p-4 text-sm">
+        <p className="font-medium">{t("A chamada de voz está desligada nesta empresa.")}</p>
+        <p className="mt-1 text-muted-foreground">
+          {t(
+            "Conectar o aparelho exige ligá-la antes, em Configurações › Segurança — é lá que está o aviso sobre o risco de o WhatsApp bloquear a conta, e quem liga precisa ter lido.",
+          )}
         </p>
       </div>
     );

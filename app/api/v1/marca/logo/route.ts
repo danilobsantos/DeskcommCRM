@@ -24,7 +24,7 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
  *     "tipo de mídia não suportado".
  *  6. **`farejarTipo` (415)** — a decisão de tipo sai dos BYTES. `file.type` não
  *     decide nada e entra só no `details`, para o log mostrar a mentira.
- *  7. **prefixo de fonte confiável** — `resolveActiveOrg` (cookie validado contra
+ *  7. **prefixo de fonte confiável** — `orgAtivaDaApi` (cookie validado contra
  *     memberships), NUNCA do body.
  *  8. **lê o caminho antigo DO BANCO** — não do cliente.
  *  9. **sobe → grava → só então apaga.** Inverter troca "sobra um arquivo" por
@@ -57,8 +57,10 @@ import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { loadAuthUser, mfaEmDivida, resolveActiveOrg } from "@/lib/auth/server";
-import { roleAtLeast } from "@/lib/auth/types";
+import { EscritaDePlatformAdminNegada, requirePlatformAdminEscrita } from "@/lib/auth/requirePlatformAdmin";
+import { loadAuthUser, mfaEmDivida } from "@/lib/auth/server";
+import { orgAtivaDaApi } from "@/lib/auth/require-role";
+import { escreveComoPlatformAdmin, roleAtLeast } from "@/lib/auth/types";
 import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { invalidarMarcaDaInstalacao } from "@/lib/branding/instalacao";
 import {
@@ -72,6 +74,7 @@ import {
 } from "@/lib/branding/logo";
 import { extensaoDe, farejarTipo, pareceSvg, podeApagar } from "@/lib/branding/logo-arquivo";
 import { marcaDaOrganizacaoDeSettings } from "@/lib/branding/organizacao";
+import { traduzir } from "@/lib/i18n/dicionario";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -84,10 +87,36 @@ export const dynamic = "force-dynamic";
  */
 const escopoSchema = z.enum(["instalacao", "organizacao"]);
 type Escopo = z.infer<typeof escopoSchema>;
+const temaSchema = z.enum(["claro", "escuro"]).default("claro");
+type TemaDoLogo = z.infer<typeof temaSchema>;
+/**
+ * Qual arquivo da marca: o logo (por tema) ou o ícone da aba (migration 0443).
+ * O ícone reusa esta rota inteira — gate, teto, farejador de bytes e a ordem
+ * sobe → grava → apaga — porque a única diferença é a coluna. O ícone só existe
+ * na INSTALAÇÃO: a aba é a mesma para todas as organizações.
+ */
+const pecaSchema = z.enum(["logo", "icone"]).default("logo");
+type PecaDaMarca = z.infer<typeof pecaSchema>;
+/** O que se está trocando: a peça e, para o logo, o tema. */
+type Alvo = { readonly peca: PecaDaMarca; readonly tema: TemaDoLogo };
+const campoDoLogo = ({ peca, tema }: Alvo) =>
+  peca === "icone" ? "favicon_path" : tema === "escuro" ? "logo_dark_path" : "logo_path";
 
-/** Qual variante do logo está sendo enviada — light (default) ou dark. */
-const variantSchema = z.enum(["light", "dark"]);
-type Variant = z.infer<typeof variantSchema>;
+/** Lê `peca` e `tema` juntos e recusa o ícone fora da instalação. */
+function lerAlvo(
+  escopo: Escopo,
+  peca: unknown,
+  tema: unknown,
+): { alvo: Alvo } | { mensagem: string } {
+  const pecaLida = pecaSchema.safeParse(peca ?? undefined);
+  if (!pecaLida.success) return { mensagem: "Campo 'peca' inválido." };
+  const temaLido = temaSchema.safeParse(tema ?? undefined);
+  if (!temaLido.success) return { mensagem: "Campo 'tema' inválido." };
+  if (pecaLida.data === "icone" && escopo !== "instalacao") {
+    return { mensagem: "O ícone da aba é da instalação, não de uma organização." };
+  }
+  return { alvo: { peca: pecaLida.data, tema: temaLido.data } };
+}
 
 /**
  * 10 trocas de logo por pessoa a cada 5 min.
@@ -116,15 +145,19 @@ type Recusa = { readonly codigo: string; readonly mensagem: string; readonly sta
  * O gate, por escopo. Devolve o contexto JÁ com o prefixo montado de fonte
  * confiável — assim nenhum caminho abaixo tem a oportunidade de montá-lo do body.
  *
- * ── Por que `mfaEmDivida` e não o `requirePlatformAdmin()` das telas ─────────
+ * ── Por que `requirePlatformAdminEscrita` dentro de `try/catch` ──────────────
  *
- * `requirePlatformAdmin()` REDIRECIONA (é o gate do layout de `/admin`), e um
- * `307` para `/login` como resposta a um `fetch()` de upload chega ao navegador
- * como HTML no lugar de JSON — a tela mostraria "erro inesperado" para um caso
- * que tem nome. Aqui o predicado é o mesmo que `lib/auth/require-role.ts` aplica
- * em todo `/api/v1`: papel + `mfaEmDivida`. A diferença de comportamento entre os
- * dois é só para quem AINDA NÃO cadastrou fator — e essa pessoa é barrada antes,
- * pelo gate de cadastro do layout, que é onde ela pode resolver.
+ * Trocar o logo da INSTALAÇÃO é escrita de platform admin e exige o que toda
+ * escrita dessas exige: linha ativa, scope `full` (o `support_readonly` lê o
+ * painel e nada muda) e sessão sem dívida de MFA — quem confere as três é
+ * `requirePlatformAdminEscrita`. Ele REDIRECIONA quem não é platform admin (é o
+ * gate do layout de `/admin`), e um `307` como resposta a um `fetch()` de upload
+ * chega ao navegador como HTML no lugar de JSON — a tela mostraria "erro
+ * inesperado" para um caso que tem nome. Por isso a chamada fica num
+ * `try/catch`: a recusa nomeada vira o seu código e o redirect vira
+ * `forbidden_role`. No escopo da ORGANIZAÇÃO o predicado segue o de
+ * `lib/auth/require-role.ts`: papel `admin` (ou platform admin com scope `full`,
+ * `escreveComoPlatformAdmin`) + `mfaEmDivida`.
  */
 async function abrirContexto(escopo: Escopo): Promise<{ ctx: Contexto } | { recusa: Recusa }> {
   const user = await loadAuthUser();
@@ -133,7 +166,15 @@ async function abrirContexto(escopo: Escopo): Promise<{ ctx: Contexto } | { recu
   }
 
   if (escopo === "instalacao") {
-    if (!user.is_platform_admin) {
+    // `requirePlatformAdminEscrita` confere linha ativa, scope `full` e MFA da
+    // sessão. Ele REDIRECIONA quem não é platform admin; aqui o redirect vira
+    // recusa, porque 307 para HTML num fetch de upload chega como "erro inesperado".
+    try {
+      await requirePlatformAdminEscrita();
+    } catch (err) {
+      if (err instanceof EscritaDePlatformAdminNegada) {
+        return { recusa: { codigo: err.code, mensagem: err.message, status: 403 } };
+      }
       return {
         recusa: {
           codigo: "forbidden_role",
@@ -142,30 +183,26 @@ async function abrirContexto(escopo: Escopo): Promise<{ ctx: Contexto } | { recu
         },
       };
     }
-    // ⚠️ Sem argumentos desde o merge com a frente que tornou a verificação em
-    // duas etapas opcional — o porquê está por extenso em
-    // `app/actions/settings/updateMarcaDaOrganizacao.ts`. Em uma linha: a função
-    // parou de consultar a política, então quem TEM fator prova sempre. Passar
-    // papel aqui não é só inútil, é o modelo mental errado gravado no código.
-    if (await mfaEmDivida()) {
-      return {
-        recusa: {
-          codigo: "mfa_required",
-          mensagem: "Confirme o segundo fator nesta sessão para trocar o logo.",
-          status: 403,
-        },
-      };
-    }
     return { ctx: { escopo, userId: user.id, prefixo: PREFIXO_DA_INSTALACAO } };
   }
 
-  const org = await resolveActiveOrg(user);
+  const ativa = await orgAtivaDaApi(user);
+  if (!ativa.ok) {
+    return {
+      recusa: {
+        codigo: "org_suspended",
+        mensagem: traduzir("A conta desta empresa está suspensa.", user.idioma),
+        status: 403,
+      },
+    };
+  }
+  const org = ativa.org;
   if (!org) {
     return {
       recusa: { codigo: "forbidden_tenant", mensagem: "Sem organização ativa.", status: 403 },
     };
   }
-  if (!user.is_platform_admin && !roleAtLeast(org.role, "admin")) {
+  if (!escreveComoPlatformAdmin(user) && !roleAtLeast(org.role, "admin")) {
     return {
       recusa: {
         codigo: "forbidden_role",
@@ -191,24 +228,21 @@ async function abrirContexto(escopo: Escopo): Promise<{ ctx: Contexto } | { recu
 }
 
 /** O caminho HOJE gravado, lido do BANCO. Nunca do cliente. */
-async function caminhoGravado(ctx: Contexto, variant: Variant): Promise<string | null> {
+async function caminhoGravado(ctx: Contexto, alvo: Alvo): Promise<string | null> {
+  const campo = campoDoLogo(alvo);
   const admin = createAdminClient();
-  const coluna = variant === "dark" ? "logo_path_dark" : "logo_path";
   if (ctx.escopo === "instalacao") {
-    const { data } = await admin
-      .from("platform_branding")
-      .select(coluna)
-      .eq("id", 1)
-      .maybeSingle();
-    return (data as Record<string, string | null> | null)?.[coluna] ?? null;
+    const { data } = await admin.from("platform_branding").select(campo).eq("id", 1).maybeSingle();
+    return (data as Record<string, string | null> | null)?.[campo] ?? null;
   }
   const { data } = await admin
     .from("organizations")
     .select("settings")
     .eq("id", ctx.orgId)
     .maybeSingle();
-  const marca = marcaDaOrganizacaoDeSettings(data?.settings ?? null);
-  return (marca as Record<string, string | null> | null)?.[coluna === "logo_path_dark" ? "logo_path_dark" : "logo_path"] ?? null;
+  // `lerAlvo` já recusou o ícone fora da instalação: aqui o campo é de logo.
+  if (campo === "favicon_path") return null;
+  return marcaDaOrganizacaoDeSettings(data?.settings ?? null)?.[campo] ?? null;
 }
 
 /**
@@ -224,13 +258,19 @@ async function caminhoGravado(ctx: Contexto, variant: Variant): Promise<string |
  * outros fazem read-modify-write do jsonb inteiro. O `row_count` de volta é o que
  * distingue "gravou" de "não gravou".
  */
-async function gravarCaminho(ctx: Contexto, caminho: string | null, variant: Variant): Promise<Recusa | null> {
+async function gravarCaminho(
+  ctx: Contexto,
+  caminho: string | null,
+  alvo: Alvo,
+): Promise<Recusa | null> {
   const admin = createAdminClient();
-  const coluna = variant === "dark" ? "logo_path_dark" : "logo_path";
   if (ctx.escopo === "instalacao") {
     const { error } = await admin
       .from("platform_branding")
-      .upsert({ id: 1, [coluna]: caminho, seeded_from_env: false }, { onConflict: "id" });
+      .upsert(
+        { id: 1, [campoDoLogo(alvo)]: caminho, seeded_from_env: false },
+        { onConflict: "id" },
+      );
     if (error) {
       logger.error("[marca/logo] gravação da instalação falhou", {
         codigo: error.code,
@@ -238,23 +278,28 @@ async function gravarCaminho(ctx: Contexto, caminho: string | null, variant: Var
       });
       return { codigo: "internal_error", mensagem: "Erro ao gravar o logo.", status: 500 };
     }
+    // A troca aparece no próximo render sem esperar o TTL de 30s do memo.
+    //
+    // ⚠️ Isto já foi um NO-OP, e o comentário aqui dizia "no MESMO processo que
+    // renderiza (na VPS há um processo de app só)" — verdade sobre o processo,
+    // falsidade sobre o que importa. O Turbopack compila esta rota e as telas em
+    // dois runtimes com caches de módulo próprios, então esta chamada zerava uma
+    // cópia do memo que nenhuma tela lê. O memo passou a morar em `globalThis`;
+    // a medição do build está no comentário dele, em `lib/branding/instalacao.ts`.
     invalidarMarcaDaInstalacao();
     return null;
   }
 
-  // Para a organização, a RPC aceita os dois caminhos. No RPC, `null` significa
-  // APAGAR aquele campo — não "não tocar". Então a variante oposta recebe o
-  // valor ATUAL (lido do banco), não null: senão subir o dark apagaria o light
-  // (e o DELETE de uma variante apagaria as duas).
-  const isDark = variant === "dark";
-  const oposta = await caminhoGravado(ctx, isDark ? "light" : "dark");
-  const { data, error } = await admin.rpc("fn_definir_logo_da_organizacao", {
+  const { data, error } = await admin.rpc("fn_definir_logo_por_tema_da_organizacao", {
+    p_tema: alvo.tema,
     p_org: ctx.orgId,
     p_actor: ctx.userId,
-    p_path: isDark ? oposta : caminho,
-    p_path_dark: isDark ? caminho : oposta,
+    p_path: caminho,
   });
   if (error) {
+    // Os dois códigos que a função levanta de propósito. `42501` é papel — e
+    // chegar aqui significa que o snapshot de membership do gate acima estava
+    // velho, que é exatamente o caso que a duplicação no banco existe para pegar.
     if (error.code === "42501") {
       return {
         codigo: "forbidden_role",
@@ -276,6 +321,8 @@ async function gravarCaminho(ctx: Contexto, caminho: string | null, variant: Var
     });
     return { codigo: "internal_error", mensagem: "Erro ao gravar o logo.", status: 500 };
   }
+  // A CATRACA DA ISSUE #144: `data` é o `row_count`. 0 significa que a
+  // organização não casou o filtro, e sem esta linha a tela diria "salvo".
   if (data !== 1) {
     return { codigo: "internal_error", mensagem: "O logo não foi gravado.", status: 500 };
   }
@@ -318,12 +365,18 @@ async function registrarAuditoria(
   req: NextRequest,
   requestId: string,
   acao: "definido" | "removido",
+  alvo: Alvo,
 ): Promise<void> {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = req.headers.get("user-agent") ?? null;
   // FORMA, nunca IDENTIDADE — mesma disciplina de `resolve.ts`. O caminho do
   // arquivo não entra: a trilha é lida por quem opera a plataforma inteira.
-  const metadata = { fields_changed: ["logo_path"], logo_definido: acao === "definido" };
+  const metadata = {
+    fields_changed: [campoDoLogo(alvo)],
+    logo_definido: acao === "definido",
+    tema: alvo.tema,
+    peca: alvo.peca,
+  };
 
   if (ctx.escopo === "instalacao") {
     await audit({
@@ -368,9 +421,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     return fail("validation_failed", "Campo 'escopo' inválido.", 422, { requestId });
   }
 
-  const variantLido = variantSchema.safeParse(form?.get("variant") ?? "light");
-  const variant: Variant = variantLido.success ? variantLido.data : "light";
-
+  const lido = lerAlvo(escopoLido.data, form?.get("peca"), form?.get("tema"));
+  if ("mensagem" in lido) return fail("validation_failed", lido.mensagem, 422, { requestId });
+  const alvo = lido.alvo;
   const aberto = await abrirContexto(escopoLido.data);
   if ("recusa" in aberto) {
     return fail(aberto.recusa.codigo, aberto.recusa.mensagem, aberto.recusa.status, { requestId });
@@ -424,7 +477,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   }
 
-  const anterior = await caminhoGravado(ctx, variant);
+  const anterior = await caminhoGravado(ctx, alvo);
   const caminho = caminhoNovoDoLogo(ctx.prefixo, extensaoDe(tipo));
 
   const { error: erroUp } = await createAdminClient()
@@ -435,17 +488,20 @@ export async function POST(req: NextRequest): Promise<Response> {
     return fail("internal_error", "Erro ao subir o logo.", 500, { requestId });
   }
 
-  const recusa = await gravarCaminho(ctx, caminho, variant);
+  const recusa = await gravarCaminho(ctx, caminho, alvo);
   if (recusa) {
+    // A gravação falhou DEPOIS do upload: o arquivo novo é que vira órfão, não o
+    // antigo. Tentar apagá-lo aqui seria o caminho certo e não é obrigatório —
+    // por isso é `void`, sem `await` no caminho de erro.
     void createAdminClient().storage.from(BUCKET_DE_LOGOS).remove([caminho]);
     return fail(recusa.codigo, recusa.mensagem, recusa.status, { requestId });
   }
 
   await apagarAnterior(ctx, anterior);
-  await registrarAuditoria(ctx, req, requestId, "definido");
+  await registrarAuditoria(ctx, req, requestId, "definido", alvo);
 
   return ok(
-    { logo_path: caminho, logo_url: urlPublicaDoLogo(caminho, baseDoStorage()), variant },
+    { logo_path: caminho, logo_url: urlPublicaDoLogo(caminho, baseDoStorage()) },
     { requestId },
   );
 }
@@ -463,15 +519,15 @@ export async function DELETE(req: NextRequest): Promise<Response> {
 
   const requestId = randomUUID();
 
-  const params = new URL(req.url).searchParams;
-  const escopoLido = escopoSchema.safeParse(params.get("escopo"));
+  const escopoLido = escopoSchema.safeParse(new URL(req.url).searchParams.get("escopo"));
   if (!escopoLido.success) {
     return fail("validation_failed", "Parâmetro 'escopo' inválido.", 422, { requestId });
   }
 
-  const variantLido = variantSchema.safeParse(params.get("variant") ?? "light");
-  const variant: Variant = variantLido.success ? variantLido.data : "light";
-
+  const busca = new URL(req.url).searchParams;
+  const lido = lerAlvo(escopoLido.data, busca.get("peca"), busca.get("tema"));
+  if ("mensagem" in lido) return fail("validation_failed", lido.mensagem, 422, { requestId });
+  const alvo = lido.alvo;
   const aberto = await abrirContexto(escopoLido.data);
   if ("recusa" in aberto) {
     return fail(aberto.recusa.codigo, aberto.recusa.mensagem, aberto.recusa.status, { requestId });
@@ -490,12 +546,12 @@ export async function DELETE(req: NextRequest): Promise<Response> {
     });
   }
 
-  const anterior = await caminhoGravado(ctx, variant);
-  const recusa = await gravarCaminho(ctx, null, variant);
+  const anterior = await caminhoGravado(ctx, alvo);
+  const recusa = await gravarCaminho(ctx, null, alvo);
   if (recusa) return fail(recusa.codigo, recusa.mensagem, recusa.status, { requestId });
 
   await apagarAnterior(ctx, anterior);
-  await registrarAuditoria(ctx, req, requestId, "removido");
+  await registrarAuditoria(ctx, req, requestId, "removido", alvo);
 
-  return ok({ logo_path: null, logo_url: null, variant }, { requestId });
+  return ok({ logo_path: null, logo_url: null }, { requestId });
 }

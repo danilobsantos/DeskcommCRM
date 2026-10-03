@@ -19,14 +19,13 @@ describe("useInboundMessageAlerts — busca de contatos para notificação", () 
             ok: true,
             status: 200,
             json: async () => ({
+              // A rota devolve o contato FLAT em `data` (`ok(contact)`).
               data: {
-                contact: {
-                  id: contactId,
-                  display_name: "Cliente Teste",
-                  name: null,
-                  avatar_storage_path: null,
-                  is_anonymized: false,
-                },
+                id: contactId,
+                display_name: "Cliente Teste",
+                name: null,
+                avatar_storage_path: null,
+                is_anonymized: false,
               },
             }),
           };
@@ -66,13 +65,12 @@ describe("useInboundMessageAlerts — busca de contatos para notificação", () 
             ok: true,
             status: 200,
             json: async () => ({
+              // A rota devolve o contato FLAT em `data` (`ok(contact)`).
               data: {
-                contact: {
-                  id: contactId,
-                  display_name: "Cliente com Foto",
-                  avatar_storage_path: "profiles/foto.jpg",
-                  is_anonymized: false,
-                },
+                id: contactId,
+                display_name: "Cliente com Foto",
+                avatar_storage_path: "profiles/foto.jpg",
+                is_anonymized: false,
               },
             }),
           };

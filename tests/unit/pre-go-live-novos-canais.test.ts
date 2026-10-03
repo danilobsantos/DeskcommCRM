@@ -32,7 +32,10 @@ describe("todo canal criado pela interface nasce em pré-go-live", () => {
     expect(initial).not.toBeNull();
     expect(JSON.parse(initial![1]!)).toEqual(metadataInicialDoCanal());
     expect(fn).toContain("case when p_onboarding then '{\"onboarding\":true}'::jsonb");
-    // O nome da sessão gerado para o WAHA não pode exceder 54 caracteres (limite do WAHA)
+    // O nome da sessão gerado para o WAHA não pode exceder 54 caracteres (limite do WAHA).
+    // Formato canônico `org_<8>_<12>` (migration 9005, a última da cadeia): contém
+    // o `left(replace(p_org...),8)` que a 0232 do upstream vigiava — a assertion
+    // estrita implica a frouxa.
     expect(fn).toContain("'org_'||left(replace(p_org::text,'-',''),8)||'_'||left(replace(gen_random_uuid()::text,'-',''),12)");
   });
 

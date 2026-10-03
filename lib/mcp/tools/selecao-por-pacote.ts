@@ -43,23 +43,81 @@ import { entraPorPacote, type ToolBundle, type ToolRisk } from "./pacotes";
  *    default de hoje NENHUM segundo pacote cabia: evoluir exigia 21, reter 22,
  *    escalar 28, atender 30, organizar 32.
  *
- * 25 é o MENOR passo que resolve: dá a um agente cheio as 5 vagas da família de
- * agenda e mantém `vender` inteiro com folga real. Não é número redondo
+ * 25 ERA o MENOR passo que resolvia naquele catálogo. Não é número redondo
  * escolhido no olho — subir mais seria apostar contra um argumento que continua
  * de pé só porque ninguém o mediu.
+ *
+ * ═══ Por que 26, e não mais os 25 de antes (merge main→dev, 2026-09-18) ═════
+ *
+ * A base do `vender` foi 20→21: `crm_find_and_book_appointment` (upstream) e
+ * `crm_list_providers` (profissionais externos da dev, migration 9003) entraram
+ * no pacote. Medido no catálogo do merge: atender 35, escalar 33, organizar 37,
+ * evoluir 26, reter 27, contra o teto de 25 — NENHUM segundo pacote cabia a
+ * partir do agente que nasce hoje, e o guardião D3
+ * (`pacote-reserva-vaga-da-critica`) fechou. 26 é o menor passo que reabre:
+ * `evoluir` exige exatamente 26. Margem zero — o próximo +1 no `vender` fecha
+ * de novo, e aí a decisão volta (teto ou catálogo).
  *
  * ⚠️ O QUE FALTA, e é honesto dizer: não há instrumento para observar a
  * degradação que a heurística prevê. O lugar de observá-la é
  * `app/api/v1/ai/agents/[id]/tool-usage` e o log de invocação do run, com
  * "ferramenta errada escolhida" como sinal. Quem for subir de novo mede antes.
+ *
+ * ═══ 25 → 27: a proposta comercial entrou no pacote `vender` ═══════════════════
+ *
+ * Duas capacidades de proposta comercial (`crm_draft_proposal` e
+ * `crm_preparar_proposta`) entraram no pacote `vender`, e a régua de "menor passo
+ * que resolve" foi medida de novo a partir do agente que NASCE — o `vender`
+ * inteiro, que é o default do onboarding (`lib/ai/agents/capacidades-padrao.ts`).
+ *
+ * O que a medição diz agora (catálogo 68 → 70, default 20 → 22 capacidades):
+ *
+ *  - NO TETO 25 NENHUM segundo pacote cabe mais. O menor passou a exigir 27:
+ *    evoluir 27, reter 30, escalar 34, atender 35, organizar 41. Antes da
+ *    proposta comercial o menor era o `evoluir` com 25 exatas — era por ele que
+ *    25 tinha sido escolhido;
+ *  - `vender` sozinho passou a exigir 24 vagas (22 automáticas + 2 críticas), e o
+ *    default do onboarding já é o `vender` inteiro — a jornada com que todo
+ *    agente nasce. No teto 25 a folga que sobra depois de ligar `vender` cai de
+ *    3 vagas para 1. Eram 3 as que o teto 25 existia para deixar, e a proposta
+ *    comercial comeu uma por capacidade.
+ *
+ * 27 é de novo o MENOR passo que resolve, um degrau adiante e por um degrau:
+ * cada capacidade nova que entra no `vender` consome uma vaga de folga. Passar
+ * de 27 deixa de ser restaurar a mesma folga e vira escolher QUAL pacote ganha a
+ * vaga — duas perguntas diferentes. Subir até 35 daria quatro das cinco jornadas
+ * como segundo pacote; até 41 daria todas, e as duas escolhas são contra um
+ * argumento (a heurística de degradação) que ninguém mediu, que é exatamente o
+ * que o bloco ⚠️ acima diz. O dia em que o `evoluir` exigir 28, o passo volta a
+ * ser ele.
+ *
+ * ═══ 27 → 28 (merge main→dev, 2026-09-29): esse dia chegou no fork ═══════════
+ *
+ * O `vender` do fork carrega `crm_list_providers` (profissionais externos,
+ * bloco "Por que 26" acima) que o upstream não tem; somado às 2 da proposta
+ * comercial, o `evoluir` exige 28 no catálogo do merge (reter 31, escalar 36,
+ * atender 39, organizar 42 — medido em `pacote-reserva-vaga-da-critica`).
+ * 28 é o menor passo que reabre, pelo mesmo degrau da mesma régua. Margem zero
+ * de novo — e o seed da spec do `atender` volta a exceder em exatamente 1.
  */
-export const TETO_TOOLS_POR_AGENTE = 25;
+export const TETO_TOOLS_POR_AGENTE = 28;
 
 /** O mínimo que a regra precisa saber de uma capacidade. */
 export interface CapacidadeSelecionavel {
   name: string;
   risco: ToolRisk;
   pacotes: ReadonlyArray<ToolBundle>;
+  /**
+   * `false` = o MOTOR descarta (capacidade do harness, ver
+   * `lib/mcp/tools/ferramentas-do-harness.ts`).
+   *
+   * O pacote não pode oferecer o que o turno joga fora: era assim que o dono
+   * ligava "Atender e responder", via `crm_send_whatsapp_message` nas críticas e
+   * `crm_request_human_handoff` entrar sozinho pelo toggle de escalar, e o engine
+   * descartava as duas em silêncio. Ausente = marcável, porque quem monta uma
+   * capacidade à mão (teste, catálogo de terceiro) não tem como saber disto.
+   */
+  marcavel?: boolean;
 }
 
 export type EstadoPacote = "ligado" | "parcial" | "desligado";
@@ -68,7 +126,7 @@ function doPacote(
   catalogo: ReadonlyArray<CapacidadeSelecionavel>,
   pacote: ToolBundle,
 ): CapacidadeSelecionavel[] {
-  return catalogo.filter((c) => c.pacotes.includes(pacote));
+  return catalogo.filter((c) => c.pacotes.includes(pacote) && c.marcavel !== false);
 }
 
 /** As que o toggle do pacote liga sozinho — tudo que não é `critico`. */

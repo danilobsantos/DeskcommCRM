@@ -4,10 +4,10 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
-import { ServerTiming } from "@/lib/api/server-timing";
 import { ApiError } from "@/lib/api/types";
 import { fail, ok } from "@/lib/api/wrappers";
-import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { loadAuthUser } from "@/lib/auth/server";
+import { orgAtivaDaApi } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { listConversationsQuerySchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
@@ -19,20 +19,24 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
-  const timing = new ServerTiming();
+  const supabase = await createClient();
 
-  const authUser = await timing.measure("auth", () => loadAuthUser());
-  if (!authUser) {
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabase.auth.getUser();
+  if (authErr || !user) {
     return fail("unauthenticated", "Auth required.", 401, { requestId });
   }
 
+  const authUser = await loadAuthUser();
   const t = (texto: string) => traduzir(texto, authUser?.idioma ?? "pt-BR");
-  const activeOrg = await timing.measure("resolve_org", () => resolveActiveOrg(authUser));
+  const ativa = await orgAtivaDaApi(authUser, requestId);
+  if (!ativa.ok) return ativa.response;
+  const activeOrg = ativa.org;
   if (!activeOrg) {
     return fail("no_active_org", t("No active organization."), 403, { requestId });
   }
-
-  const supabase = await createClient();
 
   const url = new URL(req.url);
   const qsParsed = listConversationsQuerySchema.safeParse({
@@ -53,8 +57,22 @@ export async function GET(req: NextRequest): Promise<Response> {
     // meio: `InboxFilters` mostra o select "Filtrar por tag" sempre que a org tem
     // vocabulário, o browser manda `?tag=vip`, e a lista voltava inteira, sem erro.
     // Achado por @jmpo, no cabeçalho do teste que ele escreveu no PR #199.
-    tag: url.searchParams.get("tag") ?? undefined,
+    //
+    // ⚠️ `getAll`, e não `get` (#1274): o filtro passou a aceitar VÁRIAS
+    // etiquetas, e a repetição na URL (`?tag=vip&tag=orçamento`) só existe para o
+    // `getAll`. Um `get` aqui leria só a PRIMEIRA e a tela mostraria uma escolha
+    // que a lista ignora — que é a MESMA classe de rotura silenciosa que a linha
+    // de cima documenta, e por isso a cerca `rota-le-todo-filtro-do-schema` cobre
+    // este filtro com a mesma regra.
+    tag: url.searchParams.getAll("tag"),
+    modo: url.searchParams.get("modo") ?? undefined,
+    unread: url.searchParams.get("unread") ?? undefined,
     channel_session_id: url.searchParams.get("channel_session_id") ?? undefined,
+    // A aba "Grupos" (Task 10) — mesma rotura que `tag`/`comando` já tiveram
+    // aqui: schema aceita, hook serializa, handler filtra, e esta linha é o
+    // único lugar que pode esquecer sem erro nenhum. `rota-le-todo-filtro-do-schema`
+    // cobra a chave.
+    is_group: url.searchParams.get("is_group") ?? undefined,
     search: url.searchParams.get("search") ?? undefined,
     cursor: url.searchParams.get("cursor") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
@@ -67,29 +85,23 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const { conversations, cursor, has_more } = await timing.measure("db_query", () =>
-      listConversationsHandler(
-        supabase,
-        {
-          organization_id: activeOrg.orgId,
-          actor: { type: "user", id: authUser.id },
-          requestId,
-          idioma: authUser?.idioma,
-        },
-        qsParsed.data,
-      )
+    const { conversations, cursor, has_more } = await listConversationsHandler(
+      supabase,
+      {
+        organization_id: activeOrg.orgId,
+        actor: { type: "user", id: user.id },
+        requestId,
+        idioma: authUser?.idioma,
+      },
+      qsParsed.data,
     );
     // O nome de quem atende entra AQUI, na borda HTTP, e não no handler: o
     // handler é compartilhado com as tools MCP, que já resolvem o nome por conta
     // própria (`lib/mcp/tools/conversations.ts`) — enriquecer lá faria a mesma
     // leitura duas vezes por chamada do agente.
-    const dataComNome = await timing.measure("enrich_attendant", () =>
-      comNomeDoAtendente(conversations),
-    );
-    return ok(dataComNome, {
+    return ok(await comNomeDoAtendente(conversations), {
       requestId,
       meta: { cursor, has_more },
-      headers: { "Server-Timing": timing.header() },
     });
   } catch (err) {
     if (err instanceof ApiError) {

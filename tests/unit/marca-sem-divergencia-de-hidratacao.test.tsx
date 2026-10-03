@@ -64,6 +64,10 @@ vi.mock("@/hooks/i18n/useT", () => ({ useT: () => (chave: string) => chave }));
 vi.mock("@/components/connections/ConnectionHealthDot", () => ({
   ConnectionHealthDot: () => null,
 }));
+// O contador de casos lê a fila pelo React Query; aqui não há provider, e o
+// número não é o objeto destes casos (o dele mora em contador-de-casos.test.tsx).
+vi.mock("@/components/shell/ContadorDeCasos", () => ({ ContadorDeCasos: () => null }));
+vi.mock("@/components/shell/ContadorDaFila", () => ({ ContadorDaFila: () => null }));
 vi.mock("@/components/shell/VersionFooter", () => ({ VersionFooter: () => null }));
 
 const usuario = {
@@ -93,7 +97,7 @@ vi.mock("@/hooks/auth/AuthProvider", () => ({
 const MARCA_DO_BANCO = {
   name: "Sistema do Revendedor",
   logoUrl: "https://cdn.exemplo.test/revendedor.png",
-  logoUrlDark: null,
+  logoDarkUrl: null,
   initial: "S",
 } as const;
 
@@ -101,7 +105,7 @@ const MARCA_DO_BANCO = {
 const PUBLIC_ENV_DO_NAVEGADOR = {
   APP_NAME: MARCA_DO_BANCO.name,
   APP_LOGO_URL: MARCA_DO_BANCO.logoUrl,
-  APP_LOGO_URL_DARK: MARCA_DO_BANCO.logoUrlDark ?? "",
+  APP_LOGO_URL_DARK: MARCA_DO_BANCO.logoDarkUrl ?? "",
 };
 
 type PublicEnv = Record<string, string> | undefined;
@@ -245,7 +249,6 @@ describe("catraca: `branding()` é server-only", () => {
     const esperados = [
       "app/(public)/login/page.tsx",
       "app/(public)/signup/page.tsx",
-      "app/onboarding/layout.tsx",
       "lib/legal/operador.ts",
     ];
     const vistos = varridos.filter(chamaBranding).map((f) => relativoEmBarraNormal(RAIZ, f));

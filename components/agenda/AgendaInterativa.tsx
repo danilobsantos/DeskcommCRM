@@ -4,17 +4,20 @@ import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
 import { useT } from "@/hooks/i18n/useT";
 
-import { differenceInMinutes, format } from "date-fns";
+import { addDays, differenceInMinutes, format, subDays } from "date-fns";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
+import { useDiasBloqueados } from "@/hooks/agenda/useDiasBloqueados";
 import { useHorariosLivres } from "@/hooks/agenda/useHorariosLivres";
 import { useRemarcarAgendamento } from "@/hooks/agenda/useRemarcarAgendamento";
+import { mapaDeDiasBloqueados } from "@/lib/agenda/dias-bloqueados";
 import type { MotivoDaGradeTravada } from "@/lib/agenda/grade-interativa";
 import { cn } from "@/lib/utils";
 
 import { GradeDaAgenda } from "./GradeDaAgenda";
 import type { Agendamento, Pessoa, VisaoDaAgenda } from "./tipos";
+import { dataDeParede, diaLocalISO } from "@/lib/agenda/fuso";
 
 /**
  * A AGENDA QUE RESPONDE — o que liga a grade à disponibilidade real e ao
@@ -34,15 +37,16 @@ import type { Agendamento, Pessoa, VisaoDaAgenda } from "./tipos";
  *
  * `useHorariosLivres` é o mesmo hook que o painel de marcação usa, batendo na
  * mesma rota que o agente usa. A diferença é só o recorte: o painel pergunta
- * pelos próximos 30 dias, a grade pergunta pela janela que ela desenha. Duas
- * perguntas, uma regra — então tela e agente nunca discordam sobre o que está
- * livre. Reimplementar jornada aqui seria mais rápido e criaria exatamente essa
- * discordância, que aparece como 422 na cara de quem clicou.
+ * pelo mês que ele está mostrando, a grade pergunta pela janela que ela desenha.
+ * Duas perguntas, uma regra — então tela e agente nunca discordam sobre o que
+ * está livre. Reimplementar jornada aqui seria mais rápido e criaria exatamente
+ * essa discordância, que aparece como 422 na cara de quem clicou.
  */
 export function AgendaInterativa({
   visao,
   ancora,
   agora,
+  fuso,
   pessoas,
   agendamentos,
   recorte,
@@ -59,6 +63,11 @@ export function AgendaInterativa({
   ancora: Date;
   /** INJETADO, como na grade: relógio lido aqui dentro daria dois relógios ao teste. */
   agora: Date;
+  /**
+   * O fuso RESOLVIDO da organização — a régua de hora de parede da grade.
+   * Sem ele a grade desenha no relógio do navegador (issue #1362).
+   */
+  fuso: string;
   pessoas: Pessoa[];
   agendamentos: Agendamento[];
   /** A MESMA janela que a grade desenha — vem de quem já a calcula, sem recontá-la. */
@@ -94,7 +103,13 @@ export function AgendaInterativa({
    */
   tipos: Array<{ id: string; nome: string; duracaoMin: number }>;
   onEscolherTipo: (id: string) => void;
-  onMarcarEm: (instante: string) => void;
+  /**
+   * O clique num bloco livre da grade. OPCIONAL de propósito: quem só lê não
+   * recebe esta prop, e a AUSÊNCIA dela é o que desmonta a interação inteira
+   * abaixo — oferecer o gesto a quem não pode executá-lo é oferecer um 403, que
+   * é o defeito que este PR fecha. `undefined` = grade de leitura.
+   */
+  onMarcarEm?: (instante: string) => void;
   onAbrirAgendamento?: (id: string) => void;
   className?: string;
 }) {
@@ -116,10 +131,43 @@ export function AgendaInterativa({
     const mapa: Record<string, Array<{ instante: string; rotulo: string }>> = {};
     for (const s of horarios?.slots ?? []) {
       const d = new Date(s.inicio);
-      (mapa[format(d, "yyyy-MM-dd")] ??= []).push({ instante: s.inicio, rotulo: format(d, "HH:mm") });
+      // Chave E rótulo no fuso da ORGANIZAÇÃO: a grade da ao lado já desenha
+      // nessa régua, e um `format(d, ...)` aqui anuncia "às 09:00" para um
+      // bloco que pinta às 10:00 (issue #1362).
+      (mapa[diaLocalISO(d, fuso)] ??= []).push({
+        instante: s.inicio,
+        rotulo: format(dataDeParede(d, fuso), "HH:mm"),
+      });
     }
     return mapa;
-  }, [horarios]);
+  }, [horarios, fuso]);
+
+  /**
+   * Os dias fechados do MESMO dono da consulta acima — o selo "Fechado" da
+   * grade. Janela com 1 dia de folga de cada lado: `exception_date` é data
+   * civil no fuso da jornada e o recorte é instante, então a borda convertida
+   * pode cair no dia vizinho; buscar a mais e filtrar a menos é mais barato
+   * que acertar o fuso aqui (o motor já aplica o dele, #878).
+   */
+  const temDono = Boolean(providerId ?? ownerUserId);
+  const { data: excecoes } = useDiasBloqueados(
+    temDono
+      ? {
+          de: format(subDays(new Date(recorte.de), 1), "yyyy-MM-dd"),
+          ate: format(addDays(new Date(recorte.ate), 1), "yyyy-MM-dd"),
+          ...(providerId ? { provider_id: providerId } : {}),
+          ...(ownerUserId ? { owner_user_id: ownerUserId } : {}),
+        }
+      : null,
+  );
+  const diasBloqueados = React.useMemo(
+    () =>
+      mapaDeDiasBloqueados(
+        excecoes ?? [],
+        temDono ? { provider_id: providerId, owner_user_id: ownerUserId } : null,
+      ),
+    [excecoes, temDono, providerId, ownerUserId],
+  );
 
   /**
    * Por que a grade está travada — a MESMA ordem do painel de marcação, e de
@@ -205,21 +253,22 @@ export function AgendaInterativa({
       // toast e a tela fica sem registro de que a remarcação não valeu.
       setOtimista(null);
       setRecusa(
-        `A remarcação não foi aceita — o compromisso voltou para ${format(
-          new Date(antes.comeca),
-          "EEEE, d 'de' MMMM 'às' HH:mm",
-          { locale: localeDaData },
-        )}.`,
+        t("A remarcação não foi aceita — o compromisso voltou para {data}.").replace(
+          "{data}",
+          format(dataDeParede(new Date(antes.comeca), fuso), t("EEEE, d 'de' MMMM 'às' HH:mm"), {
+            locale: localeDaData,
+          }),
+        ),
       );
     });
-  }, [agendamentos, pendente, remarcar]);
+  }, [agendamentos, pendente, remarcar, localeDaData, t, fuso]);
 
   const nomeDoPendente = pendente
-    ? (agendamentos.find((a) => a.id === pendente.id)?.titulo ?? "o compromisso")
+    ? (agendamentos.find((a) => a.id === pendente.id)?.titulo ?? t("o compromisso"))
     : "";
 
   return (
-    <div className={cn("flex min-h-0 flex-col gap-2", className)}>
+    <div className={cn("flex flex-col gap-2", className)}>
       {horarios?.google_cobertura_parcial && <p role="status" className="text-xs text-warning">{t("Ocupação do Google ainda não verificada neste período.")}</p>}
       {tipos.length > 1 && (
         <div
@@ -265,7 +314,10 @@ export function AgendaInterativa({
           {motivo === "sem-jornada" ? (
             <>
               <span className="font-semibold text-text">
-                {t("Você ainda não publicou seus horários de atendimento.")}
+                {/* Sem "Você": esta grade é a de quem a agenda mostra, que não é
+                    necessariamente quem está logado (o atendente abre a agenda
+                    da dona). Quem é, o cabeçalho acima já nomeia. */}
+                {t("A jornada de atendimento ainda não foi publicada.")}
               </span>{" "}
               {t("Sem eles ninguém consegue marcar clicando na grade — nem você, nem o agente.")}
             </>
@@ -293,16 +345,18 @@ export function AgendaInterativa({
           <p className="text-xs leading-4 text-text">
             {t("Remarcar")} <span className="font-semibold">{nomeDoPendente}</span> {t("para")}{" "}
             <span className="font-semibold">
-              {format(new Date(pendente.instante), "EEEE, d 'de' MMMM 'às' HH:mm", { locale: localeDaData })}
+              {format(dataDeParede(new Date(pendente.instante), fuso), t("EEEE, d 'de' MMMM 'às' HH:mm"), {
+                locale: localeDaData,
+              })}
             </span>
             {t("? Quem foi atendido recebe o aviso da mudança.")}
           </p>
           <div className="flex shrink-0 gap-2">
             <Button variant="ghost" size="sm" onClick={() => setPendente(null)}>
-              Cancelar
+              {t("Cancelar")}
             </Button>
             <Button size="sm" data-testid="confirmar-remarcacao-botao" onClick={confirmar}>
-              Remarcar
+              {t("Remarcar")}
             </Button>
           </div>
         </div>
@@ -320,7 +374,7 @@ export function AgendaInterativa({
             onClick={() => setRecusa(null)}
             className="shrink-0 text-xs font-medium text-text-muted underline underline-offset-2 hover:text-text"
           >
-            Entendi
+            {t("Entendi")}
           </button>
         </div>
       )}
@@ -329,12 +383,16 @@ export function AgendaInterativa({
         visao={visao}
         ancora={ancora}
         agora={agora}
+        fuso={fuso}
         pessoas={pessoas}
         agendamentos={desenhados}
         onAbrirAgendamento={onAbrirAgendamento}
-        className="min-h-0 flex-1"
+        // SEM `min-h-0`: a grade aparece inteira e quem rola é a página
+        // (ver o comentário na raiz da grade).
+        className="flex-1"
+        diasBloqueados={diasBloqueados}
         interacao={
-          tipo
+          tipo && onMarcarEm
             ? {
                 horariosPorDia,
                 motivo,
@@ -346,7 +404,7 @@ export function AgendaInterativa({
                     // está na disponibilidade publicada. Remarcar assim mesmo
                     // criaria um compromisso que o motor não teria oferecido.
                     setPendente(null);
-                    setRecusa(`Não dá para remarcar para esse horário — ${razao}.`);
+                    setRecusa(t("Não dá para remarcar para esse horário — {motivo}.").replace("{motivo}", t(razao)));
                     return;
                   }
                   setRecusa(null);

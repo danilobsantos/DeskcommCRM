@@ -1,6 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./helpers/test";
 
 import { lerCreds, loginComoAdmin } from "./helpers/login-admin";
+import { partesNoFuso } from "../../lib/agenda/fuso";
 
 /**
  * A PROVA NA TELA DO PRODUTO — e ela existe porque a outra estava na tela errada.
@@ -20,6 +21,9 @@ import { lerCreds, loginComoAdmin } from "./helpers/login-admin";
  * gate para isso no nível do registro, e aqui ela é exercida pelo clique.
  */
 const ESPERA = 60_000;
+// O fuso que o seed grava na organização (`scripts/seed-e2e-credentials.ts`).
+// A grade desenha nele; o relógio do runner não entra na conta.
+const FUSO_DA_ORG = "America/Sao_Paulo";
 test.describe.configure({ mode: "serial", timeout: 180_000 });
 
 test.describe("a Agenda como o dono do produto a usa", () => {
@@ -173,16 +177,45 @@ test.describe("a Agenda como o dono do produto a usa", () => {
       ).toHaveAttribute("aria-pressed", "true");
     }
 
-    // A régua do agora só existe quando o instante cabe na faixa desenhada
-    // (07h–21h). Fora dela a ausência é CORRETA, e exigir presença faria a spec
-    // ficar vermelha de madrugada — que é o defeito que este repo já pagou nos
+    // A régua do agora só existe quando o instante cabe na faixa desenhada.
+    // Fora dela a ausência é CORRETA, e exigir presença faria a spec ficar
+    // vermelha de madrugada — que é o defeito que este repo já pagou nos
     // invariantes de turno.
-    const hora = new Date().getHours();
+    //
+    // ⚠️ A FAIXA É CALCULADA COMO O COMPONENTE CALCULA, e não "7 a 21".
+    //
+    // `GradeDaAgenda.tsx` desenha quando
+    // `0 <= (hora - 7) * 60 + minuto <= (21 - 7 + 1) * 60`, ou seja até as
+    // **22:00:59** — o limite superior é `<= 900`, não `< 900`. A versão
+    // anterior desta spec comparava `hora >= 7 && hora <= 21`, e as duas réguas
+    // discordavam numa janela de UM MINUTO por dia: às 22:00 o componente ainda
+    // desenha e a spec exigia ausência.
+    //
+    // Um minuto em 1440 parece desprezível até acontecer. Aconteceu em
+    // 11/09/2026, em DOIS PRs de contribuidores diferentes, cujos `e2e`
+    // começaram às `22:00:12` e `22:00:24` — os dois ficaram vermelhos por um
+    // defeito que não era deles, num arquivo que eles não tocaram.
+    //
+    // A régua aqui passou a ser a MESMA conta do componente. Duplicar a regra
+    // continua sendo duplicação; o que muda é que agora ela duplica o que o
+    // componente faz, em vez de uma aproximação dele.
+    //
+    // ⚠️ E A HORA É LIDA NO FUSO DA ORGANIZAÇÃO, não no relógio deste processo
+    // (#1362). A grade desenha a régua em `minutosDesdeOTopo(agora, fuso)`, com
+    // o fuso da org; o runner do CI roda em UTC e a org do seed está em
+    // `America/Sao_Paulo` (`scripts/seed-e2e-credentials.ts`). Com
+    // `getHours()` aqui, as duas réguas discordavam ~6h por dia (07:00-09:59Z e
+    // 22:01-01:00Z) — o mesmo defeito do minuto das 22:00, só que 360 vezes maior.
+    const agora = new Date();
+    const parede = partesNoFuso(agora, FUSO_DA_ORG);
+    const minutosDesdeOTopo = (parede.hora - 7) * 60 + parede.minuto;
+    const dentroDaFaixa = minutosDesdeOTopo >= 0 && minutosDesdeOTopo <= (21 - 7 + 1) * 60;
+    const horaLida = `${parede.hora}h${String(parede.minuto).padStart(2, "0")} em ${FUSO_DA_ORG}`;
     const regua = page.getByTestId("regua-do-agora");
-    if (hora >= 7 && hora <= 21) {
-      await expect(regua, "dentro da faixa 07h–21h e sem régua do agora").toBeVisible();
+    if (dentroDaFaixa) {
+      await expect(regua, `dentro da faixa desenhada (${horaLida}) e sem régua do agora`).toBeVisible();
     } else {
-      await expect(regua, "fora da faixa e a régua apareceu mesmo assim").toHaveCount(0);
+      await expect(regua, `fora da faixa (${horaLida}) e a régua apareceu mesmo assim`).toHaveCount(0);
     }
   });
 

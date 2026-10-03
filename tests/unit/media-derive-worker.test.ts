@@ -7,7 +7,7 @@ const messageRow = {
   organization_id: "org1",
   type: "audio" as string,
   media_mime: "audio/ogg",
-  media_storage_path: "org1/conv1/msg1.ogg",
+  media_storage_path: "org1/conv1/msg1.ogg" as string | null,
   media_derived_status: null as string | null,
 };
 
@@ -23,22 +23,59 @@ const messageRow = {
  * (o caso "ninguém configurou nada", que é o comportamento anterior que estes
  * casos existem para preservar).
  */
-const bindingDeVisao: { provider: string; model_id: string; credential_id: string | null } | null = null;
+let bindingDeVisao: { provider: string; model_id: string; credential_id: string | null } | null = null;
 
+/**
+ * A Central: o que ela JÁ TEM aberto, e o que o worker manda inserir.
+ *
+ * `agent_inbox_items` devolve `null` no select, e não `messageRow`: o dedupe de
+ * `avisarMidiaNaoLida` desiste quando acha item aberto, então um dublê que
+ * devolve linha para qualquer tabela faria o aviso NUNCA ser inserido — com o
+ * teste passando por não ter exercitado nada.
+ */
+const avisoAbertoNaCentral: Record<string, unknown> | null = null;
+
+/** Versão publicada com `video_frames_enabled` — null = leitura de vídeo desligada (o padrão). */
+let agenteComVideo: Record<string, unknown> | null = { id: "v1" };
+const inboxInsertMock = vi.fn();
 const fromMock = vi.fn();
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (tabela: string) => {
       fromMock(tabela);
-      const linha = tabela === "ai_purpose_bindings" ? bindingDeVisao : messageRow;
+      const linha =
+        tabela === "ai_purpose_bindings"
+          ? bindingDeVisao
+          : tabela === "agent_inbox_items"
+            ? avisoAbertoNaCentral
+            : tabela === "ai_agent_versions"
+              ? agenteComVideo
+              : messageRow;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const terminais: any = {
         maybeSingle: async () => ({ data: linha, error: null }),
         single: async () => ({ data: linha, error: null }),
+        insert: async (row: Record<string, unknown>) => {
+          if (tabela === "agent_inbox_items") inboxInsertMock(row);
+          return { error: null };
+        },
         update: (patch: Record<string, unknown>) => {
           updateEqMock(patch);
-          return { eq: () => ({ eq: async () => ({ error: null }) }) };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const chain: any = new Proxy(
+            {
+              eq: () => chain,
+              neq: () => chain,
+              select: () => chain,
+              then: (onFulfilled: (v: unknown) => void, onRejected?: (e: unknown) => void) => {
+                const p = Promise.resolve({ data: [messageRow], error: null });
+                return p.then(onFulfilled, onRejected);
+              },
+            },
+            { get: (alvo, prop) => (prop in alvo ? alvo[prop as keyof typeof alvo] : () => chain) },
+          );
+          return chain;
         },
         then: (resolve: (v: unknown) => unknown) =>
           Promise.resolve({ data: linha ? [linha] : [], error: null }).then(resolve),
@@ -58,6 +95,10 @@ vi.mock("@/lib/messaging/media/derive", () => ({
   deriveMediaText: vi.fn(async () => "transcrição do áudio real"),
 }));
 
+vi.mock("ai", () => ({
+  generateText: vi.fn(async () => ({ text: "descrição de mentira" })),
+}));
+
 vi.mock("@/lib/agent-engine/edge/llm/credentials", () => {
   class LlmNotConfiguredError extends Error {
     override readonly name = "llm_not_configured";
@@ -69,21 +110,43 @@ vi.mock("@/lib/agent-engine/edge/llm/credentials", () => {
   }
   return {
     LlmNotConfiguredError,
+    // resolveOrgLlmConfig mockado: o worker precisa de credencial p/
+    // montar as deps, mas o teste não exercita rede.
     resolveOrgLlmConfig: vi.fn(async () => ({
       provider: "openai",
       apiKey: "sk-test",
       defaultModel: "gpt-5",
+      origemDaChave: "chave_da_instalacao",
       params: {},
       enabledModels: [],
       orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
       orcamentoIndisponivelPorque: null,
+      baseUrl: null,
     })),
   };
 });
 
-import { deriveMessageMedia, buildDeriveDeps, MARCADOR_NAO_LIDA } from "@/workers/media-derive-worker";
+import { deriveMessageMedia, MARCADOR_NAO_LIDA } from "@/workers/media-derive-worker";
 import { deriveMediaText } from "@/lib/messaging/media/derive";
-import { resolveOrgLlmConfig, LlmNotConfiguredError } from "@/lib/agent-engine/edge/llm/credentials";
+import { resolveOrgLlmConfig, LlmNotConfiguredError, type OrgLlmConfig } from "@/lib/agent-engine/edge/llm/credentials";
+import { DETALHE_TECNICO } from "@/lib/event-log/aviso-de-evento-morto";
+
+function configResolvida(over: Partial<OrgLlmConfig> = {}): OrgLlmConfig {
+  return {
+    provider: "openai",
+    apiKey: "sk-test",
+    origemDaChave: "credencial_da_organizacao",
+    defaultModel: "gpt-5",
+    params: {},
+    enabledModels: [],
+    orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
+    orcamentoIndisponivelPorque: null,
+    // Coluna nova da credencial do provedor personalizado (#1642): nula aqui
+    // como é em todo provedor nativo.
+    baseUrl: null,
+    ...over,
+  };
+}
 
 function eventRow(attempts = 0) {
   return {
@@ -104,18 +167,56 @@ describe("deriveMessageMedia", () => {
     fromMock.mockReset();
     downloadMock.mockReset().mockResolvedValue({ data: new Blob([new Uint8Array([1, 2, 3])]), error: null });
     updateEqMock.mockReset();
+    inboxInsertMock.mockReset();
     messageRow.media_derived_status = null;
     messageRow.type = "audio";
+    messageRow.media_storage_path = "org1/conv1/msg1.ogg";
+    agenteComVideo = { id: "v1" };
+    bindingDeVisao = null;
+    messageRow.media_mime = "audio/ogg";
+    vi.mocked(resolveOrgLlmConfig).mockReset().mockResolvedValue(configResolvida());
     vi.mocked(deriveMediaText).mockReset().mockResolvedValue("transcrição do áudio real");
     vi.mocked(resolveOrgLlmConfig).mockReset().mockResolvedValue({
       provider: "openai",
       apiKey: "sk-test",
       defaultModel: "gpt-5",
+      origemDaChave: "chave_da_instalacao",
       params: {},
       enabledModels: [],
       orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
       orcamentoIndisponivelPorque: null,
+      baseUrl: null,
     });
+  });
+
+  it("usa binding da visão quando a organização não tem credencial padrão (#1591)", async () => {
+    messageRow.type = "image";
+    messageRow.media_mime = "image/jpeg";
+    bindingDeVisao = { provider: "openai", model_id: "gpt-4o", credential_id: "cred-vision" };
+
+    // Sem override (padrão da org) rejeita; com override (binding) resolve com sucesso
+    vi.mocked(resolveOrgLlmConfig).mockImplementation(async (_pool, _cfg, _orgId, override) => {
+      if (override?.credentialId === "cred-vision") {
+        return configResolvida({ apiKey: "sk-vision", defaultModel: "gpt-4o" });
+      }
+      throw new Error("Nenhuma credencial padrão encontrada para a organização");
+    });
+
+    const r = await deriveMessageMedia(eventRow());
+    expect(r.status).toBe("ok");
+    expect(resolveOrgLlmConfig).toHaveBeenCalledTimes(1);
+    expect(resolveOrgLlmConfig).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "org1",
+      { provider: "openai", credentialId: "cred-vision" },
+    );
+    expect(deriveMediaText).toHaveBeenCalledWith(
+      "image",
+      expect.anything(),
+      "image/jpeg",
+      expect.anything(),
+    );
   });
 
   it("baixa a mídia, deriva e grava ready", async () => {
@@ -140,6 +241,27 @@ describe("deriveMessageMedia", () => {
     expect(downloadMock).not.toHaveBeenCalled();
   });
 
+  /**
+   * Mídia que o worker PULA de propósito grava `skipped`. Sem a marca o status
+   * ficava null para sempre, e o drain — que espera a mídia da CONVERSA —
+   * atrasava em até 120s a resposta do texto que o cliente mandou depois.
+   */
+  it("vídeo com leitura desligada (padrão) → grava skipped, sem baixar", async () => {
+    messageRow.type = "video";
+    agenteComVideo = null;
+    const r = await deriveMessageMedia(eventRow());
+    expect(r.status).toBe("skipped");
+    expect(downloadMock).not.toHaveBeenCalled();
+    expect(updateEqMock).toHaveBeenCalledWith({ media_derived_status: "skipped" });
+  });
+
+  it("mensagem sem arquivo no storage → grava skipped", async () => {
+    messageRow.media_storage_path = null;
+    const r = await deriveMessageMedia(eventRow());
+    expect(r.status).toBe("skipped");
+    expect(updateEqMock).toHaveBeenCalledWith({ media_derived_status: "skipped" });
+  });
+
   it("erro na derivação marca failed no último attempt", async () => {
     vi.mocked(deriveMediaText).mockRejectedValue(new Error("transcription_503"));
     const r = await deriveMessageMedia(eventRow(4));
@@ -159,34 +281,113 @@ describe("deriveMessageMedia", () => {
     );
   });
 
-  it("quando a org não tem credencial LLM (LlmNotConfiguredError), não falha permanentemente: deriva áudio via OpenAI", async () => {
+  // Desenho da #2171 (escada de transcrição, merge main→dev 2026-10-03): sem
+  // credencial LLM utilizável o erro SOBE em vez do fallback silencioso para a
+  // OpenAI — a tentativa devolve `error` (o dreno tenta de novo) e, na última,
+  // grava `failed` + MARCADOR + aviso na Central. O caso antigo ("deriva áudio
+  // via OpenAI") media o desenho pré-escada e contradiz o fluxo atual.
+  it("quando a org não tem credencial LLM (LlmNotConfiguredError), a tentativa falha com erro e não grava transcrição", async () => {
     vi.mocked(resolveOrgLlmConfig)
       .mockReset()
-      .mockRejectedValueOnce(new LlmNotConfiguredError())
-      .mockResolvedValueOnce({
-        provider: "openai",
-        apiKey: "sk-openai",
-        defaultModel: "gpt-5",
-        params: {},
-        enabledModels: [],
-        orcamento: { modo: "off", tetoCents: 0, efetivoEm: null, limiarPct: 80 },
-        orcamentoIndisponivelPorque: null,
-      });
+      .mockRejectedValueOnce(new LlmNotConfiguredError());
 
     const r = await deriveMessageMedia(eventRow());
-    expect(r.status).toBe("ok");
-    expect(updateEqMock).toHaveBeenCalledWith(
-      expect.objectContaining({ media_derived_text: "transcrição do áudio real", media_derived_status: "ready" }),
+    expect(r.status).toBe("error");
+    expect(updateEqMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ media_derived_status: "ready" }),
     );
   });
 
-  it("quando a org não tem credencial LLM e é imagem, buildDeriveDeps gera MARCADOR_NAO_LIDA e avisa", async () => {
-    const adminFake = { from: fromMock };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deps = buildDeriveDeps(null, null, "org1", adminFake as any);
-    const texto = await deps.describeImage(Buffer.from([1, 2, 3]), "image/jpeg");
-    expect(texto).toBe(MARCADOR_NAO_LIDA);
-    expect(fromMock).toHaveBeenCalledWith("agent_inbox_items");
+  /**
+   * O `failed` sem marcador deixava o agente ver `[documento]` — "veio um
+   * arquivo", sem dizer que a leitura falhou — e responder sobre um conteúdo
+   * que ele nunca leu. Medido numa VPS em produção (17/09): PDF de catálogo sem
+   * camada de texto, extrator falhou, e o agente disse ao cliente que o material
+   * "parece ser de distribuidora/promocional".
+   */
+  it("a falha permanente entrega ao agente o marcador de mídia não lida", async () => {
+    messageRow.type = "document";
+    messageRow.media_mime = "application/pdf";
+    vi.mocked(deriveMediaText).mockRejectedValue(
+      new Error("pdfjs-dist extracted no text (possibly image-only PDF)"),
+    );
+
+    await deriveMessageMedia(eventRow(4));
+
+    expect(updateEqMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        media_derived_text: MARCADOR_NAO_LIDA,
+        media_derived_status: "failed",
+      }),
+    );
+  });
+
+  /**
+   * DESISTIR CALADO ERA O DESFECHO MAIS COMUM DOS TRÊS.
+   *
+   * As recusas que o worker sabia explicar — modelo sem visão, provedor
+   * indisponível, falta de chave para transcrever — já abriam
+   * `midia_nao_lida`, e por isso pareciam cobrir o
+   * assunto. A falha que vem de DENTRO da chamada ao modelo estoura como
+   * exceção, cai no catch, marcava `failed` e não dizia nada.
+   *
+   * Medido numa VPS em produção (org real, 14/09): quatro imagens JPEG com
+   * `media_derived_status='failed'`, os quatro eventos mortos em `event_log`
+   * com "The model `claude-sonnet-5` does not exist or you do not have access
+   * to it", e a Central com ZERO avisos de mídia.
+   */
+  describe("a falha permanente avisa a Central", () => {
+    const RECUSA_DO_PROVEDOR =
+      "The model `claude-sonnet-5` does not exist or you do not have access to it.";
+
+    it("no último attempt abre `midia_nao_lida` com a frase do provedor", async () => {
+      messageRow.type = "image";
+      messageRow.media_mime = "image/jpeg";
+      vi.mocked(deriveMediaText).mockRejectedValue(new Error(RECUSA_DO_PROVEDOR));
+
+      await deriveMessageMedia(eventRow(4));
+
+      expect(inboxInsertMock, "falhou de vez e não avisou ninguém").toHaveBeenCalledTimes(1);
+      const aviso = inboxInsertMock.mock.calls[0]![0] as Record<string, unknown>;
+      expect(aviso).toMatchObject({
+        organization_id: "org1",
+        kind: "midia_nao_lida",
+        severity: "warn",
+      });
+      // A frase do PROVEDOR precisa chegar: é ela que distingue "chave errada"
+      // de "modelo que sua conta não assina" — duas ações diferentes.
+      expect(String(aviso.body)).toContain("claude-sonnet-5");
+      // E o tipo tem que ser o que o operador chama de "isto", não `msg.type`.
+      expect(String(aviso.title)).toContain("imagem");
+      // O turno que já correu seguiu sem o texto — isso o aviso continua
+      // dizendo. O que mudou é o DEPOIS: `markFailed` grava o marcador, então
+      // do próximo turno em diante o agente sabe que houve arquivo ilegível.
+      expect(String(aviso.body)).toContain("O conteúdo do arquivo não chegou ao agente.");
+      expect(String(aviso.body)).toContain("responde avisando");
+      // E a frase do provedor vem no FIM, rotulada: é inglês de API, e quem lê
+      // a Central não programa.
+      const corpo = String(aviso.body);
+      const rotulo = corpo.indexOf(DETALHE_TECNICO);
+      expect(rotulo, "a frase do provedor sem o rótulo de detalhe técnico").toBeGreaterThan(0);
+      expect(corpo.slice(0, rotulo)).not.toContain("does not exist");
+      expect(corpo.slice(rotulo)).toContain(RECUSA_DO_PROVEDOR);
+    });
+
+    it("tentativa que ainda VAI tentar de novo não avisa (controle)", async () => {
+      // Sem este controle, o caso acima passaria com o worker avisando a cada
+      // tentativa — cinco avisos por mídia, que é como a Central deixa de ser lida.
+      messageRow.type = "image";
+      vi.mocked(deriveMediaText).mockRejectedValue(new Error(RECUSA_DO_PROVEDOR));
+
+      await deriveMessageMedia(eventRow(0));
+
+      expect(inboxInsertMock, "avisou antes de desistir").not.toHaveBeenCalled();
+    });
+
+    it("derivação que dá certo não avisa nada (controle)", async () => {
+      await deriveMessageMedia(eventRow(4));
+      expect(inboxInsertMock).not.toHaveBeenCalled();
+    });
   });
 });
 

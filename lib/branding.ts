@@ -23,8 +23,8 @@ export type Branding = {
   name: string;
   /** URL do logo para o tema CLARO, ou `null` quando a marca deve aparecer como texto. */
   logoUrl: string | null;
-  /** URL do logo para o tema ESCURO, ou `null` (usa `logoUrl` nos dois temas). */
-  logoUrlDark: string | null;
+  /** Arte opcional preparada para o tema escuro; ausente preserva o logo padrão. */
+  logoDarkUrl?: string | null;
   /** Primeira letra do nome — usada onde só cabe um caractere (sidebar recolhida). */
   initial: string;
 };
@@ -40,15 +40,17 @@ export type Branding = {
 export function resolveBranding(
   name: string | undefined | null,
   logoUrl: string | undefined | null,
-  logoUrlDark?: string | undefined | null,
+  logoDarkUrl?: string | undefined | null,
 ): Branding {
   const resolvedName = (name ?? "").trim() || DEFAULT_APP_NAME;
   const resolvedLogo = (logoUrl ?? "").trim();
-  const resolvedLogoDark = (logoUrlDark ?? "").trim();
+  const resolvedLogoDark = (logoDarkUrl ?? "").trim();
   return {
     name: resolvedName,
     logoUrl: resolvedLogo.length > 0 ? resolvedLogo : null,
-    logoUrlDark: resolvedLogoDark.length > 0 ? resolvedLogoDark : null,
+    // Ausente quando vazio (não `null`): distingue "sem arte escura" para o
+    // spread condicional das camadas — ver `resolverMarca`.
+    ...(resolvedLogoDark.length > 0 ? { logoDarkUrl: resolvedLogoDark } : {}),
     initial: ([...resolvedName][0] ?? DEFAULT_APP_NAME[0]!).toUpperCase(),
   };
 }

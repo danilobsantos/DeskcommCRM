@@ -62,7 +62,23 @@ Cada dentista precisa de jornada própria, senão **não agenda nada**.
 
 - Caminho: **Agenda → Profissionais → botão "Horário"** (`/app/agenda/profissionais`).
 - Defina as janelas semanais + fuso do profissional e salve.
-- O profissional também tem **Ativo/Inativo**; inativo não recebe oferta.
+- O profissional também tem **Ativo/Inativo**; inativo não recebe oferta e nem
+  aparece na lista que a IA consulta (`crm_list_providers` só devolve ativos).
+- Nome e especialidades se editam pelo botão **"Editar"** no card do
+  profissional (mesma permissão de manager+ do cadastro).
+- **Excluir** fica no card (ícone de lixeira, com confirmação). É **barrado
+  quando há consulta futura** — transfira ou cancele antes; cancelada não
+  conta (só `pending`/`confirmed` barram). Sem futuras, apaga a linha, audita
+  `agenda.provider_deleted` e os bloqueios dele vão junto (CASCADE).
+- **Fechar dia ou período** (feriado, férias, motivo particular): na mesma
+  página, em **"Dias fora da rotina"**, marque um ou mais profissionais e o dia
+  inicial + "Até" (opcional, dias corridos). A IA deixa de oferecer horários
+  nesses dias; o que já estava marcado continua marcado. A porta é a mesma da
+  agenda própria (`POST /api/v1/agenda/excecoes` com `provider_id`).
+- O dia fechado aparece **marcado na agenda** (`/app/agenda`): selo "Fechado"
+  no cabeçalho do dia (semana) e na célula do mês, do dono que a grade mostra
+  (profissional isolado ou atendente). O motivo vai no hover — dia fechado sem
+  motivo mostra só o selo. Sem dono conhecido, sem selo.
 
 ---
 
@@ -148,7 +164,7 @@ agenda vivem no pacote **"Vender e mover o funil"**; para conversar, ligue tamb�
 | Tool | Risco | O que faz |
 |---|---|---|
 | `crm_list_event_types` | seguro | lista os tipos de atendimento (consulta, limpeza…) |
-| `crm_list_providers` | seguro | lista os profissionais externos (dentistas sem login) |
+| `crm_list_providers` | seguro | lista os profissionais externos ATIVOS (dentistas sem login); inativos não aparecem |
 | `crm_find_free_slots` | seguro | horários livres de um tipo, já com jornada/folgas/ocupados |
 | `crm_list_appointments` | seguro | compromissos de um cliente/dia/pessoa |
 | `crm_book_appointment` | atenção | marca consulta (reserva o horário) |
@@ -181,6 +197,11 @@ agenda vivem no pacote **"Vender e mover o funil"**; para conversar, ligue tamb�
    nascer com a cor do dentista.
 5. Confirme que o compromisso aparece no **histórico** e que a disponibilidade
    agora exclui aquele horário.
+6. Feche um dia do profissional em **"Dias fora da rotina"** e confira que
+   `crm_find_free_slots` (ou a grade) não oferece mais nada nesse dia — e que
+   o compromisso já marcado continua lá.
+7. Edite nome/especialidades pelo **"Editar"**, desligue pelo Switch e confira
+   que o inativo some de `crm_list_providers`.
 
 ### 7.2 Teste do agente (ponta a ponta)
 1. Com o agente **publicado** e o canal WhatsApp conectado, envie uma mensagem do

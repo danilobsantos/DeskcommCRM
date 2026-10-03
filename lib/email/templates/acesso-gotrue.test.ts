@@ -18,7 +18,7 @@ import {
 const MARCA: MarcaDeSaida = {
   nome: 'Acme "Test" & Cia',
   logoUrl: "https://exemplo.test/logo.png",
-  logoUrlDark: null,
+  logoDarkUrl: null,
   accent: "#506d48",
   accentFg: "#ffffff",
   origens: { nome: "instalacao", cor: "instalacao" },

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { updateBranding } from "@/app/actions/settings/updateBranding";
 import { CampoDeLogo } from "@/components/branding/CampoDeLogo";
+import { CampoDoIconeDaAba } from "@/components/branding/CampoDoIconeDaAba";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,12 +22,13 @@ import { EstadoDaMarca } from "./_estado";
 import { avisosDaMarca, type DistanciaAteSuaCor } from "@/lib/branding/linguagem";
 import { TiraDeTons, type ItemDaLegenda } from "@/components/branding/TiraDeTons";
 import { useT } from "@/hooks/i18n/useT";
+import { MENSAGEM_DA_RECUSA_DE_ESCRITA } from "@/lib/auth/recusa-de-escrita-de-admin";
 
 export interface MarcaGravada {
   readonly app_name: string | null;
   readonly logo_url: string | null;
   readonly logo_path: string | null;
-  readonly logo_path_dark: string | null;
+  readonly logo_dark_path: string | null;
   readonly accent_hex: string | null;
   readonly show_powered_by: boolean;
 }
@@ -42,11 +44,13 @@ interface Props {
    * interface aparece com o nome em texto.
    */
   readonly logoEmVigor: string | null;
-  readonly logoEmVigorDark: string | null;
+  readonly logoEscuroEmVigor?: string | null;
+  /** O ícone da aba subido nesta tela (URL pública), ou `null` para o desenhado. */
+  readonly iconeDaAba?: string | null;
   /** O que apareceria SEM o arquivo subido — a URL colada no `.env`, se houver. */
   readonly logoDoAmbiente: string | null;
   readonly logoDoAmbienteDark: string | null;
-  readonly origens: { readonly nome: string; readonly logoUrl: string; readonly logoUrlDark: string; readonly cor: string };
+  readonly origens: { readonly nome: string; readonly logoUrl: string; readonly logoDarkUrl?: string; readonly cor: string };
   readonly definidoNestaTela: boolean;
   readonly fallbackEm: string | null;
   readonly fallbackMotivo: string | null;
@@ -54,6 +58,7 @@ interface Props {
 
 /** Mensagem por código de recusa da server action. */
 const ERRO_EM_PORTUGUES: Record<string, string> = {
+  ...MENSAGEM_DA_RECUSA_DE_ESCRITA,
   validation_failed: "Algum campo não está no formato esperado.",
   unauthenticated: "Sua sessão expirou. Entre de novo para salvar.",
   forbidden_role: "Só quem administra a instalação pode mudar a marca.",
@@ -66,7 +71,8 @@ export function FormularioDaMarca({
   gravada,
   nomeEmVigor,
   logoEmVigor,
-  logoEmVigorDark,
+  logoEscuroEmVigor,
+  iconeDaAba,
   logoDoAmbiente,
   logoDoAmbienteDark,
   origens,
@@ -337,13 +343,20 @@ export function FormularioDaMarca({
       <Card className="space-y-4 p-6">
         <CampoDeLogo
           escopo="instalacao"
-          logoDaCamada={{ url: gravada.logo_path ? logoEmVigor : null }}
-          logoDaCamadaDark={{ url: gravada.logo_path_dark ? logoEmVigorDark : null }}
+          // Literal, nunca memoizado: a identidade deste objeto é o que diz ao
+          // campo que houve render NOVO do servidor. Ver os Props de CampoDeLogo.
+          logoDaCamada={{
+            url: gravada.logo_path ? logoEmVigor : null,
+            escuraUrl: logoEscuroEmVigor,
+          }}
           logoHerdado={logoDoAmbiente}
-          logoHerdadoDark={logoDoAmbienteDark}
+          logoEscuroHerdado={logoDoAmbienteDark}
           origemDoHerdado="do arquivo de instalação do servidor"
           nomeEmVigor={nomeEmVigor}
         />
+        {/* Mesmo cartão do logo: também sobe na hora, sem passar pelo Salvar.
+            Literal, nunca memoizado — ver o cabeçalho de CampoDoIconeDaAba. */}
+        <CampoDoIconeDaAba iconeDaCamada={{ url: iconeDaAba ?? null }} />
       </Card>
 
       <EstadoDaMarca

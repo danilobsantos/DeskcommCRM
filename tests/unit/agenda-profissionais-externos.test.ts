@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 
 import { providersHabilitados } from "@/lib/agenda/providers";
-import { horariosLivresDaOrg, listaAgendamentos } from "@/lib/agenda/consulta";
+import { horariosLivresDaOrg, listaAgendamentos, listaProfissionais } from "@/lib/agenda/consulta";
 import { partesNoFuso } from "@/lib/agenda/fuso";
 import { sidebarGroups } from "@/lib/navigation/registry";
 
@@ -161,6 +161,51 @@ describe("sidebarGroups + providersRequired", () => {
 
   it("mostra /app/agenda/profissionais com a feature ON", () => {
     expect(grupo(true)).toContain("/app/agenda/profissionais");
+  });
+});
+
+// ── listaProfissionais ────────────────────────────────────────────────
+//
+// A IA só pode ver ATIVOS (`crm_list_providers` passa `apenasAtivos`): um
+// inabilitado que continua na lista vira oferta que a escrita recusa —
+// promessa quebrada no WhatsApp. A tela de gestão usa o default (todos, com
+// o flag), então o filtro é opt-in, não mudança de default.
+describe("listaProfissionais", () => {
+  /** Mock que GRAVA os filtros `.eq()` — o mock da seção acima não grava. */
+  function mockComFiltros(linhas: Record<string, unknown>[]) {
+    const filtros: Array<[string, unknown]> = [];
+    const eu: Record<string, unknown> = {};
+    eu.select = () => eu;
+    eu.eq = (col: string, val: unknown) => {
+      filtros.push([col, val]);
+      return eu;
+    };
+    eu.order = async () => ({ data: linhas, error: null });
+    return { supabase: { from: () => eu }, filtros };
+  }
+
+  it("sem opts devolve todos, com o flag ativo/inativo", async () => {
+    const { supabase } = mockComFiltros([
+      { id: "a", name: "Dra. Ana", specialties: ["clínico"], active: true },
+      { id: "b", name: "Dr. Bia", specialties: [], active: false },
+    ]);
+    const r = await listaProfissionais(supabase as never, "org-1");
+    expect(r).toEqual([
+      { id: "a", nome: "Dra. Ana", especialidades: ["clínico"], ativo: true },
+      { id: "b", nome: "Dr. Bia", especialidades: [], ativo: false },
+    ]);
+  });
+
+  it("com apenasAtivos filtra active=true no banco", async () => {
+    const { supabase, filtros } = mockComFiltros([
+      { id: "a", name: "Dra. Ana", specialties: ["clínico"], active: true },
+    ]);
+    const r = await listaProfissionais(supabase as never, "org-1", { apenasAtivos: true });
+    expect(filtros).toContainEqual(["active", true]);
+    expect(r).toEqual([
+      { id: "a", nome: "Dra. Ana", especialidades: ["clínico"], ativo: true },
+    ]);
+    expect(r.some((p) => !p.ativo)).toBe(false);
   });
 });
 

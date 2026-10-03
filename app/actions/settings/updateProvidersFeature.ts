@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 
 import { audit } from "@/lib/audit";
-import { requirePlatformAdmin } from "@/lib/auth/requirePlatformAdmin";
+import { escritaDeAdminOuRecusa } from "@/lib/auth/escritaDeAdminOuRecusa";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type UpdateProvidersFeatureResult =
@@ -23,7 +23,9 @@ export async function updateProvidersFeature(
   organizationId: string,
   enabled: boolean,
 ): Promise<UpdateProvidersFeatureResult> {
-  const { user: authUser } = await requirePlatformAdmin();
+  const escrita = await escritaDeAdminOuRecusa();
+  if (!escrita.ok) return escrita;
+  const { user: authUser } = escrita.ctx;
 
   const admin = createAdminClient();
   const { data: orgRow, error: readErr } = await admin
