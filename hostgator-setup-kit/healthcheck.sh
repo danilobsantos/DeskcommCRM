@@ -143,3 +143,32 @@ fetch('http://127.0.0.1:3000/email-templates/confirmation').then(r=>r.text()).th
     fi
     ;;
 esac
+
+step "TLS do banco (Supabase)"
+# ── Por que este passo existe (#829) ──────────────────────────────────────────
+# Instalação sem patches permanentes falhou nos diagnósticos com
+# `SELF_SIGNED_CERT_IN_CHAIN`: a cadeia do pooler não está na trust store
+# padrão, e o erro cru não diz o que fazer. Aqui o teste roda com verificação
+# TOTAL (sslmode=verify-full + sslrootcert, montado pelo pg_container) e, quando
+# a CA não está declarada, a frase vem com o NOME da variável que falta — é o
+# que a issue pede. Nada é desligado para o teste passar.
+#
+# A chave é OPCIONAL, e o passo trata a ausência dela como opção, não como
+# defeito: sem SUPABASE_SSL_ROOT_CERT a linha é informativa (c_dim), sem
+# instrução de download. Em amarelo, ela mandaria TODA instalação existente —
+# a maioria não exige verificação de certificado — baixar uma CA de que não
+# precisa. No single-server o banco é o Postgres desta máquina, e a CA da nuvem
+# não se aplica. O amarelo fica para quem DECLAROU a CA e ela não funciona.
+if [ "${SINGLE_SERVER:-0}" = "1" ]; then
+  c_dim "  não se aplica: no single-server o banco é o Postgres desta máquina, não o pooler da nuvem."
+elif [ -z "${SUPABASE_SSL_ROOT_CERT:-}" ]; then
+  c_dim "  (opcional) SUPABASE_SSL_ROOT_CERT não declarada no .env — nada a verificar."
+  c_dim "  Só faz falta se a sua conexão exige verificação de certificado (veja o README do kit)."
+elif tls_dito="$(tls_do_banco 2>&1)"; then
+  c_grn "✓ TLS do banco verificado (sslmode=verify-full com a CA de SUPABASE_SSL_ROOT_CERT)"
+else
+  while IFS= read -r linha_tls; do
+    if [ -n "$linha_tls" ]; then c_ylw "$linha_tls"; fi
+  done <<< "$tls_dito"
+  c_dim "  (a verificação de certificado continua ligada — nada foi desligado para este teste.)"
+fi
