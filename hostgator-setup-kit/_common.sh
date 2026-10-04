@@ -245,6 +245,13 @@ unset _deskcomm_chamador
 # Todo `docker compose` do kit passa por aqui: com proxy externo, um comando sem
 # o override subiria o Caddy e ele iria bater de frente com o proxy da hospedagem.
 dc() {
+  # Overlay da CA do Supabase (#829): só com a variável declarada, o arquivo da
+  # CA existindo no disco (ca_do_supabase_ok) E o overlay no MESMO checkout — o
+  # install.sh chama dc() antes do clone, e um -f apontando para arquivo que
+  # não existe derruba o compose no meio da instalação. Entra por ÚLTIMO, depois
+  # dos overlays de modo e de proxy, que é a ordem em que o compose aplica.
+  local -a ca=()
+  if ca_do_supabase_ok && [ -f docker-compose.supabase-ca.yml ]; then ca=(-f docker-compose.supabase-ca.yml); fi
   if [ "${SINGLE_SERVER:-0}" = "1" ]; then
     # #2099: o single-server também respeita o proxy da hospedagem. Os dois
     # ramos eram `if SINGLE_SERVER` → return ANTES do seletor, então o
@@ -253,16 +260,16 @@ dc() {
     # estava lá. Junta os dois: o overlay do proxy vem DEPOIS do overlay do
     # single-server, e o padrão (sem a variável) continua só o single-server.
     case "${REVERSE_PROXY:-caddy}" in
-    traefik) docker compose -f "$COMPOSE" -f docker-compose.single-server.yml -f "$COMPOSE_TRAEFIK" "$@" ;;
-    npm)     docker compose -f "$COMPOSE" -f docker-compose.single-server.yml -f "$COMPOSE_NPM" "$@" ;;
-    *)       docker compose -f "$COMPOSE" -f docker-compose.single-server.yml "$@" ;;
+    traefik) docker compose -f "$COMPOSE" -f docker-compose.single-server.yml -f "$COMPOSE_TRAEFIK" ${ca[@]+"${ca[@]}"} "$@" ;;
+    npm)     docker compose -f "$COMPOSE" -f docker-compose.single-server.yml -f "$COMPOSE_NPM" ${ca[@]+"${ca[@]}"} "$@" ;;
+    *)       docker compose -f "$COMPOSE" -f docker-compose.single-server.yml ${ca[@]+"${ca[@]}"} "$@" ;;
     esac
     return
   fi
   case "${REVERSE_PROXY:-caddy}" in
-  traefik) docker compose -f "$COMPOSE" -f "$COMPOSE_TRAEFIK" "$@" ;;
-  npm)     docker compose -f "$COMPOSE" -f "$COMPOSE_NPM" "$@" ;;
-  *)       docker compose -f "$COMPOSE" "$@" ;;
+  traefik) docker compose -f "$COMPOSE" -f "$COMPOSE_TRAEFIK" ${ca[@]+"${ca[@]}"} "$@" ;;
+  npm)     docker compose -f "$COMPOSE" -f "$COMPOSE_NPM" ${ca[@]+"${ca[@]}"} "$@" ;;
+  *)       docker compose -f "$COMPOSE" ${ca[@]+"${ca[@]}"} "$@" ;;
   esac
 }
 
@@ -270,30 +277,107 @@ dc() {
 # dono. Se a mensagem omitisse o override numa instalação com proxy externo, o
 # próprio dono derrubaria o site seguindo a instrução do kit.
 dc_files() {
+  # Mesma condição do dc() (#829): a mensagem que ensina o comando tem de
+  # carregar o overlay da CA quando o kit mesmo o usaria — sem isso o dono
+  # refaz o `up -d` sem a CA e o app volta a sem-verificação.
+  local sufixo=""
+  if ca_do_supabase_ok && [ -f docker-compose.supabase-ca.yml ]; then
+    sufixo=" -f docker-compose.supabase-ca.yml"
+  fi
   if [ "${SINGLE_SERVER:-0}" = "1" ]; then
     # #2099: mesma junção de dc() — a lista de -f tem de bater com o que dc()
     # realmente roda, ou a mensagem ensinaria o dono a omitir o overlay do
-    # proxy e ele derrubaria o site seguindo a instrução do kit.
+    # proxy e o próprio dono derrubaria o site seguindo a instrução do kit.
     case "${REVERSE_PROXY:-caddy}" in
-    traefik) printf -- '-f %s -f %s -f %s' "$COMPOSE" docker-compose.single-server.yml "$COMPOSE_TRAEFIK" ;;
-    npm)     printf -- '-f %s -f %s -f %s' "$COMPOSE" docker-compose.single-server.yml "$COMPOSE_NPM" ;;
-    *)       printf -- '-f %s -f %s' "$COMPOSE" docker-compose.single-server.yml ;;
+    traefik) printf -- '-f %s -f %s -f %s%s' "$COMPOSE" docker-compose.single-server.yml "$COMPOSE_TRAEFIK" "$sufixo" ;;
+    npm)     printf -- '-f %s -f %s -f %s%s' "$COMPOSE" docker-compose.single-server.yml "$COMPOSE_NPM" "$sufixo" ;;
+    *)       printf -- '-f %s -f %s%s' "$COMPOSE" docker-compose.single-server.yml "$sufixo" ;;
     esac
     return
   fi
   case "${REVERSE_PROXY:-caddy}" in
-  traefik) printf -- '-f %s -f %s' "$COMPOSE" "$COMPOSE_TRAEFIK" ;;
-  npm)     printf -- '-f %s -f %s' "$COMPOSE" "$COMPOSE_NPM" ;;
-  *)       printf -- '-f %s' "$COMPOSE" ;;
+  traefik) printf -- '-f %s -f %s%s' "$COMPOSE" "$COMPOSE_TRAEFIK" "$sufixo" ;;
+  npm)     printf -- '-f %s -f %s%s' "$COMPOSE" "$COMPOSE_NPM" "$sufixo" ;;
+  *)       printf -- '-f %s%s' "$COMPOSE" "$sufixo" ;;
   esac
 }
 
+# ── A CA do Supabase, declarada UMA vez (#829) ────────────────────────────────
+#
+# O pooler da nuvem apresenta uma cadeia que a trust store padrão não conhece
+# (SELF_SIGNED_CERT_IN_CHAIN quando o cliente exige verificação). Fornecer a CA
+# oficial resolve — mas até aqui não existia caminho declarado: o runtime
+# (app/worker/scheduler) e os clientes Postgres EFÊMEROS do kit
+# (`docker run postgres:17-alpine psql`) moram em lugares diferentes e cada um
+# precisava do arquivo por conta própria, com override de Compose só para o
+# app/worker justamente não cobrindo os temporários.
+#
+# Daqui em diante é UMA chave no .env, lida pelos três consumidores:
+#
+#   SUPABASE_SSL_ROOT_CERT=/root/certs/prod-ca-2021.crt
+#
+# Caminho desta MÁQUINA (host), não do contêiner — o kit monta o arquivo
+# somente-leitura no caminho fixo abaixo e traduz para cada cliente:
+#   • psql/pg_dump efêmeros → -v ...:ro + PGSSLROOTCERT (libpq);
+#   • app/worker/scheduler  → overlay docker-compose.supabase-ca.yml
+#     (volume :ro + NODE_EXTRA_CA_CERTS), que dc() só acrescenta com a CA pronta;
+#   • quem lê .env direto (node, cliente Node fora do compose) → a própria
+#     chave, documentada em .env.example.
+# A verificação NUNCA é desligada. No Node (NODE_EXTRA_CA_CERTS) a CA soma à
+# trust store. Na libpq, o PGSSLROOTCERT apontando para um arquivo que existe
+# faz `sslmode=require` se comportar como verify-ca (comportamento documentado
+# da libpq): com a CA declarada, uma URL com require passa a verificar a cadeia
+# nos psql do kit — e uma CA errada faz esses psql falharem fechado.
+# Chave ausente = o kit faz o que sempre fez (o healthcheck só informa).
+#
+# O download oficial (a mesma CA da issue):
+#   curl -fsSL -o /root/certs/prod-ca-2021.crt \
+#     https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt
+CA_NO_CONTAINER="/etc/deskcomm/ca/supabase-ca.crt"
+
+# stdout: o caminho ABSOLUTO do arquivo (o docker recusa bind relativo).
+# stderr: o que falta, sempre com o nome da variável — é a frase que o
+# diagnóstico mostra quando há falha de certificado, no lugar do
+# `SELF_SIGNED_CERT_IN_CHAIN` cru que a issue reportou.
+# Quem só quer saber se está pronta: ca_do_supabase_ok.
+ca_do_supabase() {
+  local p="${SUPABASE_SSL_ROOT_CERT:-}"
+  if [ -z "$p" ]; then
+    printf '%s' "SUPABASE_SSL_ROOT_CERT não está declarada no .env — sem ela o kit não recebe a CA do Supabase. Declare SUPABASE_SSL_ROOT_CERT=/caminho/do/prod-ca-2021.crt (baixe com: curl -fsSL -o /root/certs/prod-ca-2021.crt https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt)" >&2
+    return 1
+  fi
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  if [ ! -f "$p" ] || [ ! -r "$p" ]; then
+    printf '%s' "SUPABASE_SSL_ROOT_CERT aponta para '$p', e este arquivo não existe (ou não é legível). Corrija o caminho no .env — a CA fica FORA do checkout, e o kit só monta arquivo que existe." >&2
+    return 1
+  fi
+  printf '%s' "$p"
+}
+
+# Silenciosa, para as decisões de montagem (dc/pg_container): sem CA pronta o
+# overlay de runtime NÃO entra — um bind para arquivo inexistente faria o
+# compose criar um DIRETÓRIO no lugar da CA e subir o app sem ela.
+ca_do_supabase_ok() { ca_do_supabase >/dev/null 2>&1; }
+
 # psql/pg_dump efêmeros. No modo single-server o Postgres só é alcançável pela
 # bridge privada (supabase-db), nunca por porta pública.
+#
+# Com a CA declarada, todo contêiner efêmero nasce com o arquivo montado
+# somente-leitura e PGSSLROOTCERT apontando para ele: é o que faz uma connection
+# string com `sslmode=verify-full` (ou um teste `PGSSLMODE=verify-full`)
+# validar cadeia dentro do contêiner. Idempotente por construção — cada chamada
+# monta de novo o MESMO caminho fixo, sem acumular flag nenhuma.
 pg_container() {
-  local -a rede=()
+  local -a rede=() ca=()
+  local caminho=""
   [ -n "${PSQL_DOCKER_NETWORK:-}" ] && rede=(--network "$PSQL_DOCKER_NETWORK")
-  docker run --rm ${rede[@]+"${rede[@]}"} "$@"
+  # `local caminho` na linha de cima, não em `local caminho="$(...)"`: com a
+  # atribuição junto, o status do comando substituído some dentro do `local` e
+  # este `if` aceitaria uma CA quebrada como se estivesse pronta.
+  if caminho="$(ca_do_supabase 2>/dev/null)"; then
+    ca=(-v "$caminho:$CA_NO_CONTAINER:ro" -e "PGSSLROOTCERT=$CA_NO_CONTAINER")
+  fi
+  docker run --rm ${rede[@]+"${rede[@]}"} ${ca[@]+"${ca[@]}"} "$@"
 }
 
 # ── MODO SINGLE-SERVER: o Supabase que o kit instala e opera ─────────────────
@@ -1478,6 +1562,44 @@ url_do_schema() {
 # os chamadores mexem em `auth.mfa_factors` e `private.app_secrets`, fora do
 # alcance de uma role de app com grants só em `public`.
 psql_run() { pg_container -i postgres:17-alpine psql "$(url_do_schema)" -v ON_ERROR_STOP=1 "$@"; }
+
+# ── O teste TLS do kit (#829) ────────────────────────────────────────────────
+#
+# A issue quer duas metades, e esta é a segunda: com a CA declarada o teste
+# PASSA com verificação LIGADA; sem ela, o diagnóstico diz qual variável falta.
+#
+# `sslmode` no query string vence o ambiente (libpq), então dá para exigir
+# `verify-full` reescrevendo a string SÓ no teste — a conexão normal do kit
+# segue a string original, inalterada. `sslrootcert` precisa do caminho DENTRO
+# do contêiner, que é o fixo do pg_container (CA_NO_CONTAINER).
+url_tls_verificada() {  # url_tls_verificada <connection string> → string com verificação total
+  local url="${1:?url_tls_verificada sem connection string}"
+  case "$url" in
+    *sslmode=*) url="$(printf '%s' "$url" | sed 's/sslmode=[A-Za-z0-9_-]*/sslmode=verify-full/g')" ;;
+    *) case "$url" in *\?*) url="${url}&sslmode=verify-full" ;; *) url="${url}?sslmode=verify-full" ;; esac ;;
+  esac
+  case "$url" in
+    *sslrootcert=*) url="$(printf '%s' "$url" | sed "s|sslrootcert=[^&]*|sslrootcert=${CA_NO_CONTAINER}|g")" ;;
+    *) url="${url}&sslrootcert=${CA_NO_CONTAINER}" ;;
+  esac
+  printf '%s' "$url"
+}
+
+# Roda um `select 1` com verificação TOTAL de cadeia e hostname. Vazio no
+# sucesso; ao falhar, explica — e quando a causa é a CA ausente, a frase vem
+# com o nome da variável (ca_do_supabase), nunca só o erro cru do libpq.
+tls_do_banco() {
+  local caminho=""
+  if [ -z "${SUPABASE_DB_ADMIN_URL:-}${SUPABASE_DB_URL:-}" ]; then
+    printf '%s' "Sem SUPABASE_DB_URL no .env não há connection string para testar — rode o install.sh."
+    return 1
+  fi
+  if ! caminho="$(ca_do_supabase 2>&1)"; then
+    printf '%s' "$caminho"
+    return 1
+  fi
+  pg_container postgres:17-alpine psql "$(url_tls_verificada "$(url_do_schema)")" -tAc 'select 1' >/dev/null
+}
 
 # ── Re-aplicar o baseline num banco que JÁ existe ────────────────────────────
 # Chamado pelo `update.sh` e pelo `install.sh` re-executado. Sem `ON_ERROR_STOP`,

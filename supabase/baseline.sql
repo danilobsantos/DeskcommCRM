@@ -4531,15 +4531,21 @@ GRANT ALL ON TABLE "public"."ai_budgets" TO "anon";
 GRANT ALL ON TABLE "public"."ai_budgets" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_budgets" TO "service_role";
 
+-- I/U/D/T de `anon` e `authenticated` saem junto dos grants: morando no bloco
+-- da 0160, no fim do arquivo, a chave anon recuperava a escrita a cada passada
+-- até a linha de lá — e a mantinha se a passada morresse no meio (#2255). O `T`
+-- entrou na #2258: TRUNCATE não passa pela RLS e nenhum consumidor o usa (toda
+-- escrita de `ai_budgets` é service role, medido na 0160). A decisão segue
+-- comentada no bloco da 0160.
+revoke insert, update, delete, truncate on table public.ai_budgets from authenticated, anon;
 
 
-GRANT ALL ON TABLE "public"."ai_chunks" TO "anon";
+
 GRANT ALL ON TABLE "public"."ai_chunks" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_chunks" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."ai_faq_items" TO "anon";
 GRANT ALL ON TABLE "public"."ai_faq_items" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_faq_items" TO "service_role";
 
@@ -4551,13 +4557,11 @@ GRANT ALL ON TABLE "public"."ai_invocations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."ai_knowledge_sources" TO "anon";
 GRANT ALL ON TABLE "public"."ai_knowledge_sources" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_knowledge_sources" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."ai_knowledge_versions" TO "anon";
 GRANT ALL ON TABLE "public"."ai_knowledge_versions" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_knowledge_versions" TO "service_role";
 
@@ -4588,6 +4592,14 @@ GRANT ALL ON TABLE "public"."ai_provider_credentials_safe" TO "service_role";
 GRANT SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE ON TABLE "public"."api_audit_log" TO "anon";
 GRANT SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE ON TABLE "public"."api_audit_log" TO "authenticated";
 GRANT SELECT,INSERT,REFERENCES,TRIGGER,TRUNCATE ON TABLE "public"."api_audit_log" TO "service_role";
+
+-- O bloco da 0258, no fim do arquivo, revoga U/D/T destes papéis e continua
+-- sendo a fonte do contrato (o invariante `audit-log-sob-o-default-acl-do-supabase`
+-- o extrai por rótulo). Mas o TRUNCATE que o snapshot concede às chaves anon e
+-- service_role — o único destes que a RLS não alcança — sai JÁ AQUI: entre o
+-- grant e o bloco, a chave o recuperava a cada passada, e uma passada
+-- interrompida o deixaria de pé (#2255; `service_role` entrou na #2258).
+revoke update, delete, truncate on table public.api_audit_log from public, anon, authenticated, service_role;
 
 
 
@@ -4660,6 +4672,13 @@ GRANT ALL ON TABLE "public"."event_log" TO "service_role";
 GRANT ALL ON TABLE "public"."idempotency_keys" TO "anon";
 GRANT ALL ON TABLE "public"."idempotency_keys" TO "authenticated";
 GRANT ALL ON TABLE "public"."idempotency_keys" TO "service_role";
+
+-- TRUNCATE ignora RLS; nenhum consumidor de idempotência precisa dele. A
+-- revogação acompanha os grants acima de propósito: o `update.sh` reaplica o
+-- arquivo inteiro, e deixá-la no fim do apêndice devolvia o privilégio ao `anon`
+-- a cada atualização até essa linha — e o mantinha, se a passada morresse no
+-- meio (issue #2251).
+revoke truncate on public.idempotency_keys from public, anon, authenticated;
 
 
 
@@ -10929,10 +10948,10 @@ $$;
 revoke all     on function public.fn_demanda_fecha_com_conversa() from public;
 revoke execute on function public.fn_demanda_fecha_com_conversa() from anon, authenticated;
 
-drop trigger if exists trg_demanda_fecha_com_conversa on public.conversations;
-create trigger trg_demanda_fecha_com_conversa
-  after update of status on public.conversations
-  for each row execute function public.fn_demanda_fecha_com_conversa();
+-- O gatilho desta função saiu daqui: era criado e derrubado adiante SEM
+-- recriação, e o `update.sh` reinstalava o gatilho velho a cada passada. O
+-- `drop trigger if exists` do bloco da 0222 continua, para limpar quem o
+-- recebeu de um baseline antigo.
 
 
 notify pgrst, 'reload schema';
@@ -14829,9 +14848,9 @@ notify pgrst, 'reload schema';
 -- tabela com o JWT do usuário.
 --
 -- SELECT fica: ler o próprio orçamento pelo PostgREST continua escopado pela
--- policy de SELECT da 0150. `revoke` é idempotente por natureza — este bloco
--- pode ser re-aplicado à vontade pelo `update.sh`.
-revoke insert, update, delete on table public.ai_budgets from authenticated, anon;
+-- policy de SELECT da 0150. O `revoke` de I/U/D/T acompanha os grants do
+-- snapshot desde a #2255/#2258 — aqui ele era reaplicado a cada passada, e a
+-- chave anon recuperava a escrita até esta linha.
 
 -- ---- o arquivo do webhook pode perder o corpo (migration 0163) ----
 --
@@ -17051,6 +17070,9 @@ create policy tenant_isolation_ai_chunks_write on public.ai_chunks
     or public.fn_is_platform_admin_full()
   );
 
+-- Estas quatro nunca foram para o anon: a concessão que o dump trazia saiu
+-- do texto — ela era reaplicada a cada install/update só para ser revogada
+-- aqui, e uma atualização que morresse no meio deixava o anon com ALL.
 revoke all on table public.ai_knowledge_sources  from anon;
 revoke all on table public.ai_knowledge_versions from anon;
 revoke all on table public.ai_chunks             from anon;
@@ -18584,8 +18606,6 @@ create policy idempotency_platform_creation_server_only on public.idempotency_ke
   as restrictive for all to anon, authenticated
   using (endpoint not like '/api/v1/admin/tenants:%' and not tenant_creation_trusted)
   with check (endpoint not like '/api/v1/admin/tenants:%' and not tenant_creation_trusted);
--- TRUNCATE ignora RLS; nenhum consumidor de idempotência precisa dele.
-revoke truncate on public.idempotency_keys from public, anon, authenticated;
 
 -- Criação administrativa atômica; chave existente com endpoint por ator, sem tokens.
 -- Apenas service_role: identidade/plataforma/MFA são verificadas pelo handler.
@@ -23544,13 +23564,19 @@ create trigger trg_contact_redaction_lock before update on public.contacts
 
 -- Passo 1 legado: mesma autoridade humana, apenas a escrita do contato.
 -- A retomada de leads/atividades segue na rota e usa o timestamp retornado aqui.
+--
+-- O portão abaixo usava `fn_is_platform_admin()` puro — o furo da #2196 —, e uma
+-- atualização interrompida deixaria este passo aceitando platform admin
+-- `support_readonly` até a definição final. A `_full` já existe no snapshot
+-- (linha 337); a régua `baseline-funcao-intermediaria-sem-guarda` cobra que a
+-- guarda forte não piore rumo à definição final.
 create or replace function public.fn_lgpd_anonymize_contact(p_organization_id uuid,p_contact_id uuid)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare c public.contacts; support jsonb;
 begin
  support:=public.fn_support_context();
  if auth.uid() is null or not public.fn_support_write_allowed(p_organization_id)
-  or not (public.fn_role_at_least(p_organization_id,'admin') or (public.fn_is_platform_admin() and support is null)) then
+  or not (public.fn_role_at_least(p_organization_id,'admin') or (public.fn_is_platform_admin_full() and support is null)) then
   raise exception 'contact_anonymize_forbidden' using errcode='42501';
  end if;
  if not public.fn_session_mfa_proven() then raise exception 'contact_anonymize_mfa_required' using errcode='42501';end if;
@@ -23651,11 +23677,12 @@ grant execute on function public.fn_reserve_channel_connection(uuid,uuid,text,te
 
 notify pgrst,'reload schema';
 
--- ---- nome de sessão WAHA cabe no teto do WAHA (migration 0233) ----
+-- ---- nome de sessão WAHA cabe no teto do WAHA (migrations 0233/9008, formato final na 9005) ----
 -- O `devlikeapro/waha:latest-2026.7.2` valida `name` de sessão com @MaxLength(54);
 -- `org_<32>_<32>` = 69 e todo `POST /api/sessions` de canal novo tomava 400. O
--- prefixo da org encurta para 8 (`org_<8>_<32>` = 45), alinhado com a busca de
--- canal de onboarding logo acima no corpo. Idempotente: `create or replace`.
+-- formato final (9005) gera 25 caracteres: `org_` (4) + 8 da org + `_` (1) + 12
+-- hex aleatórios — e cura as fileiras que nasceram compridas. Idempotente:
+-- `create or replace` + `update` com `where`.
 create or replace function public.fn_reserve_channel_connection(p_org uuid,p_key uuid,p_hash text,p_display_name text default null,p_onboarding boolean default false)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare receipt public.channel_connection_requests; channel public.channel_sessions; token uuid:=gen_random_uuid();
@@ -23688,7 +23715,7 @@ begin
   if channel.id is null then
    insert into public.channel_sessions(organization_id,waha_session_name,display_name,engine,webhook_path_token,
      webhook_secret_encrypted,status,last_status_change_at,consecutive_health_fails,daily_message_limit,metadata)
-   values(p_org,'org_'||left(replace(p_org::text,'-',''),8)||'_'||replace(gen_random_uuid()::text,'-',''),p_display_name,'NOWEB',
+   values(p_org,'org_'||left(replace(p_org::text,'-',''),8)||'_'||left(replace(gen_random_uuid()::text,'-',''),12),p_display_name,'NOWEB',
      replace(gen_random_uuid()::text,'-',''),'\x00'::bytea,'STARTING',now(),0,250,
      '{"ai_gate":"allowlist","ai_gate_mode":"pre_go_live","ai_test_phone_numbers":[]}'::jsonb
      || case when p_onboarding then '{"onboarding":true}'::jsonb else '{}'::jsonb end) returning * into channel;
@@ -23702,6 +23729,8 @@ begin
    and id<>receipt.id and (state='processing' and lease_until>now())) then raise exception 'connection_in_progress' using errcode='55P03';end if;
  update public.channel_connection_requests set state='processing',lease_token=token,lease_until=now()+interval '5 minutes',
   remote_created=false,updated_at=now() where organization_id=p_org and id=receipt.id;
+ -- Não ressuscita antes da pós-condição remota. Arquivado permanece invisível
+ -- até finish; falha conserva identidade e estado FAILED para reparo.
  update public.channel_sessions set status='STARTING',status_reason='connection_pending',last_status_change_at=now()
   where organization_id=p_org and id=channel.id returning * into channel;
  return jsonb_build_object('replay',false,'channel',to_jsonb(channel),'receipt_id',receipt.id,'lease_token',token);
@@ -23710,13 +23739,11 @@ $$;
 revoke all on function public.fn_reserve_channel_connection(uuid,uuid,text,text,boolean) from public,anon;
 grant execute on function public.fn_reserve_channel_connection(uuid,uuid,text,text,boolean) to authenticated;
 
--- Auto-curativo: canal WAHA com nome fora do teto que nunca pareou nem está de
--- pé recebe um nome curto. Sessão que o WAHA nunca aceitou; renomear é seguro.
+-- Auto-curativo (9005): canal com nome fora do teto recebe um nome curto.
+-- Idempotente: `update` com `where`.
 update public.channel_sessions
-   set waha_session_name = 'org_'||left(replace(organization_id::text,'-',''),8)||'_'||replace(gen_random_uuid()::text,'-',''),
-       updated_at = now()
- where provider = 'waha' and waha_session_name is not null
-   and length(waha_session_name) > 54 and phone_number is null and status <> 'WORKING';
+   set waha_session_name = 'org_' || left(replace(organization_id::text, '-', ''), 8) || '_' || left(replace(gen_random_uuid()::text, '-', ''), 12)
+ where length(waha_session_name) > 54;
 -- ---- Convites de time persistidos (migration 0238) ----
 --
 -- Racional completo no cabeçalho da migration 0238. Em uma linha: o convite
@@ -24546,7 +24573,7 @@ as $$
     'conversation.transferred',
     'whatsapp.chat_id_not_recognized',
     'whatsapp.conversation_mark_failed',
-    -- contato, lead, organização e plataforma
+    -- contato, lead, organização e plataforma ('lead.reopened' saiu na 0534: ele ganhou consumidor)
     'contact.anonymized',
     'contact.created',
     'contact.deleted',
@@ -24556,7 +24583,6 @@ as $$
     'lead.bulk_assigned',
     'lead.bulk_deleted',
     'lead.bulk_tagged',
-    'lead.reopened',
     'lead.risk_backlog_seeded',
     'lead.updated',
     'org.updated',
@@ -44691,6 +44717,110 @@ $$;
 revoke execute on function public.fn_solicitar_reenvio_conversao(uuid, uuid, text) from public, anon, authenticated;
 grant execute on function public.fn_solicitar_reenvio_conversao(uuid, uuid, text) to service_role;
 
+-- ---- a remarcação carimba quando o horário foi marcado (migration 0536) ----
+-- Issue #2230, seguimento da #2226/#2223: a régua do degrau vencido na marcação
+-- é `calendar_appointments.created_at`, e `created_at` não muda quando a reunião
+-- é REMARCADA. Reunião criada 3 dias antes e remarcada às 18:30 para as 16h do
+-- dia seguinte mantém a véspera (1440 min) "vencida desde 16:00 de hoje" e a
+-- primeira varredura depois da remarcação manda o aviso — o mesmo defeito da
+-- #2223 com outro gatilho. Medido na issue: varredura às 18:35 → `[1440]`.
+--
+-- A coluna guarda o instante em que o `starts_at` ATUAL foi gravado. As duas
+-- alternativas foram medidas antes de escolher (corpo da migration 0536):
+-- `updated_at` descartaria degraus ARMADOS (o link do Meet e cada revisão o
+-- reescrevem) e `revision_started_at` vira com status e conversa, matando a
+-- véspera de um compromisso confirmado já dentro de 24h.
+--
+-- O carimbo mora num GATILHO: a remarcação entra pela tela, pela ferramenta MCP
+-- e pela reconciliação do Google, e todas passam por `fn_appointment_change_core`
+-- — mas o gatilho é o único ponto que não depende de quem escreve lembrar de
+-- gravar. O guard é `is distinct from` porque o UPDATE do RPC SEMPRE nomeia
+-- `starts_at` no SET, mesmo quando o patch não o traz: nomear não é mudar.
+--
+-- Aditiva e idempotente; sem backfill — linha nunca remarcada fica `NULL` e o
+-- leitor (`app/api/v1/cron/agenda-reminder/route.ts`) cai em `created_at`, que é
+-- o comportamento de antes. A função entra ANTES da varredura anon de propósito.
+alter table public.calendar_appointments
+  add column if not exists starts_at_marked_at timestamptz;
+
+comment on column public.calendar_appointments.starts_at_marked_at is
+  'Instante em que o starts_at ATUAL foi gravado — a régua do degrau de lembrete vencido na marcação (#2223) depois de uma remarcação (#2230). NULL = a linha nunca foi remarcada; quem lê (a rota agenda-reminder) cai em created_at.';
+
+create or replace function public.fn_starts_at_marked_at() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.starts_at is distinct from old.starts_at then
+    new.starts_at_marked_at := clock_timestamp();
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_starts_at_marked_at() from public, anon, authenticated;
+grant execute on function public.fn_starts_at_marked_at() to service_role;
+
+drop trigger if exists trg_starts_at_marked_at on public.calendar_appointments;
+create trigger trg_starts_at_marked_at
+  before update of starts_at on public.calendar_appointments
+  for each row execute function public.fn_starts_at_marked_at();
+
+-- ---------------------------------------------------------------------------
+-- ---- a demanda do caso encerrado ganha próximo passo (migration 0505, #2035) ----
+-- A IA abre um caso por handoff e esse caso abre uma demanda (`origem='handoff'`,
+-- `agent_case_id` preenchido, `estado='em_atendimento'`). Quando o caso chega a
+-- `resolved`/`cancelled`, a demanda ligada ficava ABERTA e SEM PRÓXIMO PASSO para
+-- sempre — sem ninguém ter por onde agir (issue #2035). Aqui a garantia é da
+-- TABELA (mesma razão da 0148: o caso tem 5 escritores): a virada de status
+-- preenche o próximo passo da demanda ligada, NO ESPELHO do que `fn_service_status`
+-- faz quando a conversa vai a estado terminal — e NÃO decide o desfecho (0222:
+-- "O sistema não pode ser o único a decidir que uma demanda acabou").
+-- `escalated` não dispara; guardas `proximo_passo is null` e `fechada_em is null`
+-- = idempotente; `organization_id` sempre de `new` = tenant-safe.
+create or replace function public.fn_demanda_marca_proximo_passo_com_o_caso()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+begin
+  if new.status not in ('resolved','cancelled') then
+    -- 'awaiting_human', 'awaiting_lead' e 'escalated' não encerram o caso:
+    -- o problema do contato segue em trabalho e a demanda continua como está.
+    return new;
+  end if;
+
+  -- O MESMO gesto de `fn_service_status` quando a conversa vai a estado
+  -- terminal: o sistema não decide que a demanda acabou, ele garante que ela
+  -- não fique sem próximo passo. As duas guardas tornam a escrita inofensiva —
+  -- o `where` casando zero linhas não dispara nem o bump de `revision`.
+  update public.demandas
+     set proximo_passo = 'Revisar o caso encerrado e registrar o desfecho da demanda'
+   where organization_id = new.organization_id
+     and agent_case_id   = new.id
+     and proximo_passo   is null
+     and fechada_em      is null;
+
+  return new;
+end;
+$fn$;
+
+-- ⚠️ AS DUAS ORIGENS DE EXECUTE (doutrina, item 9): público dá a qualquer
+-- função nova ao criá-la (revoke from anon não remove) e o default ACL do
+-- baseline dá a anon (revoke from public não remove). O PostgREST não pode
+-- alcançar esta função como RPC.
+revoke execute on function public.fn_demanda_marca_proximo_passo_com_o_caso() from public, anon;
+revoke execute on function public.fn_demanda_marca_proximo_passo_com_o_caso() from authenticated;
+
+drop trigger if exists trg_demanda_marca_proximo_passo_com_o_caso on public.agent_cases;
+create trigger trg_demanda_marca_proximo_passo_com_o_caso
+  after update of status on public.agent_cases
+  for each row
+  when (old.status is distinct from new.status
+        and new.status in ('resolved','cancelled'))
+  execute function public.fn_demanda_marca_proximo_passo_com_o_caso();
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
@@ -46530,3 +46660,301 @@ update public.crm_leads l
    and a.source_module = 'canal.ingest'
    and c.channel <> 'whatsapp'
    and l.source = 'whatsapp';
+
+-- ---- tipo do envio no trace (migration 0535) ----
+-- O trace passa a dizer se a tentativa vetada era RESPOSTA ou DISPARO (#2112).
+-- NULL-ável de propósito: linha anterior à 0535 é legado e continua lida como
+-- resposta (o que o código de antes assumia); `null` passa no CHECK. CHECK de
+-- vocabulário fechado (`resposta`/`disparo`), espelho de `TipoDeEnvio` em
+-- lib/agent-engine/guardrails/before-send.ts. Idempotente.
+alter table public.before_send_traces
+  add column if not exists tipo_envio text;
+
+do $$ begin
+  if not exists (select 1 from pg_constraint
+                  where conname = 'before_send_traces_tipo_envio_check'
+                    and conrelid = 'public.before_send_traces'::regclass) then
+    alter table public.before_send_traces
+      add constraint before_send_traces_tipo_envio_check
+      check (tipo_envio in ('resposta', 'disparo'));
+  end if;
+end $$;
+
+-- ---- dedupe do job_dead da conversa atômico: índice único parcial (migration 0538) ----
+-- Só a conversa: `job_dead` de job/cron é registro de ocorrência. `status` fica
+-- fora da chave para a reabertura continuar funcionando. Cabeçalho da 0538 para
+-- o racional inteiro.
+with repetidas as (
+  select id,
+         row_number() over (
+           partition by organization_id, kind, ref_id
+           order by created_at asc, id asc
+         ) as ordem
+    from public.agent_inbox_items
+   where status = 'open'
+     and kind = 'job_dead'
+     and ref_kind = 'conversation'
+)
+update public.agent_inbox_items i
+   set status = 'resolved',
+       resolved_at = now()
+  from repetidas r
+ where i.id = r.id
+   and r.ordem > 1;
+
+create unique index if not exists agent_inbox_job_dead_conversa_aberto_unico
+  on public.agent_inbox_items (organization_id, kind, ref_id)
+  where status = 'open' and kind = 'job_dead' and ref_kind = 'conversation';
+
+-- ---- dedupe dos avisos other por título: índice único parcial (migration 0539) ----
+-- Os avisos de `kind='other'` cuja chave é o TÍTULO (sem ref própria, ou com a
+-- credencial de IA): os de grão próprio (`lead`, `agent_case`, etc.) ficam fora
+-- pelo `ref_kind`. Cabeçalho da 0539 para o racional inteiro.
+with repetidas as (
+  select id,
+         row_number() over (
+           partition by organization_id, kind, title
+           order by created_at asc, id asc
+         ) as ordem
+    from public.agent_inbox_items
+   where status = 'open'
+     and kind = 'other'
+     and (ref_kind is null or ref_kind = 'ai_provider_credential')
+)
+update public.agent_inbox_items i
+   set status = 'resolved',
+       resolved_at = now()
+  from repetidas r
+ where i.id = r.id
+   and r.ordem > 1;
+
+create unique index if not exists agent_inbox_other_por_titulo_aberto_unico
+  on public.agent_inbox_items (organization_id, kind, title)
+  where status = 'open' and kind = 'other' and (ref_kind is null or ref_kind = 'ai_provider_credential');
+
+-- ---- dedupe dos avisos de orçamento: índice único parcial (migration 0540) ----
+-- Os dois kinds de orçamento deduplicam pelo par (organização, kind) — um
+-- relata que a IA parou, o outro que o gasto passou do aviso e ela segue.
+-- Cabeçalho da 0540 para o racional inteiro.
+with repetidas as (
+  select id,
+         row_number() over (
+           partition by organization_id, kind
+           order by created_at asc, id asc
+         ) as ordem
+    from public.agent_inbox_items
+   where status = 'open'
+     and kind in ('budget_exceeded','budget_warning')
+)
+update public.agent_inbox_items i
+   set status = 'resolved',
+       resolved_at = now()
+  from repetidas r
+ where i.id = r.id
+   and r.ordem > 1;
+
+create unique index if not exists agent_inbox_budget_aberto_unico
+  on public.agent_inbox_items (organization_id, kind)
+  where status = 'open' and kind in ('budget_exceeded','budget_warning');
+
+-- ---- #2155: destino de funil/etapa da intenção do roteador (migration 0542) ----
+-- O roteador só escolhia o AGENTE; o card ficava no funil de entrada. Cada
+-- intenção ganha, opcionalmente, `pipeline_id` (funil) e `stage_id` (etapa) de
+-- destino; `NULL` = só roteia o agente, como antes. FK composta com a
+-- organização (mesmo desenho da 0394): uma intenção nunca aponta para funil ou
+-- etapa de OUTRA empresa, e `on delete set null` com coluna-lista zera só o
+-- destino quando o funil/etapa é excluído — a intenção continua roteando.
+-- Idempotente: `add column if not exists` + `do` com `duplicate_object`.
+alter table public.ai_router_members
+  add column if not exists pipeline_id uuid,
+  add column if not exists stage_id uuid;
+
+do $$ begin
+  alter table public.ai_router_members
+    add constraint ai_router_members_pipeline_mesma_org
+    foreign key (organization_id, pipeline_id)
+    references public.crm_pipelines (organization_id, id)
+    on delete set null (pipeline_id);
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table public.ai_router_members
+    add constraint ai_router_members_stage_mesma_org
+    foreign key (organization_id, stage_id)
+    references public.crm_stages (organization_id, id)
+    on delete set null (stage_id);
+exception when duplicate_object then null; end $$;
+
+comment on column public.ai_router_members.pipeline_id is
+  'Funil de DESTINO quando esta intenção casa (#2155). NULL = só roteia o agente, como antes.';
+comment on column public.ai_router_members.stage_id is
+  'Etapa de destino dentro de pipeline_id (#2155). NULL = a primeira etapa aberta do funil.';
+
+-- ---- Catálogo Gemini 3.x (migration 9007) ----
+--
+-- Remove os mortos da 2.x do menu e adiciona os lite da 3.x, com preço próprio
+-- (o teste de invariantes exige preço vindo do catálogo, não da cura). O
+-- `gemini-3.1-flash-lite` fica ATIVO: é o piso de custo da geração 3 e o
+-- substituto oficial do 2.0-flash. Deprecar, nunca apagar: a linha continua
+-- referenciada pelo histórico de custo. Idempotente: `update` com `where` +
+-- `on conflict do update` (e `deprecated_at = null` ressuscita se uma cadeia
+-- antiga repor a linha como ativa).
+update public.ai_models set deprecated_at = now()
+ where provider = 'google'
+   and model_id in ('gemini-2.0-flash',
+                    'gemini-2.5-flash',
+                    'gemini-2.5-flash-lite',
+                    'gemini-2.5-pro')
+   and deprecated_at is null;
+
+insert into public.ai_models
+  (provider, model_id, display_name, description, context_window,
+   input_price_per_million_cents, output_price_per_million_cents,
+   supports_tools, supports_vision, released_at)
+values
+  ('google', 'gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite',
+   'Substituto oficial do 2.0-flash; o piso de custo da geração 3 para alto volume.',
+   1000000, 25, 150, true, true, '2026-05-07'),
+  ('google', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite',
+   'Alto volume e baixa latência na geração 3.',
+   1000000, 15, 125, true, true, '2026-07-21')
+on conflict (provider, model_id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  context_window = excluded.context_window,
+  input_price_per_million_cents = excluded.input_price_per_million_cents,
+  output_price_per_million_cents = excluded.output_price_per_million_cents,
+  supports_tools = excluded.supports_tools,
+  supports_vision = excluded.supports_vision,
+  released_at = excluded.released_at,
+  deprecated_at = null;
+
+insert into public.ai_pricing
+  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
+values
+  ('gemini-3.1-flash-lite', 25, 150, 'catálogo 9007'),
+  ('gemini-3.5-flash-lite', 15, 125, 'catálogo 9007 — $0,15/$1,25 assumido, fontes divergem ($0,30/$2,50 em outras); rever')
+on conflict (model) do update set
+  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
+  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
+  notes = excluded.notes,
+  superseded_at = null;
+
+-- ---- Profissionais externos da agenda (migration 9003) ----
+--
+-- O `providers` (dentista sem login) existe como registro de domínio, com
+-- jornada própria; o compromisso passa a poder pertencer OU a um atendente OU
+-- a um profissional, nunca aos dois. Transcrição fiel da 9003 §§1–4 (sem
+-- `grant`, como na migration — paridade com a cadeia, não melhoria).
+-- Idempotente: `if not exists` / `drop ... if exists` em tudo.
+create table if not exists public.providers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  specialties text[] not null default '{}',
+  active boolean not null default true,
+  schedule jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_providers_org on public.providers (organization_id);
+create index if not exists idx_providers_specialties on public.providers using gin (specialties);
+
+comment on table public.providers is
+  'Profissional EXTERNO (dentista, corretor, consultor) sem conta no sistema. A jornada dele mora em `schedule` (mesmo molde de attendant_availability.schedule); quem gerencia é o atendente. Um compromisso de `calendar_appointments` pertence ou a um profissional (provider_id) ou a um usuário (owner_user_id), nunca aos dois.';
+comment on column public.providers.specialties is
+  'Especialidades do profissional. Vocabulário aberto, sem CHECK — cada nicho tem o seu.';
+comment on column public.providers.schedule is
+  'Jornada semanal tz-aware, no molde de `availabilityScheduleSchema` ({timezone, windows[{dow,start,end}]}). Vazio (default `{}`) = nada publicado ⇒ zero horário, igual a attendant_availability para a agenda.';
+
+alter table public.providers enable row level security;
+
+drop policy if exists providers_select on public.providers;
+create policy providers_select on public.providers
+  for select using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids()))
+  );
+
+drop policy if exists providers_write on public.providers;
+create policy providers_write on public.providers
+  using (
+    public.fn_is_platform_admin_full()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  )
+  with check (
+    public.fn_is_platform_admin_full()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+revoke all on public.providers from anon;
+
+alter table public.calendar_appointments
+  add column if not exists provider_id uuid references public.providers(id) on delete set null;
+
+alter table public.calendar_appointments
+  drop constraint if exists calendar_appointments_dono_unico;
+alter table public.calendar_appointments
+  add constraint calendar_appointments_dono_unico
+  check (owner_user_id is null or provider_id is null);
+
+comment on column public.calendar_appointments.provider_id is
+  'O PROFISSIONAL EXTERNO dono deste compromisso, quando não há usuário. Mutuamente exclusivo com owner_user_id (constraint calendar_appointments_dono_unico).';
+
+alter table public.calendar_availability_exceptions
+  alter column user_id drop not null;
+
+alter table public.calendar_availability_exceptions
+  add column if not exists provider_id uuid references public.providers(id) on delete cascade;
+
+alter table public.calendar_availability_exceptions
+  drop constraint if exists calendar_exceptions_dono_unico;
+alter table public.calendar_availability_exceptions
+  add constraint calendar_exceptions_dono_unico
+  check (user_id is null or provider_id is null);
+
+create unique index if not exists calendar_exceptions_provider_dia_faixa_key
+  on public.calendar_availability_exceptions (organization_id, provider_id, exception_date, start_minute)
+  where provider_id is not null;
+
+comment on column public.calendar_availability_exceptions.provider_id is
+  'O profissional a quem a exceção se aplica, quando não é um usuário. Mutuamente exclusivo com user_id.';
+
+drop trigger if exists trg_providers_updated_at on public.providers;
+create trigger trg_providers_updated_at
+  before update on public.providers
+  for each row execute function public.fn_set_updated_at();
+
+-- As travas do modo somente leitura do suporte (migration 0274, aplicadas por
+-- cada migration que cria tabela gravável — ver 0279, 0464): a 9003 nasceu
+-- antes delas. A chamada é idempotente (a função recria por `drop ... if
+-- exists`), e o espelho vive na migration 9012.
+do $f$ begin perform public.fn_aplicar_travas_de_suporte(); end $f$;
+
+-- ---- Logo dual da instalação (migration 9001) ----
+--
+-- A coluna `logo_path_dark` (tema escuro) com a mesma trava de formato da
+-- clara. Transcrição fiel da 9001 (coluna + cura + constraint); as funções
+-- `fn_definir_*` já estão no apêndice. Idempotente: `if not exists` + cura com
+-- `where` + `drop constraint if exists`.
+alter table public.platform_branding
+  add column if not exists logo_path_dark text;
+
+comment on column public.platform_branding.logo_path_dark is
+  'Caminho do arquivo de logo para o tema ESCURO em storage/brand-logos, sempre platform/<uuid>.<png|jpg>. NULL = usa logo_path (light) nos dois temas. Escrito por app/api/v1/marca/logo/route.ts com variant=dark.';
+
+update public.platform_branding
+   set logo_path_dark = null
+ where logo_path_dark is not null
+   and logo_path_dark !~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$';
+
+alter table public.platform_branding
+  drop constraint if exists platform_branding_logo_path_dark;
+alter table public.platform_branding
+  add constraint platform_branding_logo_path_dark check (
+    logo_path_dark is null
+    or logo_path_dark ~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$'
+  );

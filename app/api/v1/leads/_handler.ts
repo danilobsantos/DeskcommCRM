@@ -16,6 +16,7 @@ import { resolveOwnerPatch, type OwnerPatch, type OwnerPatchInput } from "@/lib/
 import { emitLeadActivity, stageChangeReason } from "@/lib/leads/activity-emitter";
 import { listaLegivel } from "@/lib/leads/activity-vocabulary";
 import { camposAlterados } from "@/lib/leads/campos-alterados";
+import { valoresAntesDepois } from "@/lib/leads/valores-audit";
 import { RECUSA_DE_TROCA_DE_FUNIL } from "@/lib/leads/clonar-para-funil";
 import {
   RECUSA_RETOMADA_ETAPA_INDISPONIVEL,
@@ -247,6 +248,8 @@ export interface ListLeadsQuery {
   lost_reason?: string;
   /** Categoria do motivo de perda (issue #1537), resolvida no funil. */
   lost_reason_category?: string;
+  /** Só os negócios deste contato — o escopo do turno do agente, no WHERE, antes do limite. */
+  contact_id?: string;
   limit?: number;
   cursor?: string | null;
 }
@@ -300,6 +303,7 @@ export async function listLeadsHandler(
   if (q.stage_id) query = query.eq("stage_id", q.stage_id);
   if (q.status) query = query.eq("status", q.status);
   if (q.owner_user_id) query = query.eq("owner_user_id", q.owner_user_id);
+  if (q.contact_id) query = query.eq("contact_id", q.contact_id);
   // #1537 — perda por motivo e por categoria. A categoria NÃO é coluna: ela
   // sai do `settings.lost_reasons` do funil, então o caminho é achar os rótulos
   // da categoria e filtrar por eles. Só os PERDIDOS têm motivo que valha; um
@@ -795,14 +799,20 @@ export async function updateLeadHandler(
     // reason é RENDERIZADO NA TELA e vai junto em captura, exportação e ticket
     // de suporte; o §9 proíbe PII nova em log, reason ou evidence.
     //
-    // O valor anterior NÃO é guardado em lugar nenhum — nem aqui, nem no
-    // `api_audit_log`, que registra `lead.updated` com só `{ fields }` (os
-    // NOMES dos campos, nunca o antes-e-depois). Pôr lá o valor do título ou
-    // de `custom_fields` também seria PII fora do alcance da proteção: o audit
-    // é append-only e a anonimização da LGPD (lib/lgpd/cascata.ts) não o
-    // alcança. Guardar o antes-e-depois só de campos tipados sem PII é
-    // pergunta aberta na #1755, sem decisão. Hoje, quem precisa do valor
-    // anterior não tem onde buscar.
+    // O VALOR DO TÍTULO, DA DESCRIÇÃO, DAS TAGS E DE `custom_fields` NÃO é
+    // guardado em lugar nenhum — nem aqui, nem no `api_audit_log`. Pôr essa
+    // PII lá ficaria fora do alcance da proteção: o audit é append-only
+    // (migration 0258) e a anonimização da LGPD (lib/lgpd/cascata.ts) não o
+    // reescreve — a cascata só insere a linha `lgpd.redact_executed`
+    // (migration 0019, passo 8). O que sobra é o expurgo por retenção (L-10:
+    // 5 anos, migration 0167).
+    //
+    // ANTES-E-DEPOIS SÓ DOS CAMPOS TIPADOS SEM PII vai para o audit desde a
+    // #1755: `value_cents`, `currency`, `owner_user_id`, `owner_agent_id` e
+    // `expected_close_date`, pela lista branca de `lib/leads/valores-audit.ts`
+    // — o mesmo par `{ antes, depois }` que `ai.budget_limit_changed` já grava
+    // e a ida e volta que `lead.moved` já grava em
+    // `from_stage_id`/`to_stage_id`.
     //
     // NÃO confunda com a atividade de autorização vencida (wave 4), que mostra
     // antes-e-depois DE PROPÓSITO: lá o texto é a proposta do PRÓPRIO AGENTE,
@@ -871,6 +881,18 @@ export async function updateLeadHandler(
     .eq("id", leadId)
     .maybeSingle();
 
+  // ANTES E DEPOIS DOS CAMPOS TIPADOS, NÃO DO TEXTO (issue #1755).
+  //
+  // A lista branca mora em lib/leads/valores-audit.ts, junto com a medição de
+  // por que é branca (audit append-only que a cascata da LGPD não reescreve).
+  // Título, descrição, tags e `custom_fields` ficam de fora por construção —
+  // `fields`, com os NOMES, continua dizendo que eles mudaram.
+  const valores = valoresAntesDepois(
+    camposDaAuditoria,
+    existing as Record<string, unknown>,
+    fields,
+  );
+
   await audit({
     action: "lead.updated",
     actorUserId: a.actorUserId,
@@ -878,7 +900,12 @@ export async function updateLeadHandler(
     resourceType: "crm_lead",
     resourceId: leadId,
     requestId: ctx.requestId,
-    metadata: { ...a.metadataActor, fields },
+    metadata: {
+      ...a.metadataActor,
+      fields,
+      // Omitido quando vazio: editar SÓ texto grava a mesma linha de antes.
+      ...(Object.keys(valores).length > 0 ? { valores } : {}),
+    },
   });
 
   return (fresh ?? updated) as Record<string, unknown>;
