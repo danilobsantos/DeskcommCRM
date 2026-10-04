@@ -23677,11 +23677,12 @@ grant execute on function public.fn_reserve_channel_connection(uuid,uuid,text,te
 
 notify pgrst,'reload schema';
 
--- ---- nome de sessão WAHA cabe no teto do WAHA (migration 0233) ----
+-- ---- nome de sessão WAHA cabe no teto do WAHA (migrations 0233/9008, formato final na 9005) ----
 -- O `devlikeapro/waha:latest-2026.7.2` valida `name` de sessão com @MaxLength(54);
 -- `org_<32>_<32>` = 69 e todo `POST /api/sessions` de canal novo tomava 400. O
--- prefixo da org encurta para 8 (`org_<8>_<32>` = 45), alinhado com a busca de
--- canal de onboarding logo acima no corpo. Idempotente: `create or replace`.
+-- formato final (9005) gera 25 caracteres: `org_` (4) + 8 da org + `_` (1) + 12
+-- hex aleatórios — e cura as fileiras que nasceram compridas. Idempotente:
+-- `create or replace` + `update` com `where`.
 create or replace function public.fn_reserve_channel_connection(p_org uuid,p_key uuid,p_hash text,p_display_name text default null,p_onboarding boolean default false)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare receipt public.channel_connection_requests; channel public.channel_sessions; token uuid:=gen_random_uuid();
@@ -23714,7 +23715,7 @@ begin
   if channel.id is null then
    insert into public.channel_sessions(organization_id,waha_session_name,display_name,engine,webhook_path_token,
      webhook_secret_encrypted,status,last_status_change_at,consecutive_health_fails,daily_message_limit,metadata)
-   values(p_org,'org_'||left(replace(p_org::text,'-',''),8)||'_'||replace(gen_random_uuid()::text,'-',''),p_display_name,'NOWEB',
+   values(p_org,'org_'||left(replace(p_org::text,'-',''),8)||'_'||left(replace(gen_random_uuid()::text,'-',''),12),p_display_name,'NOWEB',
      replace(gen_random_uuid()::text,'-',''),'\x00'::bytea,'STARTING',now(),0,250,
      '{"ai_gate":"allowlist","ai_gate_mode":"pre_go_live","ai_test_phone_numbers":[]}'::jsonb
      || case when p_onboarding then '{"onboarding":true}'::jsonb else '{}'::jsonb end) returning * into channel;
@@ -23728,6 +23729,8 @@ begin
    and id<>receipt.id and (state='processing' and lease_until>now())) then raise exception 'connection_in_progress' using errcode='55P03';end if;
  update public.channel_connection_requests set state='processing',lease_token=token,lease_until=now()+interval '5 minutes',
   remote_created=false,updated_at=now() where organization_id=p_org and id=receipt.id;
+ -- Não ressuscita antes da pós-condição remota. Arquivado permanece invisível
+ -- até finish; falha conserva identidade e estado FAILED para reparo.
  update public.channel_sessions set status='STARTING',status_reason='connection_pending',last_status_change_at=now()
   where organization_id=p_org and id=channel.id returning * into channel;
  return jsonb_build_object('replay',false,'channel',to_jsonb(channel),'receipt_id',receipt.id,'lease_token',token);
@@ -23736,13 +23739,11 @@ $$;
 revoke all on function public.fn_reserve_channel_connection(uuid,uuid,text,text,boolean) from public,anon;
 grant execute on function public.fn_reserve_channel_connection(uuid,uuid,text,text,boolean) to authenticated;
 
--- Auto-curativo: canal WAHA com nome fora do teto que nunca pareou nem está de
--- pé recebe um nome curto. Sessão que o WAHA nunca aceitou; renomear é seguro.
+-- Auto-curativo (9005): canal com nome fora do teto recebe um nome curto.
+-- Idempotente: `update` com `where`.
 update public.channel_sessions
-   set waha_session_name = 'org_'||left(replace(organization_id::text,'-',''),8)||'_'||replace(gen_random_uuid()::text,'-',''),
-       updated_at = now()
- where provider = 'waha' and waha_session_name is not null
-   and length(waha_session_name) > 54 and phone_number is null and status <> 'WORKING';
+   set waha_session_name = 'org_' || left(replace(organization_id::text, '-', ''), 8) || '_' || left(replace(gen_random_uuid()::text, '-', ''), 12)
+ where length(waha_session_name) > 54;
 -- ---- Convites de time persistidos (migration 0238) ----
 --
 -- Racional completo no cabeçalho da migration 0238. Em uma linha: o convite
@@ -46788,3 +46789,172 @@ comment on column public.ai_router_members.pipeline_id is
   'Funil de DESTINO quando esta intenção casa (#2155). NULL = só roteia o agente, como antes.';
 comment on column public.ai_router_members.stage_id is
   'Etapa de destino dentro de pipeline_id (#2155). NULL = a primeira etapa aberta do funil.';
+
+-- ---- Catálogo Gemini 3.x (migration 9007) ----
+--
+-- Remove os mortos da 2.x do menu e adiciona os lite da 3.x, com preço próprio
+-- (o teste de invariantes exige preço vindo do catálogo, não da cura). O
+-- `gemini-3.1-flash-lite` fica ATIVO: é o piso de custo da geração 3 e o
+-- substituto oficial do 2.0-flash. Deprecar, nunca apagar: a linha continua
+-- referenciada pelo histórico de custo. Idempotente: `update` com `where` +
+-- `on conflict do update` (e `deprecated_at = null` ressuscita se uma cadeia
+-- antiga repor a linha como ativa).
+update public.ai_models set deprecated_at = now()
+ where provider = 'google'
+   and model_id in ('gemini-2.0-flash',
+                    'gemini-2.5-flash',
+                    'gemini-2.5-flash-lite',
+                    'gemini-2.5-pro')
+   and deprecated_at is null;
+
+insert into public.ai_models
+  (provider, model_id, display_name, description, context_window,
+   input_price_per_million_cents, output_price_per_million_cents,
+   supports_tools, supports_vision, released_at)
+values
+  ('google', 'gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite',
+   'Substituto oficial do 2.0-flash; o piso de custo da geração 3 para alto volume.',
+   1000000, 25, 150, true, true, '2026-05-07'),
+  ('google', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite',
+   'Alto volume e baixa latência na geração 3.',
+   1000000, 15, 125, true, true, '2026-07-21')
+on conflict (provider, model_id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  context_window = excluded.context_window,
+  input_price_per_million_cents = excluded.input_price_per_million_cents,
+  output_price_per_million_cents = excluded.output_price_per_million_cents,
+  supports_tools = excluded.supports_tools,
+  supports_vision = excluded.supports_vision,
+  released_at = excluded.released_at,
+  deprecated_at = null;
+
+insert into public.ai_pricing
+  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
+values
+  ('gemini-3.1-flash-lite', 25, 150, 'catálogo 9007'),
+  ('gemini-3.5-flash-lite', 15, 125, 'catálogo 9007 — $0,15/$1,25 assumido, fontes divergem ($0,30/$2,50 em outras); rever')
+on conflict (model) do update set
+  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
+  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
+  notes = excluded.notes,
+  superseded_at = null;
+
+-- ---- Profissionais externos da agenda (migration 9003) ----
+--
+-- O `providers` (dentista sem login) existe como registro de domínio, com
+-- jornada própria; o compromisso passa a poder pertencer OU a um atendente OU
+-- a um profissional, nunca aos dois. Transcrição fiel da 9003 §§1–4 (sem
+-- `grant`, como na migration — paridade com a cadeia, não melhoria).
+-- Idempotente: `if not exists` / `drop ... if exists` em tudo.
+create table if not exists public.providers (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  specialties text[] not null default '{}',
+  active boolean not null default true,
+  schedule jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_providers_org on public.providers (organization_id);
+create index if not exists idx_providers_specialties on public.providers using gin (specialties);
+
+comment on table public.providers is
+  'Profissional EXTERNO (dentista, corretor, consultor) sem conta no sistema. A jornada dele mora em `schedule` (mesmo molde de attendant_availability.schedule); quem gerencia é o atendente. Um compromisso de `calendar_appointments` pertence ou a um profissional (provider_id) ou a um usuário (owner_user_id), nunca aos dois.';
+comment on column public.providers.specialties is
+  'Especialidades do profissional. Vocabulário aberto, sem CHECK — cada nicho tem o seu.';
+comment on column public.providers.schedule is
+  'Jornada semanal tz-aware, no molde de `availabilityScheduleSchema` ({timezone, windows[{dow,start,end}]}). Vazio (default `{}`) = nada publicado ⇒ zero horário, igual a attendant_availability para a agenda.';
+
+alter table public.providers enable row level security;
+
+drop policy if exists providers_select on public.providers;
+create policy providers_select on public.providers
+  for select using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids()))
+  );
+
+drop policy if exists providers_write on public.providers;
+create policy providers_write on public.providers
+  using (
+    public.fn_is_platform_admin_full()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  )
+  with check (
+    public.fn_is_platform_admin_full()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+revoke all on public.providers from anon;
+
+alter table public.calendar_appointments
+  add column if not exists provider_id uuid references public.providers(id) on delete set null;
+
+alter table public.calendar_appointments
+  drop constraint if exists calendar_appointments_dono_unico;
+alter table public.calendar_appointments
+  add constraint calendar_appointments_dono_unico
+  check (owner_user_id is null or provider_id is null);
+
+comment on column public.calendar_appointments.provider_id is
+  'O PROFISSIONAL EXTERNO dono deste compromisso, quando não há usuário. Mutuamente exclusivo com owner_user_id (constraint calendar_appointments_dono_unico).';
+
+alter table public.calendar_availability_exceptions
+  alter column user_id drop not null;
+
+alter table public.calendar_availability_exceptions
+  add column if not exists provider_id uuid references public.providers(id) on delete cascade;
+
+alter table public.calendar_availability_exceptions
+  drop constraint if exists calendar_exceptions_dono_unico;
+alter table public.calendar_availability_exceptions
+  add constraint calendar_exceptions_dono_unico
+  check (user_id is null or provider_id is null);
+
+create unique index if not exists calendar_exceptions_provider_dia_faixa_key
+  on public.calendar_availability_exceptions (organization_id, provider_id, exception_date, start_minute)
+  where provider_id is not null;
+
+comment on column public.calendar_availability_exceptions.provider_id is
+  'O profissional a quem a exceção se aplica, quando não é um usuário. Mutuamente exclusivo com user_id.';
+
+drop trigger if exists trg_providers_updated_at on public.providers;
+create trigger trg_providers_updated_at
+  before update on public.providers
+  for each row execute function public.fn_set_updated_at();
+
+-- As travas do modo somente leitura do suporte (migration 0274, aplicadas por
+-- cada migration que cria tabela gravável — ver 0279, 0464): a 9003 nasceu
+-- antes delas. A chamada é idempotente (a função recria por `drop ... if
+-- exists`), e o espelho vive na migration 9012.
+do $f$ begin perform public.fn_aplicar_travas_de_suporte(); end $f$;
+
+-- ---- Logo dual da instalação (migration 9001) ----
+--
+-- A coluna `logo_path_dark` (tema escuro) com a mesma trava de formato da
+-- clara. Transcrição fiel da 9001 (coluna + cura + constraint); as funções
+-- `fn_definir_*` já estão no apêndice. Idempotente: `if not exists` + cura com
+-- `where` + `drop constraint if exists`.
+alter table public.platform_branding
+  add column if not exists logo_path_dark text;
+
+comment on column public.platform_branding.logo_path_dark is
+  'Caminho do arquivo de logo para o tema ESCURO em storage/brand-logos, sempre platform/<uuid>.<png|jpg>. NULL = usa logo_path (light) nos dois temas. Escrito por app/api/v1/marca/logo/route.ts com variant=dark.';
+
+update public.platform_branding
+   set logo_path_dark = null
+ where logo_path_dark is not null
+   and logo_path_dark !~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$';
+
+alter table public.platform_branding
+  drop constraint if exists platform_branding_logo_path_dark;
+alter table public.platform_branding
+  add constraint platform_branding_logo_path_dark check (
+    logo_path_dark is null
+    or logo_path_dark ~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$'
+  );
