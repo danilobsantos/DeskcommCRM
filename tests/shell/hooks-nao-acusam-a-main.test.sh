@@ -384,10 +384,10 @@ linhas_do_diff() { diff <(git -C "$1" show "HEAD:$2") "$1/$2" | grep '^[<>]'; }
 # CASO COMENTARIO-LINHA · só o comentário mudou (é o caso da issue, na forma mínima)
 cl="$TMP/comentario-linha"; preparar "$cl" "$principal" "$BASE_DA_BRANCH"
 inv1324 > "$cl/$INV"; commitar "$cl" "o invariante com o comentario antigo"
-sed -i 's/renumerada para 0020/renumerada para 0024/' "$cl/$INV"; git -C "$cl" add "$INV"
+sed -i '' 's/renumerada para 0020/renumerada para 0024/' "$cl/$INV"; git -C "$cl" add "$INV"
 if [ -z "$(git -C "$cl" diff --cached --name-only)" ]; then falha 'COMENTARIO-LINHA: a premissa — a mudança está ENCENADA no índice' 'nada encenado: o caso não mede o M'
 else ok "COMENTARIO-LINHA: a premissa — a mudança está ENCENADA no índice (status M)"; fi
-if [ "$(linhas_do_diff "$cl" "$INV" | grep -c '^[<>] *//')" = "2" ] && [ "$(linhas_do_diff "$cl" "$INV" | wc -l)" = "2" ]; then
+if [ "$(linhas_do_diff "$cl" "$INV" | grep -c '^[<>] *//')" = "2" ] && [ "$(linhas_do_diff "$cl" "$INV" | wc -l | tr -d ' ')" = "2" ]; then
   ok "COMENTARIO-LINHA: a premissa — as DUAS linhas que o diff bruto mexe são de COMENTÁRIO"
 else falha "COMENTARIO-LINHA: as duas linhas do diff são de comentário" "diff: $(linhas_do_diff "$cl" "$INV")"; fi
 r=$(rodar "$cl" freeze-invariants.sh)
@@ -406,7 +406,7 @@ select 1 as um;`;
 it("MARCADOR-BASE-A", () => {});
 TS
 commitar "$cb" "o invariante com os comentarios antigos"
-sed -i -e 's/em 18\/09\/2026/em 19\/09\/2026/' -e 's/^-- 0012 rls/-- 0024 rls/' "$cb/$INV"; git -C "$cb" add "$INV"
+sed -i '' -e 's/em 18\/09\/2026/em 19\/09\/2026/' -e 's/^-- 0012 rls/-- 0024 rls/' "$cb/$INV"; git -C "$cb" add "$INV"
 if [ -n "$(git -C "$cb" diff --cached --name-only)" ]; then ok "COMENTARIO-BLOCO: a premissa — a mudança está ENCENADA (bloco + comentário de SQL)"
 else falha 'COMENTARIO-BLOCO: a premissa — a mudança está encenada' 'nada encenado: o sed não pegou'; fi
 r=$(rodar "$cb" freeze-invariants.sh)
@@ -417,7 +417,7 @@ assert_exit "$(exit_de "$r")" 0 'COMENTARIO-BLOCO: bloco /* */ e -- dentro de te
 # teste é exatamente o que o invariante vigia.
 ar="$TMP/assercao-real"; preparar "$ar" "$principal" "$BASE_DA_BRANCH"
 inv1324 > "$ar/$INV"; commitar "$ar" "o invariante intacto"
-sed -i 's/esperado = 2/esperado = 3/; s/toBe(2)/toBe(3)/' "$ar/$INV"; git -C "$ar" add "$INV"
+sed -i '' 's/esperado = 2/esperado = 3/; s/toBe(2)/toBe(3)/' "$ar/$INV"; git -C "$ar" add "$INV"
 if [ "$(linhas_do_diff "$ar" "$INV" | grep -c 'toBe(3)')" -ge 1 ] && [ "$(linhas_do_diff "$ar" "$INV" | grep -c '^[<>] *//')" = "0" ] && [ -n "$(git -C "$ar" diff --cached --name-only)" ]; then
   ok "ASSERCAO-REAL: a premissa — a mudança toca o CORPO do teste (não o comentário)"
 else falha "ASSERCAO-REAL: a mudança toca o corpo do teste" "diff: $(linhas_do_diff "$ar" "$INV")"; fi
@@ -435,7 +435,7 @@ const baseUrl = "http://waha:3000";
 it("MARCADOR-BASE-A", () => { expect(baseUrl).toBe("http://waha:3000"); });
 TS
 commitar "$st" "o invariante com a URL antiga"
-sed -i 's/waha:3000/waha:4000/g' "$st/$INV"; git -C "$st" add "$INV"
+sed -i '' 's/waha:3000/waha:4000/g' "$st/$INV"; git -C "$st" add "$INV"
 if [ "$(git -C "$st" show "HEAD:$INV" | sed 's,//.*,,' )" = "$(sed 's,//.*,,' "$st/$INV")" ]; then
   ok 'STRING: a premissa — um removedor ingênuo de // IGUALARIA os dois lados (o falso liberado existe)'
 else falha "STRING: a premissa do removedor ingênuo" "os lados já diferiam sob o filtro ingênuo: o caso não mede a armadilha"; fi
@@ -446,7 +446,7 @@ assert_contains "$(saida_de "$r")" "$INV" "STRING: e a mensagem nomeia o invaria
 # CASO CARONA · comentário E asserção no MESMO commit: o comentário não leva carona
 cr2="$TMP/carona"; preparar "$cr2" "$principal" "$BASE_DA_BRANCH"
 inv1324 > "$cr2/$INV"; commitar "$cr2" "o invariante intacto"
-sed -i 's/renumerada para 0020/renumerada para 0024/; s/esperado = 2/esperado = 3/' "$cr2/$INV"; git -C "$cr2" add "$INV"
+sed -i '' 's/renumerada para 0020/renumerada para 0024/; s/esperado = 2/esperado = 3/' "$cr2/$INV"; git -C "$cr2" add "$INV"
 r=$(rodar "$cr2" freeze-invariants.sh)
 assert_exit "$(exit_de "$r")" 1 "CARONA: renumerar o comentário NÃO libera a asserção que veio junto"
 assert_contains "$(saida_de "$r")" "$INV" "CARONA: e a mensagem nomeia o invariante"
@@ -460,7 +460,7 @@ import { it } from "vitest";
 it.fails("MARCADOR-BASE-A", () => {});
 TS
 commitar "$ff" "o invariante com o test.fails"
-sed -i 's/it\.fails(/it(/' "$ff/$INV"; git -C "$ff" add "$INV"
+sed -i '' 's/it\.fails(/it(/' "$ff/$INV"; git -C "$ff" add "$INV"
 r=$(rodar "$ff" freeze-invariants.sh)
 assert_exit "$(exit_de "$r")" 1 "FLIP-FAILS: o flip documentado SEGUE BLOQUEADO sem a válvula"
 saida=$( cd "$ff" && DESKCOMM_GOV_INVARIANTS_EDIT=1 bash loop/hooks/freeze-invariants.sh 2>&1 ); rc=$?
@@ -471,7 +471,7 @@ assert_exit "$rc" 0 "FLIP-FAILS: e com DESKCOMM_GOV_INVARIANTS_EDIT=1 segue libe
 # merge — e que reabriria aqui por outro caminho).
 cm="$TMP/comentario-modo"; preparar "$cm" "$principal" "$BASE_DA_BRANCH"
 inv1324 > "$cm/$INV"; commitar "$cm" "o invariante com o comentario antigo"
-sed -i 's/renumerada para 0020/renumerada para 0024/' "$cm/$INV"
+sed -i '' 's/renumerada para 0020/renumerada para 0024/' "$cm/$INV"
 chmod +x "$cm/$INV"; git -C "$cm" add "$INV"
 if git -C "$cm" ls-files --stage "$INV" | grep -q '^100755' \
    && [ "$(git -C "$cm" ls-tree HEAD -- "$INV" | awk '{print $1}')" = "100644" ] \
