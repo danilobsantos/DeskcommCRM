@@ -723,6 +723,7 @@ jobs:
         agenda-marcar-pela-tela.spec.ts
         agenda-profissionais-externos.spec.ts
         agenda-remarcar-e-cancelar.spec.ts
+        agenda-editar-compromisso.spec.ts
         agenda-tipos-de-agendamento.spec.ts
         cliente-pela-agenda.spec.ts
         agenda-dia-desenhado-na-virada-do-mes.spec.ts

@@ -12064,6 +12064,36 @@ export const DICIONARIO: Traducoes = {
   "Agendamento cancelado.": { es: "Cita cancelada." },
   "Horário confirmado.": { es: "Horario confirmado." },
   "Confirmar horário": { es: "Confirmar horario" },
+  // EDIÇÃO DE COMPROMISSO (9015) + Google do profissional (9013/9014, que
+  // entraram sem as linhas e deixavam o guarda vermelho).
+  "Editar compromisso": { es: "Editar cita" },
+  "Carregando tipos…": { es: "Cargando tipos…" },
+  "Não foi possível carregar os tipos. Tente novamente.": {
+    es: "No se pudieron cargar los tipos. Inténtalo de nuevo.",
+  },
+  "Como no Google Agenda: o que vai para o calendário": {
+    es: "Como en Google Calendar: lo que va al calendario",
+  },
+  "O que mudar aqui é atualizado na agenda do Google.": {
+    es: "Lo que cambies aquí se actualiza en la agenda de Google.",
+  },
+  "Confirmar troca de paciente": { es: "Confirmar cambio de paciente" },
+  "Trocar o paciente deste compromisso? O convite na agenda do Google será atualizado: o paciente anterior sai e o novo entra.": {
+    es: "¿Cambiar el paciente de esta cita? La invitación en la agenda de Google se actualizará: el paciente anterior sale y el nuevo entra.",
+  },
+  "Confirmar troca": { es: "Confirmar cambio" },
+  "Fechar edição": { es: "Cerrar edición" },
+  "Google": { es: "Google" },
+  "Google por profissional ligado": { es: "Google por profesional activado" },
+  "Google por profissional desligado": { es: "Google por profesional desactivado" },
+  "Google por profissional (conta central)": { es: "Google por profesional (cuenta central)" },
+  "Liga ou desliga o vínculo de cada profissional com uma agenda do Google da conta central da clínica. Só vale com Profissionais externos ligado. Desligado, a agenda volta a jornada + exceções e os vínculos ficam guardados para a reativação.": {
+    es: "Activa o desactiva el vínculo de cada profesional con una agenda de Google de la cuenta central de la clínica. Solo vale con Profesionales externos activado. Desactivado, la agenda vuelve a jornada + excepciones y los vínculos quedan guardados para la reactivación.",
+  },
+  "Agenda do Google ligada": { es: "Agenda de Google activada" },
+  "Agenda do Google desligada": { es: "Agenda de Google desactivada" },
+  "Agenda do Google deste profissional": { es: "Agenda de Google de este profesional" },
+  "Ligar agenda do Google…": { es: "Conectar agenda de Google…" },
   "Marcado como realizado.": { es: "Cita marcada como realizada." },
   "Marcado como falta — o horário volta a ficar livre.": { es: "Cita marcada como inasistencia. El horario vuelve a estar disponible." },
   "Mídia": { es: "Multimedia" },

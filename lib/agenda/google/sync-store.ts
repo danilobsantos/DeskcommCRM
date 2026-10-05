@@ -31,6 +31,12 @@ export const appointmentSnapshotSchema = z.object({
   location_details: z.string().nullable(),
   guest_email: z.string().nullable(),
   revision: z.string(),
+  // EDIÇÃO DE COMPROMISSO (9015): o par que prova TROCA DE PACIENTE no
+  // executor — `revision_started_at` posterior ao último sync com `local >
+  // synced` e projeções iguais. Vêm de graça no `to_jsonb(a)` do
+  // `fn_google_appointment`; o schema só precisa deixá-los passar.
+  revision_started_at: z.string(),
+  google_synced_at: z.string().nullable(),
   google_local_revision: z.string(),
   google_synced_local_revision: z.string(),
   google_connection_id: z.uuid().nullable(),

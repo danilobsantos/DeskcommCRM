@@ -110,6 +110,21 @@ const alterarSchema = z
     status: z.enum(["confirmed", "completed", "no_show"]).optional(),
     notes: z.string().max(2000).optional(),
     guest_email: emailDoConvidado.optional(),
+    /**
+     * EDIÇÃO DE COMPROMISSO (9015): título livre, observação publicável (vai
+     * para o Google; `""` limpa), paciente (uuid ou null para desvincular) e
+     * tipo (recalcula o fim e revalida a disponibilidade no handler).
+     */
+    title: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).optional(),
+    contact_id: z.string().uuid().nullable().optional(),
+    /**
+     * Conversa vinculada: anda JUNTO com o paciente (a tela limpa ao trocar
+     * e religa ao escolher). Aceita e grava como na criação, sem validação
+     * nova — a mesma regra de lá.
+     */
+    conversation_id: z.string().uuid().nullable().optional(),
+    event_type_id: z.string().uuid().optional(),
   })
   .refine(
     (c) =>
@@ -117,7 +132,12 @@ const alterarSchema = z
       c.starts_at !== undefined ||
       c.status !== undefined ||
       c.notes !== undefined ||
-      c.guest_email !== undefined,
+      c.guest_email !== undefined ||
+      c.title !== undefined ||
+      c.description !== undefined ||
+      c.contact_id !== undefined ||
+      c.conversation_id !== undefined ||
+      c.event_type_id !== undefined,
     {
       message: "Informe pelo menos um campo para alterar.",
     },
