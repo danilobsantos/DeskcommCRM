@@ -69,6 +69,12 @@ export function useConversationCounts(
     queryKey: ["conversation-counts", orgId, sufixo],
     enabled: !!orgId,
     refetchInterval: 30_000,
+    // Sem retry, de propósito: cada poll dispara 6 contagens RLS em paralelo, e
+    // o default (3 tentativas) transformava um blip de lentidão em tempestade —
+    // medido em produção em 2026-10-05, milhares de requests idênticas até o
+    // inbox parar de carregar. Um ciclo falho volta a ser 1 tentativa; o poll de
+    // 30s e o Realtime recuperam a tela no ciclo seguinte.
+    retry: false,
     queryFn: () =>
       apiClient
         .get<{ data: ConversationCounts }>(

@@ -172,6 +172,12 @@ export function useConversationsRealtime(
     // chega de fora enquanto ninguém olha, e voltar para a aba é quando a
     // defasagem aparece. Segunda rede — a primeira é o Realtime.
     refetchOnWindowFocus: true,
+    // Sem retry, de propósito: cada ciclo falho já mostra o toast (showApiError
+    // no queryFn) e o default (3 tentativas) multiplicava cada 500 em 4 rajadas
+    // — medido em produção em 2026-10-05, milhares de `conversations?comando=…`
+    // idênticas até a lista parar de carregar. O Realtime invalida e refaz no
+    // change seguinte; voltar para a aba refaz na hora.
+    retry: false,
   });
 
   const onChange = useCallback(() => {
