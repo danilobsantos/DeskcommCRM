@@ -72,6 +72,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { nomeDoContato, type ContatoNomeavel } from "@/lib/contacts/rotulo-do-contato";
 
 import { diaLocalISO, instanteDe } from "./fuso";
+import { googleDeProfissionaisHabilitado } from "./providers";
 import { horariosLivres, type ExcecaoDeData, type Slot } from "./horarios-livres";
 import { lerJornadaDoBanco, RECUSA_PARA_O_CLIENTE } from "./jornada";
 import {
@@ -110,8 +111,9 @@ export interface ParametrosDaConsulta {
   /**
    * O PROFISSIONAL EXTERNO dono da consulta (migration 9003), quando não é um
    * usuário. Mutuamente exclusivo com `ownerUserId`: se vier, é ele que decide
-   * jornada e ocupados, e as leituras de `attendant_availability` e do Google
-   * (que só existem para USUÁRIOS) são puladas.
+   * jornada e ocupados, e as leituras de `attendant_availability` são puladas.
+   * O Google vale quando há vínculo (`calendar_connection_calendars.provider_id`,
+   * 9013) com a sub-flag ligada — sem vínculo, a lista externa fica vazia.
    */
   ownerProviderId?: string | null;
   de: Date;
@@ -378,11 +380,13 @@ export async function horariosLivresDaOrg(
   }
   const { ocupados, fontesDefasadas } = oQueOcupa;
 
- // `calendar_external_events` NÃO tem `user_id`: o dono vem por
+  // `calendar_external_events` NÃO tem `user_id`: o dono vem por
   // `connection_id → calendar_connections.user_id`. O join traz de carona a
   // situação da conexão, que decide se o horário sai com aviso de defasagem.
-  // ⚠️ PROFISSIONAL NÃO TEM GOOGLE: conexões e eventos externos são só do
-  // atendente-usuário — para provider as duas listas ficam vazias por desenho.
+  // ⚠️ Para PROFISSIONAL, o dono vem pelo VÍNCULO
+  // (`calendar_connection_calendars.provider_id`, 9013) — ver
+  // `ocupacaoGoogleDoProfissional`: sem vínculo ou com a sub-flag OFF, as duas
+  // listas ficam vazias, como antes da 9013.
   //
   // Por RPC, e não direto em `calendar_connections`: a RLS da tabela esconde a
   // conexão de um Atendente, e "nunca foi lida" passava a ser "não tem Google"
@@ -462,8 +466,9 @@ export interface ParametrosDaOcupacao {
   donoId: string | null;
   /**
    * Profissional externo (sem login): o dono endereça `calendar_appointments`
-   * por `provider_id`, e NÃO tem Google — a lista de eventos externos fica
-   * vazia por desenho. Mutuamente exclusivo com `donoId` (constraint do banco).
+   * por `provider_id`. O Google vale quando há vínculo (9013) — ver
+   * `ocupacaoGoogleDoProfissional`. Mutuamente exclusivo com `donoId`
+   * (constraint do banco).
    */
   providerId?: string | null;
   de: Date;
@@ -493,9 +498,64 @@ export interface ParametrosDaOcupacao {
  *
  * O filtro de janela é o cruzamento ESTRITO (`starts_at < ate` e `ends_at > de`),
  * a mesma régua de `colide`: encostar não é ocupar.
+ *
+ * A ocupação do Google de um PROFISSIONAL EXTERNO (migration 9013) sai por
+ * `ocupacaoGoogleDoProfissional`, logo abaixo: vínculo
+ * (`calendar_connection_calendars.provider_id`) + sub-flag
+ * `providers_google_enabled` ligados. Sem vínculo ou com a sub-flag OFF, a
+ * resposta é a mesma de antes da 9013 — lista vazia, sem erro.
  */
-export async function coletaOQueOcupa(
+async function ocupacaoGoogleDoProfissional(
   supabase: SupabaseClient,
+  organizationId: string,
+  providerId: string,
+  de: Date,
+  ate: Date,
+): Promise<{ data: unknown[] | null; error: { message: string } | null }> {
+  // 1. O vínculo — índice único parcial `(organization_id, provider_id)`, então
+  // é uma leitura barata. Sem vínculo não há Google: volta vazio, sem erro,
+  // que é o comportamento que todo chamador já conhece.
+  const { data: vinculo, error: erroVinc } = await supabase
+    .from("calendar_connection_calendars")
+    .select("connection_id")
+    .eq("organization_id", organizationId)
+    .eq("provider_id", providerId)
+    .maybeSingle();
+  if (erroVinc) return { data: null, error: { message: erroVinc.message } };
+  if (!vinculo) return { data: [], error: null };
+
+  // 2. A sub-flag por tenant — desligada, a leitura pausa mesmo com vínculo
+  // gravado (desligar pausa, não apaga). Erro de leitura aqui também recusa em
+  // vez de oferecer horário sem o Google: na dúvida, OCUPA (`ocupados.ts`).
+  const { data: org, error: erroOrg } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", organizationId)
+    .maybeSingle();
+  if (erroOrg) return { data: null, error: { message: erroOrg.message } };
+  const settings = (org as { settings?: unknown } | null)?.settings;
+  if (!googleDeProfissionaisHabilitado(settings)) return { data: [], error: null };
+
+  // 3. A ocupação, pela função — mesma forma da do dono (0260), com o dono
+  // trocado pelo vínculo. Nome via string (não entra em `database.types.ts`):
+  // `googleRpc` aceita qualquer nome e valida a resposta no uso.
+  try {
+    const dados = await googleRpc(supabase, "fn_agenda_ocupacao_google_do_profissional", {
+      p_org: organizationId,
+      p_provider: providerId,
+      p_de: de.toISOString(),
+      p_ate: ate.toISOString(),
+    });
+    return { data: (dados ?? []) as unknown[], error: null };
+  } catch (e) {
+    return {
+      data: null,
+      error: { message: e instanceof Error ? e.message : "Falha ao ler a agenda do Google." },
+    };
+  }
+}
+
+export async function coletaOQueOcupa(  supabase: SupabaseClient,
   organizationId: string,
   params: ParametrosDaOcupacao,
 ): Promise<({ ok: true } & OQueOcupa) | { ok: false; erro: string }> {
@@ -519,10 +579,19 @@ export async function coletaOQueOcupa(
     // do encaixe, que é por isso que a leitura mora aqui (issue #879, ver o
     // cabeçalho). A função confere o pertencimento e devolve só ocupação.
     //
-    // ⚠️ PROFISSIONAL NÃO TEM GOOGLE: para provider a chamada é pulada e a
-    // lista fica vazia por desenho.
+    // ⚠️ PROFISSIONAL COM VÍNCULO TEM GOOGLE (migration 9013): o dono vem pelo
+    // vínculo `calendar_connection_calendars.provider_id` (conta central da
+    // clínica, uma agenda por profissional). Sem vínculo — ou com a sub-flag
+    // `providers_google_enabled` desligada — a chamada é pulada e a lista fica
+    // vazia, exatamente como antes da 9013.
     params.providerId
-      ? Promise.resolve({ data: null, error: null })
+      ? ocupacaoGoogleDoProfissional(
+          supabase,
+          organizationId,
+          params.providerId,
+          params.de,
+          params.ate,
+        )
       : supabase.rpc("fn_agenda_ocupacao_google_do_dono", {
           p_org: organizationId,
           p_owner: params.donoId as string,

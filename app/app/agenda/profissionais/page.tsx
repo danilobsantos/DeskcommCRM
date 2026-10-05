@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { providersHabilitados } from "@/lib/agenda/providers";
+import { googleDeProfissionaisHabilitado, providersHabilitados } from "@/lib/agenda/providers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import type { ScheduleWindow } from "@/lib/schemas/routing";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +31,8 @@ export default async function ProfissionaisPage() {
 
   if (!providersHabilitados(orgRow?.settings)) redirect("/app/agenda");
 
+  const googleHabilitado = googleDeProfissionaisHabilitado(orgRow?.settings);
+
   const { data: profissionais } = await supabase
     .from("providers")
     .select("id, name, specialties, active, schedule")
@@ -56,9 +58,47 @@ export default async function ProfissionaisPage() {
     if (pid) porProfissional.set(pid, (porProfissional.get(pid) ?? 0) + 1);
   }
 
+  // Vínculos Google por profissional (9013) + agendas elegíveis da conta
+  // central — só quando a sub-flag está ligada. Leitura pela sessão: a RLS da
+  // tabela libera dono da conexão ou manager+; sem visibilidade, a lista vem
+  // vazia e o seletor some (nunca erro na tela).
+  const vinculos: { providerId: string; calendarId: string; nome: string }[] = [];
+  const agendas: { id: string; nome: string; elegivel: boolean }[] = [];
+  if (googleHabilitado) {
+    const { data: linhas } = await supabase
+      .from("calendar_connection_calendars")
+      .select("id, provider_id, name, available, access_role, counts_for_conflicts, calendar_connections!inner(status)")
+      .eq("organization_id", activeOrg.orgId);
+    for (const linha of linhas ?? []) {
+      const l = linha as unknown as {
+        id: string;
+        provider_id: string | null;
+        name: string;
+        available: boolean;
+        access_role: string | null;
+        counts_for_conflicts: boolean;
+        calendar_connections: { status: string } | { status: string }[];
+      };
+      const status = Array.isArray(l.calendar_connections)
+        ? l.calendar_connections[0]?.status
+        : l.calendar_connections?.status;
+      const elegivel =
+        l.available === true &&
+        ["writer", "owner"].includes(String(l.access_role)) &&
+        l.counts_for_conflicts === true &&
+        status === "healthy";
+      agendas.push({ id: l.id, nome: l.name, elegivel });
+      if (l.provider_id) vinculos.push({ providerId: l.provider_id, calendarId: l.id, nome: l.name });
+    }
+    agendas.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  }
+
   return (
     <ProfissionaisClient
       canWrite={user.is_platform_admin || activeOrg.role === "manager" || activeOrg.role === "admin"}
+      googleHabilitado={googleHabilitado}
+      vinculosIniciais={vinculos}
+      agendas={agendas}
       iniciais={(profissionais ?? []).map((p) => {
         const s = (p.schedule as { timezone?: string; windows?: unknown[] } | null) ?? {};
         return {

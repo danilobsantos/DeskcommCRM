@@ -21,13 +21,30 @@ import { availabilityScheduleSchema } from "@/lib/schemas/routing";
  */
 export function settingsDeAgendamento(settings: unknown): {
   providers_enabled: boolean;
+  providers_google_enabled: boolean;
 } {
-  const s = (settings ?? {}) as { scheduling?: { providers_enabled?: unknown } | null };
-  return { providers_enabled: s?.scheduling?.providers_enabled === true };
+  const s = (settings ?? {}) as {
+    scheduling?: { providers_enabled?: unknown; providers_google_enabled?: unknown } | null;
+  };
+  return {
+    providers_enabled: s?.scheduling?.providers_enabled === true,
+    providers_google_enabled: s?.scheduling?.providers_google_enabled === true,
+  };
 }
 
 export function providersHabilitados(settings: unknown): boolean {
   return settingsDeAgendamento(settings).providers_enabled;
+}
+
+/**
+ * O Google por profissional só vale com as DUAS chaves: a do módulo
+ * (profissionais externos) e a do sync (Google do profissional). Sub-flag OFF
+ * = comportamento idêntico a antes da 9013 (jornada + exceções, sem Google),
+ * mesmo com vínculo gravado — desligar pausa, não apaga.
+ */
+export function googleDeProfissionaisHabilitado(settings: unknown): boolean {
+  const s = settingsDeAgendamento(settings);
+  return s.providers_enabled && s.providers_google_enabled;
 }
 
 // `availabilityScheduleSchema` já defaulta timezone e windows internamente; a

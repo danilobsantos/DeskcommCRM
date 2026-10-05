@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { reconcileAppointment } from "@/lib/agenda/google/sync-executor";
 vi.mock("@/lib/agenda/google/membros", () => ({
   apenasDeMembrosAtivos: vi.fn(async (_db, rows) => rows),
+  apenasDeVinculosAtivos: vi.fn(async (_db, rows) => rows),
 }));
 vi.mock("@/lib/audit", () => ({
   audit: vi.fn(async () => undefined),
@@ -13,10 +14,10 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/agenda/google/sync-executor", () => ({ reconcileAppointment: vi.fn() }));
 vi.mock("@/lib/env", () => ({ env: { INTERNAL_CRON_SECRET: "cron", INTERNAL_SECRET: null } }));
-import { apenasDeMembrosAtivos } from "@/lib/agenda/google/membros";
+import { apenasDeMembrosAtivos, apenasDeVinculosAtivos } from "@/lib/agenda/google/membros";
 import { GET } from "@/app/api/v1/cron/agenda-google-push/route";
 const org = "aaaaaaaa-0000-4000-8000-00000000000a";
-let rows: Array<{ id: string; organization_id: string }>;
+let rows: Array<{ id: string; organization_id: string; user_id?: string | null; provider_id?: string | null }>;
 let filters: string[];
 beforeEach(() => {
   vi.clearAllMocks();
@@ -109,4 +110,32 @@ it("titular redigido durante seleção é terminal sem auditar inação repetida
   await GET(request());
   expect(reconcileAppointment).toHaveBeenCalledTimes(2);
   expect(audit).not.toHaveBeenCalled();
+});
+
+describe("candidatos de profissional (9014) usam o filtro de vínculo", () => {
+  it("linha com provider_id passa por apenasDeVinculosAtivos, não por membros", async () => {
+    rows = [{ id: "prov-appt", organization_id: org, user_id: null, provider_id: "prov-1" }];
+    vi.mocked(apenasDeVinculosAtivos).mockResolvedValueOnce([
+      // O `id` viaja junto na linha real (a rota filtra por ele); o tipo do
+      // filtro só carrega org+provider, então o cast é só do dublê.
+      { organization_id: org, provider_id: "prov-1", id: "prov-appt" } as never,
+    ]);
+    await GET(request());
+    expect(apenasDeVinculosAtivos).toHaveBeenCalledWith(
+      expect.anything(),
+      [{ id: "prov-appt", organization_id: org, provider_id: "prov-1" }],
+    );
+    expect(reconcileAppointment).toHaveBeenCalledWith(expect.anything(), org, "prov-appt");
+  });
+
+  it("vínculo recusado não chega ao executor, mas usuário da mesma rodada chega", async () => {
+    rows = [
+      { id: "user-appt", organization_id: org, user_id: "u-1", provider_id: null },
+      { id: "prov-appt", organization_id: org, user_id: null, provider_id: "prov-1" },
+    ];
+    vi.mocked(apenasDeVinculosAtivos).mockResolvedValueOnce([]);
+    await GET(request());
+    const ids = vi.mocked(reconcileAppointment).mock.calls.map((c) => c[2]);
+    expect(ids).toEqual(["user-appt"]);
+  });
 });

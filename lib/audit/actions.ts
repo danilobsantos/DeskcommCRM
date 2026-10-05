@@ -1012,6 +1012,13 @@ export const AUDIT_ACTIONS = [
   // Profissional externo excluído (migration 9003; action criada com a
   // exclusão — desligar continua sendo `agenda.provider_updated {active}`).
   "agenda.provider_deleted",
+  // Vínculo do profissional com uma agenda do Google da conta central (migration
+  // 9013): muda de onde vem a ocupação dele, então é mutação de configuração e
+  // audita — a pergunta que aparece depois é sempre "quem ligou esse dentista
+  // a qual agenda?". Desvincular também audita; o vínculo em si pode ser
+  // trocado (é regra vigente, não fato histórico).
+  "agenda.provider_google_linked",
+  "agenda.provider_google_unlinked",
   // A chave de Mapas da organização (0504, Agente de IA › Provedores): gravada ou
   // trocada, e removida. O metadata diz O QUE mudou — nunca a chave.
   "ai.maps_credential_saved",

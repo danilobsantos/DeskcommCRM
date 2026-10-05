@@ -14,7 +14,12 @@ export const appointmentSnapshotSchema = z.object({
   meeting_url: z.string().nullable().default(null),
   id: z.uuid(),
   organization_id: z.uuid(),
-  owner_user_id: z.uuid(),
+  // Dono com login OU profissional externo (9013/9014): exatamente um dos dois
+  // é não-nulo (constraint `calendar_appointments_dono_unico`). Antes da 9014
+  // `owner_user_id` era obrigatório e o `parse` quebrava em toda linha de
+  // provider — era o push inteiro recusando dentista antes de começar.
+  owner_user_id: z.uuid().nullable().default(null),
+  provider_id: z.uuid().nullable().default(null),
   contact_id: z.uuid().nullable(),
   title: z.string(),
   description: z.string().nullable(),
