@@ -44,6 +44,7 @@ import {
   VINCULO_DE_AGENDAMENTO,
 } from "@/lib/agenda/tipos";
 import { ApiError } from "@/lib/api/types";
+import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { comIdempotencia, hashDoCorpo } from "@/lib/api/idempotency";
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
@@ -110,6 +111,30 @@ export interface AlterarInput {
   notes?: string;
   /** Igual ao de `MarcarInput`: `""` desconvida, ausente não mexe. */
   guest_email?: string;
+  /** EDIÇÃO DE COMPROMISSO (9015): título livre (min 1, validado na rota). */
+  title?: string;
+  /**
+   * Observação publicável — o campo `description` do calendário externo.
+   * `""` limpa (vira null, como na criação); ausente não mexe.
+   */
+  description?: string;
+  /**
+   * Paciente: uuid troca o vínculo, null desvincula, ausente não mexe. O
+   * vínculo é resolvido contra a org (404), como na criação — e a troca
+   * acorda o push do Google (migration 9015 §2), que republica os convidados.
+   */
+  contact_id?: string | null;
+  /**
+   * Conversa vinculada: anda JUNTO com o paciente. Sem validação nova — a
+   * criação grava o que vem, e aqui é igual.
+   */
+  conversation_id?: string | null;
+  /**
+   * Tipo: troca a duração. O início é mantido (ou o `starts_at` do mesmo
+   * pedido), o fim é recalculado e a disponibilidade revalidada — remarcação
+   * parcial, com a mesma `transicao` e o mesmo audit de remarcar.
+   */
+  event_type_id?: string;
 }
 
 export interface CancelarInput {
@@ -397,10 +422,18 @@ async function executarCriacaoDeAgendamento(
   //
   // O molde é o de `app/api/v1/messages/_handler.ts:333` — resolver contra a org
   // e recusar com 404, sem dizer se o id existe noutro lugar.
+  // O nome do cliente vira o título do compromisso quando ninguém digitou
+  // outro: na grade e no Google a equipe lê "Maria Silva", não "Consulta".
+  // Vale para todo caminho de marcação (tela, IA, integração), porque mora
+  // aqui, na regra — e continua sobrescrevível: `title` explícito vence. O
+  // O nome sai de `nomeDoContato` — nunca remontado aqui à mão: a cadeia de
+  // fallback tem ordem e regra de identificador técnico, e a guarda
+  // `rotulo-do-contato.test.ts` proíbe a sétima cópia (inclusive em prosa).
+  let nomeDoCliente: string | null = null;
   if (input.contact_id) {
     const { data: contato, error: erroContato } = await supabase
       .from("contacts")
-      .select("id")
+      .select("id, display_name, name")
       .eq("id", input.contact_id)
       .eq("organization_id", ctx.organization_id)
       .maybeSingle();
@@ -410,6 +443,7 @@ async function executarCriacaoDeAgendamento(
     if (!contato) {
       throw new ApiError(404, "not_found", undefined, ctx.requestId, "Contato não encontrado.");
     }
+    nomeDoCliente = nomeDoContato(contato as unknown as { display_name?: string | null; name?: string | null });
   }
 
   const fim = new Date(inicio.getTime() + tipo.duration_minutes * 60_000);
@@ -432,7 +466,7 @@ async function executarCriacaoDeAgendamento(
     .insert({
       organization_id: ctx.organization_id,
       event_type_id: tipo.id,
-      title: input.title ?? tipo.name,
+      title: input.title ?? nomeDoCliente ?? tipo.name,
       starts_at: inicio.toISOString(),
       ends_at: fim.toISOString(),
       // O fuso do compromisso é campo de primeira classe: é o da JORNADA, onde
@@ -521,7 +555,10 @@ export async function alterarAgendamentoHandler(
     "owner_user_id",
     "provider_id",
     "contact_id",
+    "title",
+    "description",
     "starts_at",
+    "ends_at",
     "status",
     "time_zone",
   ]);
@@ -552,25 +589,79 @@ export async function alterarAgendamentoHandler(
   // gerada `needs_google_push` (migration 0225), que compara a revisão
   // publicável com o último aceite; notes e metadata não criam intenção.
   if (input.guest_email !== undefined) mudanca.guest_email = input.guest_email || null;
+  // EDIÇÃO DE COMPROMISSO (9015): título e observação gravam direto — são
+  // colunas publicáveis e o carimbo do Google (`fn_google_projection_stamp`)
+  // já as vigia, então o push sobe sozinho no próximo giro do cron. Valor
+  // igual ao atual não entra no patch: remarcar para o mesmo horário já era
+  // no-op, e repetir o título não pode virar escrita.
+  if (input.title !== undefined && input.title !== atual.title) mudanca.title = input.title;
+  const observacaoNova = input.description !== undefined ? input.description.trim() || null : undefined;
+  if (observacaoNova !== undefined && observacaoNova !== ((atual.description as string | null) ?? null)) {
+    mudanca.description = observacaoNova;
+  }
+  // Trocar o paciente resolve o vínculo contra a org, como na criação (404 sem
+  // dizer se o id existe noutro lugar). `null` desvincula. Sem `transicao`: a
+  // timeline do lead não ganha notícia por troca de paciente — quem leva a
+  // mudança ao Google é o carimbo da 9015 §2 — mas o audit abaixo registra.
+  const contatoAnterior = (atual.contact_id as string | null) ?? null;
+  if (input.contact_id !== undefined && input.contact_id !== contatoAnterior) {
+    if (input.contact_id) {
+      const { data: contato, error: erroContato } = await supabase
+        .from("contacts")
+        .select("id")
+        .eq("id", input.contact_id)
+        .eq("organization_id", ctx.organization_id)
+        .maybeSingle();
+      if (erroContato) {
+        throw new ApiError(500, "internal_error", undefined, ctx.requestId, erroContato.message);
+      }
+      if (!contato) {
+        throw new ApiError(404, "not_found", undefined, ctx.requestId, "Contato não encontrado.");
+      }
+    }
+    mudanca.contact_id = input.contact_id;
+    // A conversa anda JUNTO com o paciente, e a regra mora AQUI e não na
+    // tela: trocar sem soltar deixava o compromisso novo apontando para o
+    // atendimento de outra pessoa, em qualquer caminho (tela, IA,
+    // integração). Quem manda `conversation_id` junto religa de propósito.
+    if (input.conversation_id === undefined) mudanca.conversation_id = null;
+  }
+  if (input.conversation_id !== undefined) mudanca.conversation_id = input.conversation_id;
   let transicao: Transicao | null = null;
+  // Só existe quando o paciente mudou (o bloco acima só grava nesse caso) —
+  // alimenta o audit e o nome do contato na resposta.
+  const trocouPaciente = mudanca.contact_id !== undefined;
 
-  if (input.starts_at) {
-    const novoInicio = new Date(input.starts_at);
+  // EDIÇÃO DE COMPROMISSO (9015): o tipo efetivo é o do pedido quando ele vem,
+  // senão o da linha. Uma leitura só de tipo cobre remarcar, trocar o tipo e
+  // os dois juntos — antes cada caminho relia o tipo atual.
+  const tipoEfetivoId = input.event_type_id ?? (atual.event_type_id as string | null);
+  if (input.event_type_id !== undefined && input.event_type_id !== atual.event_type_id) {
+    mudanca.event_type_id = input.event_type_id;
+  }
+  if (input.starts_at || mudanca.event_type_id !== undefined) {
     const { data: tipo } = await supabase
       .from("calendar_event_types")
-      .select("id, duration_minutes")
+      .select("id, name, is_active, duration_minutes")
       .eq("organization_id", ctx.organization_id)
-      .eq("id", (atual.event_type_id as string | null) ?? "")
+      .eq("id", tipoEfetivoId ?? "")
       .maybeSingle();
     if (!tipo) {
       throw new ApiError(404, "not_found", undefined, ctx.requestId, "O tipo deste agendamento não existe mais.");
     }
+    // Mudar PARA um tipo desativado é marcar num tipo desativado: a mesma
+    // recusa da criação, com o mesmo código.
+    if (input.event_type_id !== undefined && !tipo.is_active) {
+      throw new ApiError(422, "agenda_tipo_desativado", undefined, ctx.requestId, `"${tipo.name}" está desativado.`);
+    }
 
+    const novoInicio = new Date(input.starts_at ?? (atual.starts_at as string));
     const novoFim = new Date(novoInicio.getTime() + tipo.duration_minutes * 60_000);
     // ⚠️ O PRÓPRIO COMPROMISSO OCUPA O HORÁRIO DELE. Remarcar para o mesmo
     // instante é no-op — sem esta guarda ele se veria como conflito e recusaria
     // a si mesmo.
-    const mesmoHorario = new Date(atual.starts_at as string).getTime() === novoInicio.getTime();
+    const mesmoHorario = new Date(atual.starts_at as string).getTime() === novoInicio.getTime() &&
+      new Date(atual.ends_at as string).getTime() === novoFim.getTime();
     if (!mesmoHorario) {
      // REMARCAR segue a mesma assimetria de marcar (`exigeHorarioLivre`): a
       // pessoa que combinou o encaixe por fora da grade precisa poder movê-lo
@@ -637,12 +728,16 @@ export async function alterarAgendamentoHandler(
   if (transicao) {
     await fecharOLaco(supabase, ctx, {
       appointmentId: atual.id as string,
-      contactId: (atual.contact_id as string | null) ?? null,
+      // A notícia da timeline pertence a quem o compromisso atende AGORA: se o
+      // paciente trocou junto com o horário, é na ficha nova que ela aparece.
+      contactId: trocouPaciente
+        ? (mudanca.contact_id as string | null)
+        : ((atual.contact_id as string | null) ?? null),
       atividade: atividadeDaTransicao(atual.status as SituacaoAnterior, transicao),
       gatilho: gatilhoDaTransicao(atual.status as SituacaoAnterior, transicao),
       transicao,
       fusoDoCompromisso: String(salvo.time_zone),
-      nomeDoTipo: await nomeDoTipoDoCompromisso(supabase, ctx, atual.event_type_id as string | null),
+      nomeDoTipo: await nomeDoTipoDoCompromisso(supabase, ctx, tipoEfetivoId),
       outcome: {revision:salvo.revision,source_kind:salvo.outcome_source_kind,message_id:salvo.outcome_message_id,recorded_at:salvo.outcome_recorded_at},
     });
 
@@ -655,7 +750,8 @@ export async function alterarAgendamentoHandler(
 
   if (!transicao) void audit({action:"agenda.appointment_updated",actorUserId:ctx.actor.type==="user"?ctx.actor.id:null,
     organizationId:ctx.organization_id,resourceType:"calendar_appointment",resourceId:input.id,requestId:ctx.requestId,
-    metadata:{revision:salvo.revision,confirmation_next_at:salvo.confirmation_next_at}});
+    metadata:{revision:salvo.revision,confirmation_next_at:salvo.confirmation_next_at,
+      ...(trocouPaciente ? {contact_id_anterior:contatoAnterior,contact_id_novo:mudanca.contact_id} : {})}});
   return salvo as Record<string, unknown>;
 }
 

@@ -45,6 +45,10 @@ function snapshotBase() {
     location_details: null,
     guest_email: null,
     revision: "1",
+    // EDIÇÃO DE COMPROMISSO (9015): o schema do snapshot cresceu — sem estes
+    // dois campos o parse recusa e o teste quebra antes de qualquer HTTP.
+    revision_started_at: "2026-03-09T11:00:00Z",
+    google_synced_at: null,
     google_local_revision: "1",
     google_synced_local_revision: "0",
     google_connection_id: "123e4567-e89b-42d3-a456-426614174002",
