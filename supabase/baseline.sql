@@ -2679,6 +2679,9 @@ CREATE INDEX IF NOT EXISTS "idx_conversations_open_unassigned" ON "public"."conv
 
 CREATE INDEX IF NOT EXISTS "idx_conversations_org_last_msg" ON "public"."conversations" USING "btree" ("organization_id", "last_message_at" DESC NULLS LAST);
 
+-- 0543: índice parcial para a aba Fila (conversas sem responsável e não-terminais).
+CREATE INDEX IF NOT EXISTS "idx_conversations_org_fila" ON "public"."conversations" USING "btree" ("organization_id", "awaiting_since" ASC NULLS LAST, "id" ASC) WHERE ("assigned_to_user_id" IS NULL AND "status" NOT IN ('closed', 'archived', 'resolved'));
+
 
 
 CREATE INDEX IF NOT EXISTS "idx_crm_lead_links_org_target" ON "public"."crm_lead_links" USING "btree" ("organization_id", "target_kind", "target_id");

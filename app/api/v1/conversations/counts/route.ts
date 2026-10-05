@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { gravarContadoresCache, lerContadoresCache } from "@/lib/api/cache-contadores";
 import { loadAuthUser } from "@/lib/auth/server";
 import { orgAtivaDaApi } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -105,6 +106,16 @@ export async function GET(req: NextRequest): Promise<Response> {
   const marcadores = sp.getAll("tag");
   const modo = modoDeEtiqueta(sp.get("modo")) ?? "e";
 
+  const filtrosCache: Record<string, string> = {};
+  if (soNaoLidas) filtrosCache.unread = "true";
+  for (const [coluna, valor] of auxiliares) filtrosCache[coluna] = String(valor);
+  for (const m of marcadores) filtrosCache[`tag:${m}`] = modo;
+
+  const cached = await lerContadoresCache(org, user.id, filtrosCache);
+  if (cached) {
+    return ok({ ...cached, unassigned: cached.fila }, { requestId });
+  }
+
   // ⚠️ TODA contagem nasce daqui, e daqui já sai com `organization_id` E com os
   // filtros auxiliares. Herdar tira a opção de esquecer: não existe o caminho
   // "montei uma contagem e não pus o filtro".
@@ -174,19 +185,25 @@ export async function GET(req: NextRequest): Promise<Response> {
     return fail("internal_error", firstErr.message, 500, { requestId });
   }
 
+  const valores = {
+    fila: fila.count ?? 0,
+    automatico: automatico.count ?? 0,
+    mine: mine.count ?? 0,
+    all: all.count ?? 0,
+    closed: closed.count ?? 0,
+    archived: archived.count ?? 0,
+  };
+
+  await gravarContadoresCache(org, user.id, filtrosCache, valores);
+
   return ok(
     {
-      fila: fila.count ?? 0,
-      automatico: automatico.count ?? 0,
+      ...valores,
       // `unassigned` continua respondendo, com o MESMO valor de `fila`. É rota
       // `/api/v1/` versionada: campo não some de uma versão para outra, e um
       // cliente com a página aberta desde antes do deploy segue lendo o nome
       // velho até recarregar.
-      unassigned: fila.count ?? 0,
-      mine: mine.count ?? 0,
-      all: all.count ?? 0,
-      closed: closed.count ?? 0,
-      archived: archived.count ?? 0,
+      unassigned: valores.fila,
     },
     { requestId },
   );

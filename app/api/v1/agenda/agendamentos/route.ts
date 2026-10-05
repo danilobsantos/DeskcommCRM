@@ -318,7 +318,10 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
   }
 
-  return ok([...resultado.agendamentos, ...externos], { requestId });
+  return ok([...resultado.agendamentos, ...externos], {
+    requestId,
+    meta: { proximo: resultado.proximo ?? null },
+  });
 }
 
 export async function POST(req: NextRequest): Promise<Response> {

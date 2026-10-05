@@ -189,6 +189,13 @@ export async function listConversationsHandler(
   // páginas curtas e um "carregar mais" que às vezes não traz nada.
   if (q.comando && q.comando.length > 0) {
     query = query.in("comando_da_conversa", q.comando);
+    // Predicados físicos que o planner precisa para usar o índice parcial da Fila.
+    // `comando=aguardando|automatico` implica sem responsável e não-terminal —
+    // a função calculada não deixa isso explícito para o Postgres.
+    if (isQueue) {
+      query = query.is("assigned_to_user_id", null);
+      query = query.not("status", "in", `(${CONVERSATION_TERMINAL_STATUSES.join(",")})`);
+    }
   }
   // Depois do `status` de propósito: pedir um status terminal E `exclude_finished`
   // é contradição, e a resposta certa para uma contradição é lista vazia — não
