@@ -177,6 +177,10 @@ test("profissional externo: editar, fechar o dia e sumir da lista da IA", async 
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await page.waitForURL(/\/app(\/|$)/, { timeout: 20_000 });
 
+  // O item SÓ existe com a flag ligada: o layout lê o settings e o sidebar
+  // decide por ele. Ir pela URL não provaria nada — a página tem gate próprio.
+  await expect(page.getByRole("link", { name: "Profissionais" })).toBeVisible({ timeout: 20_000 });
+
   await page.goto("/app/agenda/profissionais");
   // Pelo testid do card, e não pelo nome: "Dra. E2E" aparece duas vezes na
   // tela (card + checkbox do fechamento) e o getByText reprovaria por
