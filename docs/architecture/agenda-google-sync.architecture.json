@@ -117,6 +117,13 @@
       "label": "calendar_connection_calendars: seleção, claim, cursor e cobertura"
     },
     {
+      "id": "provider-link",
+      "lane": "banco",
+      "col": 6,
+      "type": "service",
+      "label": "Vínculo do profissional (9013/9014): provider_id na conta central; leitura bloqueia, push publica, conflito resolve manager+"
+    },
+    {
       "id": "cache",
       "lane": "banco",
       "col": 1,
@@ -421,6 +428,18 @@
       "from": "meet-export",
       "to": "meet-pdf",
       "label": "renderLgpdPdf → assinatura/entrega existente; arrays vazios compatíveis"
+    },
+    {
+      "id": "e40",
+      "from": "cursor",
+      "to": "provider-link",
+      "label": "secretária vincula dentista a um calendário (Server Action, manager+)"
+    },
+    {
+      "id": "e41",
+      "from": "provider-link",
+      "to": "hours",
+      "label": "ocupação do dentista bloqueia slots; sem vínculo nem flag, vazio"
     }
   ]
 }

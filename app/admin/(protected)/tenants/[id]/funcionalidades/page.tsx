@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requirePlatformAdmin } from "@/lib/auth/requirePlatformAdmin";
-import { providersHabilitados } from "@/lib/agenda/providers";
+import { googleDeProfissionaisHabilitado, providersHabilitados } from "@/lib/agenda/providers";
 import { FuncionalidadesClient } from "./_client";
 
 interface FuncionalidadesPageProps {
@@ -19,6 +19,13 @@ export default async function FuncionalidadesPage({ params }: FuncionalidadesPag
     .maybeSingle();
 
   const providersEnabled = providersHabilitados(org?.settings ?? null);
+  const providersGoogleEnabled = googleDeProfissionaisHabilitado(org?.settings ?? null);
 
-  return <FuncionalidadesClient organizationId={id} providersEnabled={providersEnabled} />;
+  return (
+    <FuncionalidadesClient
+      organizationId={id}
+      providersEnabled={providersEnabled}
+      providersGoogleEnabled={providersGoogleEnabled}
+    />
+  );
 }

@@ -218,6 +218,14 @@ export interface ActiveOrg {
    */
   providers_enabled?: boolean;
   /**
+   * Se o sync Google por profissional externo está ligado para esta org
+   * (`organizations.settings.scheduling.providers_google_enabled`, migration
+   * 9013). Opcional pelo mesmo motivo de `providers_enabled`: só o layout de
+   * `/app` preenche, ausente é desligado, e o gate de segurança é quem lê o
+   * settings (página, rota, coleta) — nunca este campo.
+   */
+  providers_google_enabled?: boolean;
+  /**
    * A regra "cliente pela agenda" está ligada nesta organização
    * (`organizations.settings.crm.cliente_pela_agenda`, migration 0262)?
    *

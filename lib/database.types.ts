@@ -3671,6 +3671,8 @@ export type Database = {
           is_primary: boolean
           name: string
           organization_id: string
+          /** Vínculo Google do profissional externo (migration 9013; NULL = uso por usuário). */
+          provider_id: string | null
           sync_token: string | null
           time_zone: string | null
           updated_at: string
@@ -3697,6 +3699,8 @@ export type Database = {
           is_primary?: boolean
           name: string
           organization_id: string
+          /** Vínculo Google do profissional externo (migration 9013; NULL = uso por usuário). */
+          provider_id?: string | null
           sync_token?: string | null
           time_zone?: string | null
           updated_at?: string
@@ -3723,6 +3727,8 @@ export type Database = {
           is_primary?: boolean
           name?: string
           organization_id?: string
+          /** Vínculo Google do profissional externo (migration 9013; NULL = uso por usuário). */
+          provider_id?: string | null
           sync_token?: string | null
           time_zone?: string | null
           updated_at?: string
@@ -3740,6 +3746,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calendar_connection_calendars_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "providers"
             referencedColumns: ["id"]
           },
         ]
@@ -10653,6 +10666,11 @@ export type Database = {
       fn_agenda_conexoes_google_do_dono: {
         Args: { p_org: string; p_owner: string }
         Returns: { status: string; last_sync_at: string | null }[]
+      }
+      /** Ocupação do Google da agenda vinculada ao profissional (migration 9013). */
+      fn_agenda_ocupacao_google_do_profissional: {
+        Args: { p_org: string; p_provider: string; p_de: string; p_ate: string }
+        Returns: { starts_at: string; ends_at: string; transparency: string; status: string; connection_status: string }[]
       }
       fn_appointment_change_core: { Args: { p_org: string; p_id: string; p_revision: number; p_patch: Json; p_remote: boolean; p_base: Json }; Returns: Json }
 
