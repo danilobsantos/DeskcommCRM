@@ -67,3 +67,62 @@ export async function updateProvidersFeature(
 
   return { ok: true, providers_enabled: enabled };
 }
+
+export type UpdateProvidersGoogleFeatureResult =
+  | { ok: true; providers_google_enabled: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Liga/desliga o SYNC GOOGLE por profissional externo de um tenant (migration
+ * 9013), na mesma tela de funcionalidades. Sub-flag de
+ * `organizations.settings.scheduling.providers_google_enabled` (default OFF):
+ * só tem efeito com `providers_enabled` ligado (a leitura exige as duas — ver
+ * `googleDeProfissionaisHabilitado`). Desligar PAUSA pull/push e esconde o
+ * vínculo; os vínculos gravados ficam para a reativação retomar do syncToken.
+ */
+export async function updateProvidersGoogleFeature(
+  organizationId: string,
+  enabled: boolean,
+): Promise<UpdateProvidersGoogleFeatureResult> {
+  const escrita = await escritaDeAdminOuRecusa();
+  if (!escrita.ok) return escrita;
+  const { user: authUser } = escrita.ctx;
+
+  const admin = createAdminClient();
+  const { data: orgRow, error: readErr } = await admin
+    .from("organizations")
+    .select("settings")
+    .eq("id", organizationId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: readErr.message };
+  if (!orgRow) return { ok: false, error: "organização não encontrada." };
+
+  const current = (orgRow.settings as Record<string, unknown> | null) ?? {};
+  const scheduling = (current.scheduling as Record<string, unknown> | null) ?? {};
+  const nextSettings = {
+    ...current,
+    scheduling: { ...scheduling, providers_google_enabled: enabled },
+  };
+
+  const { error: updErr } = await admin
+    .from("organizations")
+    .update({ settings: nextSettings })
+    .eq("id", organizationId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  const cabecalhos = await headers();
+  await audit({
+    action: "platform.tenant_feature_changed",
+    actorUserId: authUser.id,
+    organizationId,
+    resourceType: "organization",
+    resourceId: organizationId,
+    requestId: cabecalhos.get("x-request-id") ?? undefined,
+    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    userAgent: cabecalhos.get("user-agent") ?? undefined,
+    actingAsPlatformAdmin: true,
+    metadata: { feature: "providers_google_enabled", enabled },
+  });
+
+  return { ok: true, providers_google_enabled: enabled };
+}

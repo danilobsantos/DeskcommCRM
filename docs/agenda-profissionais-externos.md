@@ -17,6 +17,8 @@
 | Compromisso do profissional | `calendar_appointments.provider_id` (mutuamente exclusivo com `owner_user_id`) |
 | Tipos de atendimento | `calendar_event_types` (mesmos do base) |
 | Flag por tenant | `organizations.settings.scheduling.providers_enabled` |
+| Google por profissional (sub-flag) | `organizations.settings.scheduling.providers_google_enabled` (migration 9013) |
+| Vínculo dentista ↔ agenda Google | `calendar_connection_calendars.provider_id` (um profissional = uma agenda) |
 
 A feature é **opt-in**: desligada, a Agenda do base (atendentes + IA) funciona
 normalmente e nada muda.
@@ -79,6 +81,29 @@ Cada dentista precisa de jornada própria, senão **não agenda nada**.
   no cabeçalho do dia (semana) e na célula do mês, do dono que a grade mostra
   (profissional isolado ou atendente). O motivo vai no hover — dia fechado sem
   motivo mostra só o selo. Sem dono conhecido, sem selo.
+
+### 3.4 Google por profissional (conta central da clínica)
+
+Cada dentista pode ter a sua agenda do Google **sem ter conta no sistema**: a
+secretária conecta **uma vez** a conta da clínica (o OAuth que já existe) e
+liga cada profissional a **um** calendário dela, no card do profissional
+(`Agenda → Profissionais`, seletor "Ligar agenda do Google…").
+
+- Pré-requisitos: as **duas** flags ligadas no tenant (`Profissionais
+  externos` + `Google por profissional`, em
+  `/admin/tenants/:id/funcionalidades`). Sem a segunda, o seletor nem aparece
+  e a agenda volta a jornada + exceções — os vínculos gravados ficam
+  guardados para a reativação.
+- O que entra: a **ocupação** do calendário vinculado passa a bloquear
+  horários na grade e na IA (`crm_find_free_slots`), e o que a secretária
+  marca/remarca/cancela para o profissional **vai para o Google**
+  automaticamente (push pelo cron, mesma reconciliação dos atendentes).
+- Regras do vínculo: um profissional = uma agenda (vincular move); uma agenda
+  já ligada a outro profissional precisa ser desligada lá antes; só aparece
+  calendário elegível (conexão `healthy`, disponível, com escrita e contando
+  para conflito). Conflito entre Google e CRM resolve a **secretária**
+  (`manager+`) na tela — nunca a IA sozinha. Excluir o profissional
+  **dissolve** o vínculo sem apagar a agenda do catálogo.
 
 ---
 
@@ -236,3 +261,6 @@ agenda vivem no pacote **"Vender e mover o funil"**; para conversar, ligue tamb�
 | Agente oferece horário de outro profissional | `provider_id` não repassado na oferta/marcação | confira o fluxo do prompt; a oferta e a marcação devem usar o mesmo `provider_id` |
 | Cancelamento não funciona via IA | `crm_cancel_appointment` é crítico e não entra por pacote | ligue explicitamente no modo avançado |
 | Consultas de provider não aparecem na grade | grade lê `owner_user_id`; provider vai por `provider_id` | confirme que o bloco usa `responsavelId = provider_id` (versão com a integração de grade aplicada) |
+| Seletor de Google não aparece no card | sub-flag `providers_google_enabled` OFF | ligue em `/admin/tenants/:id/funcionalidades` (exige Profissionais ligados) |
+| Vínculo recusado ("não pode receber o vínculo") | conexão caída, agenda sem escrita ou fora do conflito | reconecte a conta central e escolha agenda disponível com escrita |
+| Horário do Google não bloqueia | sem vínculo, ou sub-flag desligada depois do vínculo | confira o selo "Google: <nome>" no card; desligar pausa a leitura de propósito |

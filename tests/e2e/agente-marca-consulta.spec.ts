@@ -2,6 +2,9 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { createClient } from "@supabase/supabase-js";
+
+import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
 import { test, expect } from "./helpers/test";
 
 import { irParaASemanaDoCompromisso } from "./helpers/agenda-semana-integra";
@@ -186,8 +189,7 @@ test.describe("o agente marca consulta", () => {
     expect(achado, "o compromisso marcado não aparece na listagem do próprio contato").toBeDefined();
   });
 
-  test("METADE 1b: o agente NÃO marca em horário ocupado — pelo caminho real", async () => {
-    // ⚠️ É O CASO QUE IMPEDE ESTA WAVE DE ABRIR BURACO, e mock não responderia: a recusa
+  test("METADE 1b: o agente NÃO marca em horário ocupado — pelo caminho real", async () => {    // ⚠️ É O CASO QUE IMPEDE ESTA WAVE DE ABRIR BURACO, e mock não responderia: a recusa
     // nasce da leitura da jornada e do que JÁ está marcado. Um mock do banco já teria
     // passado por ela.
     const livres = (await agenteChama(bearer, "crm_find_free_slots", {
@@ -217,6 +219,150 @@ test.describe("o agente marca consulta", () => {
     expect(segundo.mensagem, "a recusa não diz o que fazer em seguida").toMatch(
       /crm_find_free_slots|outro horário|ofereça/i,
     );
+  });
+
+  test("METADE 1c: o agente vê o dentista, respeita o Google dele e marca no livre", async () => {
+    // O PAR do vínculo Google (9013/9014) pelo caminho MCP real: lista,
+    // horários com `provider_id` (dia tomado lá fora = vazio, dia livre =
+    // cheio) e marcação no livre. Seed por service_role (só a via de leitura
+    // é exercitada — sem OAuth de verdade); limpeza no finally, na ordem
+    // reversa das FKs.
+    const NOME_DENTISTA = "Dentista E2E Par";
+    const token = tokenDoAgente();
+    const orgId = token.organization_id;
+    const sup = credenciaisSupabaseDeTeste();
+    const admin = createClient(sup.url, sup.serviceRole, { auth: { persistSession: false } });
+
+    const { data: org } = await admin.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+    const settings = ((org as { settings: Record<string, unknown> } | null)?.settings ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const scheduling = (settings.scheduling ?? {}) as Record<string, unknown>;
+    await admin
+      .from("organizations")
+      .update({
+        settings: {
+          ...settings,
+          scheduling: { ...scheduling, providers_enabled: true, providers_google_enabled: true },
+        },
+      })
+      .eq("id", orgId);
+
+    const { data: membro } = await admin
+      .from("user_organizations")
+      .select("user_id")
+      .eq("organization_id", orgId)
+      .is("revoked_at", null)
+      .limit(1)
+      .maybeSingle();
+    const donoConexao = (membro as { user_id: string } | null)?.user_id;
+    if (!donoConexao) throw new Error("sem membro ativo para pendurar a conexão central");
+
+    await admin.from("providers").delete().eq("organization_id", orgId).eq("name", NOME_DENTISTA);
+    const { data: dentista, error: erroDentista } = await admin
+      .from("providers")
+      .insert({
+        organization_id: orgId,
+        name: NOME_DENTISTA,
+        specialties: ["clínico"],
+        schedule: {
+          timezone: "America/Sao_Paulo",
+          windows: [1, 2, 3, 4, 5].map((dow) => ({ dow, start: "09:00", end: "18:00" })),
+        },
+        active: true,
+      })
+      .select("id")
+      .single();
+    if (erroDentista ?? !dentista) throw new Error(`seed do dentista falhou: ${erroDentista?.message}`);
+    const providerId = (dentista as { id: string }).id;
+
+    // Dia útil com +2 dias de folga (aviso mínimo e fuso), e o dia útil
+    // seguinte livre — o par que prova que a recusa veio do Google, e não
+    // de agenda mal semeada.
+    const ehUtil = (d: Date) => d.getUTCDay() !== 0 && d.getUTCDay() !== 6;
+    const base = new Date();
+    base.setUTCDate(base.getUTCDate() + 2);
+    while (!ehUtil(base)) base.setUTCDate(base.getUTCDate() + 1);
+    const diaTomado = base.toISOString().slice(0, 10);
+    const seguinte = new Date(base.getTime() + 24 * 3600 * 1000);
+    while (!ehUtil(seguinte)) seguinte.setUTCDate(seguinte.getUTCDate() + 1);
+    const diaLivre = seguinte.toISOString().slice(0, 10);
+
+    const { data: conexao } = await admin
+      .from("calendar_connections")
+      .insert({
+        organization_id: orgId,
+        user_id: donoConexao,
+        provider: "google_calendar",
+        account_email: `e2e-par-${orgId}@invariant.test`,
+        status: "healthy",
+      })
+      .select("id")
+      .single();
+    const conexaoId = (conexao as { id: string }).id;
+    await admin.from("calendar_connection_calendars").insert({
+      organization_id: orgId,
+      connection_id: conexaoId,
+      external_calendar_id: `e2e-par-${providerId}`,
+      name: "Dentista Par",
+      counts_for_conflicts: true,
+      available: true,
+      access_role: "writer",
+      provider_id: providerId,
+    });
+    await admin.from("calendar_external_events").insert({
+      organization_id: orgId,
+      connection_id: conexaoId,
+      external_calendar_id: `e2e-par-${providerId}`,
+      external_event_id: `e2e-par-${diaTomado}`,
+      starts_at: `${diaTomado}T12:00:00Z`,
+      ends_at: `${diaTomado}T21:00:00Z`,
+      status: "confirmed",
+      transparency: "opaque",
+    });
+
+    try {
+      const lista = (await agenteChama(token.bearer, "crm_list_providers", {})) as {
+        profissionais: { id: string; nome: string }[];
+      };
+      expect(
+        lista.profissionais.some((p) => p.id === providerId),
+        "o dentista semeado não aparece para a IA",
+      ).toBe(true);
+
+      const tomado = (await agenteChama(token.bearer, "crm_find_free_slots", {
+        event_type_slug: creds.agenda.tipo_slug,
+        dia: diaTomado,
+        provider_id: providerId,
+      })) as { horarios: unknown[] };
+      expect(tomado.horarios, "o dia tomado no Google veio com horário para o dentista").toEqual([]);
+
+      const livre = (await agenteChama(token.bearer, "crm_find_free_slots", {
+        event_type_slug: creds.agenda.tipo_slug,
+        dia: diaLivre,
+        provider_id: providerId,
+      })) as { horarios: { inicio: string }[] };
+      expect(livre.horarios.length, `nenhum horário no dia livre (${diaLivre})`).toBeGreaterThan(0);
+
+      const marcado = (await agenteChama(token.bearer, "crm_book_appointment", {
+        event_type_slug: creds.agenda.tipo_slug,
+        starts_at: livre.horarios[0]!.inicio,
+        contact_id: creds.agenda.contato_id,
+        provider_id: providerId,
+      })) as { marcado: boolean; motivo?: string; mensagem?: string; compromisso?: { id: string } };
+      expect(
+        marcado.marcado,
+        `a IA não marcou com o dentista: ${marcado.motivo ?? "?"} — ${marcado.mensagem ?? ""}`,
+      ).toBe(true);
+      marcados.push(marcado.compromisso!.id);
+    } finally {
+      await admin.from("calendar_external_events").delete().eq("connection_id", conexaoId);
+      await admin.from("calendar_connection_calendars").delete().eq("connection_id", conexaoId);
+      await admin.from("calendar_connections").delete().eq("id", conexaoId);
+      await admin.from("calendar_appointments").delete().eq("provider_id", providerId);
+      await admin.from("providers").delete().eq("id", providerId);
+    }
   });
 
   test("METADE 2: o compromisso aparece na Agenda, na tela", async ({ page }) => {

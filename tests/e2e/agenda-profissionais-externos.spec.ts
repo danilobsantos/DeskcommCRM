@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -25,11 +26,16 @@ import { lerCreds } from "./helpers/login-admin";
  *
  * O que ela NÃO prova: o turno da IA oferecendo ou recusando (isso é da
  * `agente-marca-consulta`, com atendente-usuário). Aqui a IA entra só pela
- * ferramenta que ela leria.
+ * ferramenta que ela leria. O push (escrita no Google) também fica de fora:
+ * sem OAuth de verdade no CI, ele é provado em unit (transporte fake) e no
+ * banco (invariante).
  *
  * Seed: a spec semeia o que precisa (flag `providers_enabled`, profissional
  * com jornada seg–sex SP, tipo `consulta-e2e` via `seed-e2e-agenda.ts`) —
  * idempotente, sem apagar nada, como manda o molde `agenda-marcar-pela-tela`.
+ * O caso do Google semeia ainda: conexão + calendário + vínculo + evento
+ * espelhado via service_role (só a via de LEITURA — horarios-livres e grade —
+ * é exercitada, sem HTTP no Google).
  */
 const RAIZ = path.resolve(__dirname, "../..");
 const CREDS_PATH = path.join(RAIZ, ".e2e-creds.json");
@@ -94,7 +100,12 @@ async function semear(): Promise<{ orgId: string; providerId: string; tipoId: st
   const scheduling = (settings.scheduling ?? {}) as Record<string, unknown>;
   await admin
     .from("organizations")
-    .update({ settings: { ...settings, scheduling: { ...scheduling, providers_enabled: true } } })
+    .update({
+      settings: {
+        ...settings,
+        scheduling: { ...scheduling, providers_enabled: true, providers_google_enabled: true },
+      },
+    })
     .eq("id", orgId);
 
   const jornada = {
@@ -165,6 +176,10 @@ test("profissional externo: editar, fechar o dia e sumir da lista da IA", async 
   await page.getByLabel(/senha/i).fill(creds.password);
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await page.waitForURL(/\/app(\/|$)/, { timeout: 20_000 });
+
+  // O item SÓ existe com a flag ligada: o layout lê o settings e o sidebar
+  // decide por ele. Ir pela URL não provaria nada — a página tem gate próprio.
+  await expect(page.getByRole("link", { name: "Profissionais" })).toBeVisible({ timeout: 20_000 });
 
   await page.goto("/app/agenda/profissionais");
   // Pelo testid do card, e não pelo nome: "Dra. E2E" aparece duas vezes na
@@ -303,4 +318,81 @@ test("profissional externo: excluir barra com futura e passa sem ela", async ({ 
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await page.getByRole("alertdialog").getByRole("button", { name: "Excluir", exact: true }).click();
   await expect(cartao).toBeHidden({ timeout: 20_000 });
+});
+
+test("profissional externo: vínculo Google mostra selo e bloqueia os horários", async ({ page }) => {
+  // Só a via de LEITURA é exercitada: conexão, calendário, vínculo e evento
+  // entram por service_role (sem OAuth de verdade), e a prova é o que a
+  // secretária vê — selo no card + zero slots — pela mesma rota da tela e da IA.
+  const { orgId, providerId, tipoId, dia } = await semear();
+  const creds = JSON.parse(fs.readFileSync(CREDS_PATH, "utf8")) as Creds;
+  const usuario = creds.users.manager;
+  if (!usuario) throw new Error(".e2e-creds.json sem o usuário `manager`");
+
+  const sup = credenciaisSupabaseDeTeste();
+  const admin = createClient(sup.url, sup.serviceRole, { auth: { persistSession: false } });
+  const conexaoId = randomUUID();
+  const calendarioNome = "Agenda E2E Dentista";
+  await admin.from("calendar_connections").insert({
+    id: conexaoId,
+    organization_id: orgId,
+    user_id: usuario.id,
+    provider: "google_calendar",
+    account_email: `e2e-9014-${orgId}@invariant.test`,
+    status: "healthy",
+  });
+  const { data: calendario } = await admin
+    .from("calendar_connection_calendars")
+    .insert({
+      organization_id: orgId,
+      connection_id: conexaoId,
+      external_calendar_id: `e2e-cal-${providerId}`,
+      name: calendarioNome,
+      counts_for_conflicts: true,
+      available: true,
+      access_role: "writer",
+      provider_id: providerId,
+    })
+    .select("id")
+    .single();
+  if (!calendario) throw new Error("seed do calendário vinculado falhou");
+  // O dia inteiro tomado no Google (09:00–18:00 SP = 12:00–21:00Z).
+  await admin.from("calendar_external_events").insert({
+    organization_id: orgId,
+    connection_id: conexaoId,
+    external_calendar_id: `e2e-cal-${providerId}`,
+    external_event_id: `e2e-evt-${providerId}-${dia}`,
+    starts_at: `${dia}T12:00:00Z`,
+    ends_at: `${dia}T21:00:00Z`,
+    status: "confirmed",
+    transparency: "opaque",
+  });
+
+  try {
+    await page.goto("/login");
+    await page.getByLabel(/e-?mail/i).fill(usuario.email);
+    await page.getByLabel(/senha/i).fill(creds.password);
+    await page.getByRole("button", { name: "Entrar", exact: true }).click();
+    await page.waitForURL(/\/app(\/|$)/, { timeout: 20_000 });
+
+    await page.goto("/app/agenda/profissionais");
+    const cartao = page.getByTestId(`profissional-${providerId}`);
+    await expect(cartao).toBeVisible({ timeout: 20_000 });
+    // O selo do vínculo, com o nome da agenda.
+    await expect(cartao.getByText(`Google: ${calendarioNome}`)).toBeVisible({ timeout: 20_000 });
+
+    // O dia inteiro tomado lá fora: a mesma rota da tela e da IA não oferece nada.
+    const r = await page.request.get(
+      `/api/v1/agenda/horarios-livres?event_type_id=${tipoId}&provider_id=${providerId}&de=${dia}T00:00:00-03:00&ate=${dia}T23:59:59-03:00`,
+    );
+    expect(r.ok(), `horarios-livres respondeu ${r.status()}`).toBe(true);
+    const corpo = (await r.json()) as { data?: { slots?: unknown[] } };
+    expect(corpo.data?.slots ?? null, "o Google tomado não bloqueou a grade do dentista").toEqual([]);
+  } finally {
+    // Limpeza na ordem reversa da FK (evento → calendário → conexão). O
+    // profissional sai pelo `semear()` da próxima rodada.
+    await admin.from("calendar_external_events").delete().eq("connection_id", conexaoId);
+    await admin.from("calendar_connection_calendars").delete().eq("connection_id", conexaoId);
+    await admin.from("calendar_connections").delete().eq("id", conexaoId);
+  }
 });

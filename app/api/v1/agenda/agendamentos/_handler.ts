@@ -949,9 +949,10 @@ async function exigeSemSobreposicao(
   args: { donoId: string; providerId?: string | null; inicio: Date; fim: Date; ignorarAgendamentoId?: string },
 ): Promise<void> {
   const oQueOcupa = await coletaOQueOcupa(supabase, ctx.organization_id, {
-    // Profissional externo endereça por `provider_id` e não tem Google — o
-    // `donoId` aqui pode SER o id do provider (caminho de marcar), então o
-    // nulo vale quando há provider, igual ao ramo da grade logo acima.
+    // Profissional externo endereça por `provider_id` (o Google vale quando há
+    // vínculo 9013 — ver `ocupacaoGoogleDoProfissional`); o `donoId` aqui pode
+    // SER o id do provider (caminho de marcar), então o nulo vale quando há
+    // provider, igual ao ramo da grade logo acima.
     donoId: args.providerId ? null : args.donoId,
     providerId: args.providerId ?? null,
     de: args.inicio,

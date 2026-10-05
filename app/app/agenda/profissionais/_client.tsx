@@ -46,6 +46,10 @@ import {
   excluirProfissional,
   salvarJornadaProfissional,
 } from "@/app/actions/agenda/providers";
+import {
+  desvincularGoogleDoProfissional,
+  vincularGoogleDoProfissional,
+} from "@/app/actions/agenda/provider-google";
 
 const DOW_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
@@ -58,14 +62,36 @@ interface ProfissionalInicial {
   schedule: { timezone: string; windows: ScheduleWindow[] };
 }
 
+interface VinculoGoogleInicial {
+  providerId: string;
+  calendarId: string;
+  nome: string;
+}
+
+interface AgendaDisponivel {
+  id: string;
+  nome: string;
+  elegivel: boolean;
+}
+
 interface ProfissionaisClientProps {
   canWrite: boolean;
   iniciais: ProfissionalInicial[];
+  googleHabilitado?: boolean;
+  vinculosIniciais?: VinculoGoogleInicial[];
+  agendas?: AgendaDisponivel[];
 }
 
-export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientProps) {
+export function ProfissionaisClient({
+  canWrite,
+  iniciais,
+  googleHabilitado = false,
+  vinculosIniciais = [],
+  agendas = [],
+}: ProfissionaisClientProps) {
   const t = useT();
   const [profissionais, setProfissionais] = useState(iniciais);
+  const [vinculos, setVinculos] = useState(vinculosIniciais);
   const [nome, setNome] = useState("");
   const [especialidades, setEspecialidades] = useState("");
   const [editandoJornada, setEditandoJornada] = useState<ProfissionalInicial | null>(null);
@@ -137,8 +163,35 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
     });
   };
 
-  const salvarJornada = (schedule: { timezone: string; windows: ScheduleWindow[] }) => {
-    if (!editandoJornada) return;
+  const vincular = (providerId: string, calendarId: string) => {
+    startTransition(async () => {
+      const r = await vincularGoogleDoProfissional(providerId, calendarId);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      const nome = agendas.find((a) => a.id === calendarId)?.nome ?? "";
+      setVinculos((lista) => [
+        ...lista.filter((v) => v.providerId !== providerId),
+        { providerId, calendarId, nome },
+      ]);
+      toast.success(t("Agenda do Google ligada"));
+    });
+  };
+
+  const desvincular = (providerId: string) => {
+    startTransition(async () => {
+      const r = await desvincularGoogleDoProfissional(providerId);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      setVinculos((lista) => lista.filter((v) => v.providerId !== providerId));
+      toast.success(t("Agenda do Google desligada"));
+    });
+  };
+
+  const salvarJornada = (schedule: { timezone: string; windows: ScheduleWindow[] }) => {    if (!editandoJornada) return;
     startTransition(async () => {
       const r = await salvarJornadaProfissional(editandoJornada.id, schedule);
       if (!r.ok) {
@@ -215,6 +268,12 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
               <span className="text-xs text-muted-foreground">
                 {p.proximas} {t(p.proximas === 1 ? "consulta futura" : "consultas futuras")}
               </span>
+              {googleHabilitado &&
+                vinculos.find((v) => v.providerId === p.id) && (
+                  <Badge variant="outline">
+                    {t("Google")}: {vinculos.find((v) => v.providerId === p.id)?.nome}
+                  </Badge>
+                )}
               {canWrite && (
                 <Button
                   variant="outline"
@@ -268,11 +327,46 @@ export function ProfissionaisClient({ canWrite, iniciais }: ProfissionaisClientP
                         {t("Excluir")}
                       </AlertDialogAction>
                     </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+              </div>
+              {googleHabilitado && canWrite && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Select
+                    value={vinculos.find((v) => v.providerId === p.id)?.calendarId ?? ""}
+                    onValueChange={(v) => v && vincular(p.id, v)}
+                    disabled={isPending}
+                  >
+                    <SelectTrigger
+                      className="min-w-[200px] flex-1"
+                      aria-label={t("Agenda do Google deste profissional")}
+                    >
+                      <SelectValue placeholder={t("Ligar agenda do Google…")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {agendas
+                        .filter((a) => a.elegivel)
+                        .map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.nome}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  {vinculos.some((v) => v.providerId === p.id) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => desvincular(p.id)}
+                    >
+                      {t("Desligar")}
+                    </Button>
+                  )}
+                </div>
               )}
-            </div>
-          </Card>
+            </Card>
         ))}
       </div>
 

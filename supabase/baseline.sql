@@ -21121,14 +21121,17 @@ begin
   end if;
   return new;
  end if;
- decision:=auth.uid()=old.owner_user_id and public.fn_role_at_least(new.organization_id,'agent') and public.fn_support_write_allowed(new.organization_id)
+ decision:=((old.provider_id is null and auth.uid()=old.owner_user_id and public.fn_role_at_least(new.organization_id,'agent'))
+  or (old.provider_id is not null and auth.uid() is not null and public.fn_role_at_least(new.organization_id,'manager')))
+  and public.fn_support_write_allowed(new.organization_id)
   and old.google_conflict is not null and new.google_conflict-'resolution'=old.google_conflict-'resolution'
   and new.google_conflict->'resolution'->>'actor_id'=auth.uid()::text
   and new.google_conflict->'resolution'->>'choice' in ('google','local','preserve_remote')
   and old.google_conflict->>'revision'=old.revision::text and old.google_conflict->>'local_revision'=old.google_local_revision::text
   and old.google_conflict->>'etag' is not distinct from old.google_etag;
  if auth.uid() is not null and (row(new.google_synced_at,new.google_sync_error) is distinct from row(old.google_synced_at,old.google_sync_error)
-  or (new.google_next_attempt_at is distinct from old.google_next_attempt_at and not coalesce(auth.uid()=old.owner_user_id and public.fn_role_at_least(new.organization_id,'agent') and public.fn_support_write_allowed(new.organization_id)
+  or (new.google_next_attempt_at is distinct from old.google_next_attempt_at and not coalesce((((old.provider_id is null and auth.uid()=old.owner_user_id and public.fn_role_at_least(new.organization_id,'agent'))
+   or (old.provider_id is not null and auth.uid() is not null and public.fn_role_at_least(new.organization_id,'manager'))) and public.fn_support_write_allowed(new.organization_id))
     and new.google_next_attempt_at<=clock_timestamp() and (old.google_conflict is null or decision),false))) then
   raise exception 'google_metadata_private' using errcode='42501';end if;
  if auth.uid() is not null and ((new.google_conflict is distinct from old.google_conflict and not coalesce(decision,false)) or row(new.google_base_projection,new.google_pending_write,new.google_claim_token,new.google_claim_epoch,new.google_claim_until,new.google_synced_local_revision,new.google_etag,new.google_connection_id,new.google_calendar_id,new.google_event_id)
@@ -21692,15 +21695,31 @@ begin
  if contact is not null and exists(select 1 from public.contacts where organization_id=p_org and id=contact and is_anonymized) then
   if p_action='claim' then return jsonb_build_object('terminal','redacted');end if;
   raise exception 'google_contact_redacted' using errcode='42501';end if;
- if not exists(select 1 from public.user_organizations where organization_id=p_org and user_id=a.owner_user_id and revoked_at is null) then
-  raise exception 'google_owner_unavailable' using errcode='42501';end if;
+ -- O dono com login trava pelo vínculo de membro; o profissional externo (sem
+ -- login) trava pela linha em `providers` na org — provider sem linha é linha
+ -- órfã e não vai ao Google.
+ if a.provider_id is null then
+  if not exists(select 1 from public.user_organizations where organization_id=p_org and user_id=a.owner_user_id and revoked_at is null) then
+   raise exception 'google_owner_unavailable' using errcode='42501';end if;
+ else
+  if not exists(select 1 from public.providers where organization_id=p_org and id=a.provider_id) then
+   raise exception 'google_owner_unavailable' using errcode='42501';end if;
+ end if;
  if p_action='claim' then
   if a.google_claim_until>clock_timestamp() then return null;end if;
   if a.google_event_id is null and a.status<>'cancelled' then
-   select k.* into c from public.calendar_connection_calendars k join public.calendar_connections x on x.id=k.connection_id and x.organization_id=k.organization_id
-    where k.organization_id=p_org and x.user_id=a.owner_user_id and k.is_destination;
-   if not found or (select count(*) from public.calendar_connection_calendars k join public.calendar_connections x on x.id=k.connection_id and x.organization_id=k.organization_id where k.organization_id=p_org and x.user_id=a.owner_user_id and k.is_destination)<>1 then
-    update public.calendar_appointments set google_sync_error='Escolha uma agenda de destino nas configurações.',google_next_attempt_at=now()+interval '15 minutes' where organization_id=p_org and id=p_id;return null;
+   if a.provider_id is not null then
+    select k.* into c from public.calendar_connection_calendars k join public.calendar_connections x on x.id=k.connection_id and x.organization_id=k.organization_id
+     where k.organization_id=p_org and k.provider_id=a.provider_id;
+    if not found then
+     update public.calendar_appointments set google_sync_error='Ligue este profissional a uma agenda do Google nas configurações.',google_next_attempt_at=now()+interval '15 minutes' where organization_id=p_org and id=p_id;return null;
+    end if;
+   else
+    select k.* into c from public.calendar_connection_calendars k join public.calendar_connections x on x.id=k.connection_id and x.organization_id=k.organization_id
+     where k.organization_id=p_org and x.user_id=a.owner_user_id and k.is_destination;
+    if not found or (select count(*) from public.calendar_connection_calendars k join public.calendar_connections x on x.id=k.connection_id and x.organization_id=k.organization_id where k.organization_id=p_org and x.user_id=a.owner_user_id and k.is_destination)<>1 then
+     update public.calendar_appointments set google_sync_error='Escolha uma agenda de destino nas configurações.',google_next_attempt_at=now()+interval '15 minutes' where organization_id=p_org and id=p_id;return null;
+    end if;
    end if;
    if not c.available or c.access_role not in ('owner','writer') then
     update public.calendar_appointments set google_sync_error='A agenda de destino não permite publicação. Confira o acesso nas configurações.',google_next_attempt_at=now()+interval '15 minutes' where organization_id=p_org and id=p_id;return null;end if;
@@ -21714,8 +21733,13 @@ begin
    or a.google_claim_until is null or a.google_claim_until<=clock_timestamp() then raise exception 'google_stale' using errcode='40001';end if;
   if p_action='renew' then
    if a.revision::text is distinct from p_args->>'revision' or a.google_local_revision::text is distinct from p_args->>'local_revision' then raise exception 'google_stale' using errcode='40001';end if;
-   if not exists(select 1 from public.calendar_connections x join public.calendar_connection_calendars k on k.organization_id=x.organization_id and k.connection_id=x.id
-    where x.organization_id=p_org and x.id=a.google_connection_id and x.user_id=a.owner_user_id and x.status='healthy' and k.external_calendar_id=a.google_calendar_id and k.available and k.access_role in ('writer','owner')) then raise exception 'google_connection_unavailable' using errcode='42501';end if;
+   if a.provider_id is not null then
+    if not exists(select 1 from public.calendar_connections x join public.calendar_connection_calendars k on k.organization_id=x.organization_id and k.connection_id=x.id
+     where x.organization_id=p_org and x.id=a.google_connection_id and k.provider_id=a.provider_id and x.status='healthy' and k.external_calendar_id=a.google_calendar_id and k.available and k.access_role in ('writer','owner')) then raise exception 'google_connection_unavailable' using errcode='42501';end if;
+   else
+    if not exists(select 1 from public.calendar_connections x join public.calendar_connection_calendars k on k.organization_id=x.organization_id and k.connection_id=x.id
+     where x.organization_id=p_org and x.id=a.google_connection_id and x.user_id=a.owner_user_id and x.status='healthy' and k.external_calendar_id=a.google_calendar_id and k.available and k.access_role in ('writer','owner')) then raise exception 'google_connection_unavailable' using errcode='42501';end if;
+   end if;
    update public.calendar_appointments set google_claim_until=clock_timestamp()+interval '90 seconds' where organization_id=p_org and id=p_id returning * into a;
   elsif p_action='release' then
    update public.calendar_appointments set google_claim_token=null,google_claim_until=null where organization_id=p_org and id=p_id;return 'true';
@@ -21731,7 +21755,11 @@ begin
      meeting_next_attempt_at=case when meeting_state='pending' then now()+make_interval(secs=>least(900,15*power(2,least(meeting_attempts,6)))::double precision+floor(random()*5)) else meeting_next_attempt_at end
      where organization_id=p_org and id=p_id;return 'true';end if;
    if a.google_event_id is not null then
-    select * into conn from public.calendar_connections where organization_id=p_org and id=a.google_connection_id and user_id=a.owner_user_id;
+    if a.provider_id is not null then
+     select * into conn from public.calendar_connections where organization_id=p_org and id=a.google_connection_id;
+    else
+     select * into conn from public.calendar_connections where organization_id=p_org and id=a.google_connection_id and user_id=a.owner_user_id;
+    end if;
     select * into c from public.calendar_connection_calendars where organization_id=p_org and connection_id=a.google_connection_id and external_calendar_id=a.google_calendar_id;
     if conn.id is null or conn.status<>'healthy' or c.id is null or not c.available then raise exception 'google_connection_unavailable' using errcode='42501';end if;
    end if;
@@ -21750,7 +21778,7 @@ begin
     if result?'apply_remote' then
      if a.status not in ('pending','confirmed') then raise exception 'google_outcome_protected' using errcode='40001';end if;
      if not coalesce((remote->>'cancelled')::boolean,false) and exists(select 1 from public.calendar_appointments other
-      where other.organization_id=p_org and other.owner_user_id=a.owner_user_id and other.id<>a.id and other.status in ('pending','confirmed')
+      where other.organization_id=p_org and ((a.provider_id is null and other.owner_user_id=a.owner_user_id) or (a.provider_id is not null and other.provider_id=a.provider_id)) and other.id<>a.id and other.status in ('pending','confirmed')
       and other.starts_at<(remote->>'ends_at')::timestamptz and other.ends_at>(remote->>'starts_at')::timestamptz) then
       return jsonb_build_object('overlap',true);end if;
      changed:=row(a.starts_at,a.ends_at,a.time_zone,a.status='cancelled') is distinct from row((remote->>'starts_at')::timestamptz,(remote->>'ends_at')::timestamptz,remote->>'time_zone',(remote->>'cancelled')::boolean);
@@ -23188,7 +23216,8 @@ begin
  select contact_id into contact from public.calendar_appointments where organization_id=p_org and id=p_id;
  if contact is not null then perform public.fn_service_lock(p_org,contact);end if;
  select * into a from public.calendar_appointments where organization_id=p_org and id=p_id for update;
- if not found or a.owner_user_id is distinct from auth.uid() then raise exception 'google_resolution_forbidden' using errcode='42501';end if;
+ if not found or (a.provider_id is null and a.owner_user_id is distinct from auth.uid())
+  or (a.provider_id is not null and not public.fn_role_at_least(p_org,'manager')) then raise exception 'google_resolution_forbidden' using errcode='42501';end if;
  if a.revision::text is distinct from p_revision or a.google_local_revision::text is distinct from p_local_revision
   or a.google_etag is distinct from p_etag then raise exception 'google_stale' using errcode='40001';end if;
  if p_choice='retry' then
@@ -44821,6 +44850,63 @@ create trigger trg_demanda_marca_proximo_passo_com_o_caso
 
 notify pgrst, 'reload schema';
 
+-- ---- Google Agenda do profissional: leitura via vínculo (migration 9013) ----
+--
+-- Só a FUNÇÃO mora aqui, antes da VARREDURA anon (regra vigiada por
+-- `tests/unit/varredura-anon-e-o-ultimo-bloco.test.ts`). A coluna
+-- `calendar_connection_calendars.provider_id` e o índice único nascem no bloco
+-- da 9013 no FIM do arquivo, junto das tabelas — `providers` (9003) só existe
+-- lá embaixo, e este ponto do arquivo ainda não a tem. Função `language sql`
+-- valida o corpo no primeiro uso, não na criação: na instalação e na
+-- atualização o arquivo inteiro aplica antes de qualquer chamada.
+create or replace function public.fn_agenda_ocupacao_google_do_profissional(
+  p_org uuid,
+  p_provider uuid,
+  p_de timestamptz,
+  p_ate timestamptz
+)
+returns table (
+  starts_at timestamptz,
+  ends_at timestamptz,
+  transparency text,
+  status text,
+  connection_status text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select e.starts_at, e.ends_at, e.transparency, e.status, c.status
+    from public.calendar_selected_external_events e
+    join public.calendar_connections c
+      on c.organization_id = e.organization_id
+     and c.id = e.connection_id
+    join public.calendar_connection_calendars k
+      on k.organization_id = e.organization_id
+     and k.connection_id = e.connection_id
+     and k.external_calendar_id = e.external_calendar_id
+     and k.provider_id = p_provider
+    join public.providers p
+      on p.organization_id = e.organization_id
+     and p.id = k.provider_id
+   where (auth.uid() is null
+          or p_org in (select public.fn_user_org_ids())
+          or public.fn_is_platform_admin())
+     and e.organization_id = p_org
+     and p.organization_id = p_org
+     and e.starts_at < p_ate
+     and e.ends_at > p_de;
+$$;
+
+comment on function public.fn_agenda_ocupacao_google_do_profissional(uuid, uuid, timestamptz, timestamptz) is
+  'Ocupação do Google da agenda vinculada a um PROFISSIONAL EXTERNO (migration 9013): mesma forma da fn_agenda_ocupacao_google_do_dono (0260), com o dono trocado pelo vínculo calendar_connection_calendars.provider_id. Sem vínculo, devolve zero linhas (igual a "sem Google"). Devolve ocupação, nunca conteúdo do evento.';
+
+revoke execute on function public.fn_agenda_ocupacao_google_do_profissional(uuid, uuid, timestamptz, timestamptz) from public, anon;
+grant  execute on function public.fn_agenda_ocupacao_google_do_profissional(uuid, uuid, timestamptz, timestamptz) to authenticated, service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ DE PROPÓSITO, NENHUMA FUNÇÃO É CRIADA DEPOIS DESTE BLOCO. Apêndice que cria
@@ -46958,3 +47044,37 @@ alter table public.platform_branding
     logo_path_dark is null
     or logo_path_dark ~ '^platform/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$'
   );
+
+-- ---- Google Agenda por profissional: coluna do vínculo (migration 9013) ----
+--
+-- A coluna mora aqui, no FIM do arquivo, porque `providers` (bloco da 9003,
+-- acima) só existe neste ponto — antes da VARREDURA anon ela ainda não existe
+-- e o `add column ... references` quebraria o install. A função que a lê
+-- (`fn_agenda_ocupacao_google_do_profissional`) está antes da VARREDURA, onde
+-- a regra manda função nova ficar. Transcrição fiel da 9013 §§1–2.
+-- Idempotente: coluna e índice com `if not exists`, e o índice único com
+-- `drop` antes do `create`.
+alter table public.calendar_connection_calendars
+  add column if not exists provider_id uuid references public.providers(id) on delete set null;
+
+comment on column public.calendar_connection_calendars.provider_id is
+  'O PROFISSIONAL EXTERNO dono deste calendário vinculado (migration 9013), quando a agenda não é de um usuário e sim de um dentista/corretor sem login. NULL = uso por usuário (o comportamento de antes). Com provider, a linha é o vínculo "uma agenda para cada profissional" da conta central da clínica.';
+
+-- Um profissional = uma agenda. Parcial porque NULL não colide com NULL numa
+-- UNIQUE e as linhas de usuário (a maioria) ficam fora do índice.
+drop index if exists public.calendar_connection_calendars_provider_unico;
+create unique index if not exists calendar_connection_calendars_provider_unico
+  on public.calendar_connection_calendars (organization_id, provider_id)
+  where provider_id is not null;
+
+-- ---- Push Google para profissional: o cron enxerga provider (migration 9014) ----
+--
+-- O índice parcial do push mora aqui, no FIM, porque o predicado cita
+-- `provider_id` de `calendar_appointments` (bloco da 9003, acima): no ponto da
+-- 0225, onde o índice nasce owner-only, a coluna ainda não existe e o CREATE
+-- INDEX quebraria o install. Estado final: o cron lê pendência de dono OU de
+-- profissional. Transcrição fiel da 9014 §1. Idempotente: `drop + create`.
+drop index if exists public.calendar_appointments_pendente_no_google_idx;
+create index if not exists calendar_appointments_pendente_no_google_idx
+ on public.calendar_appointments(google_next_attempt_at)
+ where needs_google_push and (owner_user_id is not null or provider_id is not null);

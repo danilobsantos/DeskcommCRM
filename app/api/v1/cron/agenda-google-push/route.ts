@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { googlePushCandidates } from "@/lib/agenda/google/candidates";
-import { apenasDeMembrosAtivos } from "@/lib/agenda/google/membros";
+import { apenasDeMembrosAtivos, apenasDeVinculosAtivos } from "@/lib/agenda/google/membros";
 import { reconcileAppointment } from "@/lib/agenda/google/sync-executor";
 import { audit } from "@/lib/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -20,7 +20,33 @@ async function executar(req: NextRequest) {
       { status: 500 },
     );
   const effects = new Map<string, { processados: number; falhas: number }>();
-  const active = await apenasDeMembrosAtivos(db, data ?? []);
+  // Candidatos de dono-usuário passam pelo filtro de membro ativo; candidatos
+  // de profissional (9014, `user_id` nulo) passam pelo filtro de vínculo — são
+  // perguntas diferentes sobre autoridades diferentes, então são duas listas.
+  const linhas = (data ?? []) as { id: string; organization_id: string; user_id: string | null; provider_id: string | null }[];
+  const [deUsuarios, deProfissionais] = await Promise.all([
+    apenasDeMembrosAtivos(
+      db,
+      linhas.filter(
+        (l): l is (typeof linhas)[number] & { user_id: string } => l.user_id !== null,
+      ),
+    ),
+    apenasDeVinculosAtivos(
+      db,
+      linhas
+        .filter((l) => l.user_id === null && l.provider_id !== null)
+        .map((l) => ({
+          id: l.id,
+          organization_id: l.organization_id,
+          provider_id: l.provider_id as string,
+        })),
+    ),
+  ]);
+  const porId = new Map<string, (typeof linhas)[number]>(
+    deUsuarios.map((l) => [l.id, l]),
+  );
+  for (const l of deProfissionais) porId.set(l.id, l as (typeof linhas)[number]);
+  const active = linhas.filter((l) => porId.has(l.id));
   for (const item of active) {
     let result: string;
     try {

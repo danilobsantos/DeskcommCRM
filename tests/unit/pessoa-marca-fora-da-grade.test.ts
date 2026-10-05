@@ -173,6 +173,34 @@ function bancoEmMemoria(tabelas: Record<string, Linha[]>, olhar: Olhar = "tudo")
         );
         return { data: doDono.map((l) => ({ status: l.status, last_sync_at: l.last_sync_at })), error: null };
       }
+      // O Google do PROFISSIONAL (9014): o dono vem pelo vínculo, não por
+      // `user_id` — mesma forma do ramo acima, com o filtro trocado. Sem
+      // vínculo, zero linhas (igual a "sem Google").
+      if (fn === "fn_agenda_ocupacao_google_do_profissional") {
+        const vinculos = (tabelas.calendar_connection_calendars ?? []).filter(
+          (l) => l.organization_id === args.p_org && l.provider_id === args.p_provider,
+        );
+        const ocupam = (tabelas.calendar_selected_external_events ?? []).filter((l) =>
+          vinculos.some(
+            (v) =>
+              l.organization_id === args.p_org &&
+              l.connection_id === v.connection_id &&
+              l.external_calendar_id === v.external_calendar_id &&
+              instante(l.starts_at) < instante(args.p_ate) &&
+              instante(l.ends_at) > instante(args.p_de),
+          ),
+        );
+        return {
+          data: ocupam.map((l) => ({
+            starts_at: l.starts_at,
+            ends_at: l.ends_at,
+            transparency: l.transparency,
+            status: l.status,
+            connection_status: (l.calendar_connections as Linha).status,
+          })),
+          error: null,
+        };
+      }
       if (fn === "fn_appointment_change") {
         const linha = (tabelas.calendar_appointments ?? []).find((l) => l.id === args.p_id);
         if (!linha) return { data: null, error: { code: "P0002", message: "não achou" } };
@@ -394,6 +422,111 @@ describe("marcar — a regra no ponto de uso", () => {
       criados(banco),
       "o encaixe marcou em cima de um compromisso do Google Agenda que a grade estava escondendo",
     ).toHaveLength(0);
+  });
+});
+
+describe("profissional externo com Google (9014) — o encaixe lê o vínculo", () => {
+  // Quarta 07/10/2026, 10:00 em SP (13:00Z), dentro da jornada do dentista. O
+  // evento do Google ocupa 10:00–11:00: marcar nele é RECUSADO para qualquer
+  // ator — o encaixe da pessoa não passa por cima do Google do dentista.
+  const PROV = "dddddddd-0000-4000-8000-00000000000d";
+
+  function bancoDoDentista(comVinculo: boolean, googleLigado = true): Banco {
+    return bancoEmMemoria({
+      calendar_event_types: [
+        {
+          id: TIPO,
+          organization_id: ORG,
+          name: "Avaliação",
+          is_active: true,
+          duration_minutes: 60,
+          buffer_before_minutes: 0,
+          buffer_after_minutes: 0,
+          minimum_notice_minutes: 0,
+          slot_interval_minutes: null,
+          booking_window_days: 30,
+          default_owner_user_id: null,
+          requires_confirmation: false,
+          location_kind: "in_person",
+          location_details: null,
+        },
+      ],
+      providers: [
+        {
+          organization_id: ORG,
+          id: PROV,
+          active: true,
+          schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "09:00", end: "18:00" }] },
+        },
+      ],
+      organizations: [
+        {
+          id: ORG,
+          settings: {
+            scheduling: {
+              providers_enabled: true,
+              ...(googleLigado ? { providers_google_enabled: true } : {}),
+            },
+          },
+        },
+      ],
+      calendar_connection_calendars: comVinculo
+        ? [
+            {
+              organization_id: ORG,
+              connection_id: CONEXAO,
+              external_calendar_id: "dentista",
+              provider_id: PROV,
+            },
+          ]
+        : [],
+      calendar_selected_external_events: [
+        {
+          organization_id: ORG,
+          connection_id: CONEXAO,
+          external_calendar_id: "dentista",
+          starts_at: NA_GRADE,
+          ends_at: "2026-10-07T14:00:00.000Z",
+          transparency: "opaque",
+          status: "confirmed",
+          calendar_connections: { user_id: DONO, status: "healthy" },
+        },
+      ],
+      calendar_appointments: [],
+      calendar_availability_exceptions: [],
+    });
+  }
+
+  it("com vínculo: a pessoa é RECUSADA em cima do Google do dentista", async () => {
+    const banco = bancoDoDentista(true);
+    await expect(
+      marcarAgendamentoHandler(
+        banco.client,
+        ctx(PESSOA),
+        { event_type_id: TIPO, provider_id: PROV, starts_at: NA_GRADE },
+      ),
+    ).rejects.toMatchObject(RECUSA);
+    expect(criados(banco), "o encaixe marcou em cima do Google do dentista vinculado").toHaveLength(0);
+  });
+
+  it("sem vínculo: o mesmo horário MARCA (o Google fora do vínculo não ocupa)", async () => {
+    const banco = bancoDoDentista(false);
+    await marcarAgendamentoHandler(
+      banco.client,
+      ctx(PESSOA),
+      { event_type_id: TIPO, provider_id: PROV, starts_at: NA_GRADE },
+    );
+    expect(criados(banco)).toHaveLength(1);
+  });
+
+  it("sub-flag desligada: o vínculo gravado é ignorado e MARCA", async () => {
+    const banco = bancoDoDentista(true, false);
+    await marcarAgendamentoHandler(
+      banco.client,
+      ctx(PESSOA),
+      { event_type_id: TIPO, provider_id: PROV, starts_at: NA_GRADE },
+    );
+    expect(criados(banco), "desligar pausou a leitura: com a flag off, o vínculo não ocupa").toHaveLength(1);
   });
 });
 
