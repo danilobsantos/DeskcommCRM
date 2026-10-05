@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { isMfaEnrolled, loadAuthUser, requiresMfa, resolveActiveOrg } from "@/lib/auth/server";
 import { DEFAULT_VISIBILITY_MODE, roleAtLeast, type VisibilityMode } from "@/lib/auth/types";
 import { clientePelaAgendaLigado } from "@/lib/schemas/settings";
+import { providersHabilitados } from "@/lib/agenda/providers";
 import { AuthProvider } from "@/hooks/auth/AuthProvider";
 import { ProvedorDeCoresDasEtiquetas } from "@/components/tags/CoresDasEtiquetas";
 import { AppShell } from "./_components/AppShell";
@@ -134,6 +135,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     activeOrg = {
       ...activeOrg,
       visibility_mode: mode ?? DEFAULT_VISIBILITY_MODE,
+      // Mesma linha de `settings` já lida acima — nenhuma consulta a mais.
+      // Expõe a flag de profissionais externos ao client para o sidebar
+      // esconder/mostrar o item (gate real é a página, que relê o settings).
+      providers_enabled: providersHabilitados(orgRow?.settings),
       // Mesma linha de `settings` já lida acima — nenhuma consulta a mais.
       cliente_pela_agenda: clientePelaAgendaLigado(orgRow?.settings),
       modulos_ligados: modulos,
