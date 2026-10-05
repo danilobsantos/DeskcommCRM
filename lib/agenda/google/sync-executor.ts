@@ -409,11 +409,31 @@ export async function reconcileAppointment(
     if (!remote) throw new Error("Evento sem projeção válida.");
     // O e-mail da ficha vai junto de uma alteração, nunca sozinho — ver
     // `comConviteDaFicha` (decisão do dono, doc 36: sem convite em massa na
-    // 1ª sincronização depois da atualização).
+    // 1ª sincronização depois da atualização). `trocouPaciente` (9015) entra
+    // na MESMA regra: `local > synced` com projeções iguais SÓ acontece quando
+    // o que mudou não é projetado — e da superfície editável a única coluna
+    // assim é `contact_id` (o carimbo da 9015 §2 avança a revisão do Google
+    // nela). `revision_started_at` posterior ao último sync prova que o
+    // DOMÍNIO virou junto: um ajuste só de espaço em título/observação avança
+    // a revisão do Google mas não a do domínio, e não entra. Sem isto a troca
+    // convergia em silêncio e o paciente antigo ficava convidado.
+    const dominioVirouDepoisDoSync =
+      a.google_synced_at !== null &&
+      Date.parse(a.revision_started_at) > Date.parse(a.google_synced_at);
+    // O mesmo sinal que a regra acima consome: refaz a lista de convidados
+    // em vez de acrescentar, senão o paciente antigo sobrevivia no evento.
+    const houveTrocaDePaciente =
+      wasPublished &&
+      !local.shared.cancelled &&
+      event?.status !== "cancelled" &&
+      a.status !== "cancelled" &&
+      BigInt(a.google_local_revision) > BigInt(a.google_synced_local_revision) &&
+      dominioVirouDepoisDoSync;
     const decision = comConviteDaFicha(compare(base, local, remote), {
       temEmail: Boolean(contato?.email),
       eventoJaTemOEmail: Boolean(contato?.email && event && eventoTemEmail(event, contato.email)),
       cancelado: event?.status === "cancelled" || a.status === "cancelled",
+      trocouPaciente: houveTrocaDePaciente,
     });
     if (decision.kind === "conflict") {
       await conflict(decision.reason!, remote, decision.groups);
@@ -485,6 +505,9 @@ export async function reconcileAppointment(
             base,
             decision.groups,
             decision.shared,
+            // TROCA DE PACIENTE (9015): refaz a lista de convidados em vez de
+            // acrescentar — senão o paciente antigo sobrevivia no evento.
+            houveTrocaDePaciente,
           ),
       event.etag ?? null,
       decision.groups,

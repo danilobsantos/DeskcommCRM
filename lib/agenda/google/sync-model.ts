@@ -209,12 +209,55 @@ export function compare(base: Base | null, local: Projection, remote: Projection
  */
 export function comConviteDaFicha(
   decision: Comparison,
-  ficha: { temEmail: boolean; eventoJaTemOEmail: boolean; cancelado: boolean },
+  ficha: {
+    temEmail: boolean;
+    eventoJaTemOEmail: boolean;
+    cancelado: boolean;
+    /**
+     * TROCA DE PACIENTE (9015): `local > synced` com projeções iguais. Vai
+     * para `trocaDePaciente` abaixo — fica NESTA assinatura (e não numa
+     * condição própria no executor) porque o guarda
+     * `agenda-convite-da-ficha-nao-e-retroativo.test.ts` fixa que o executor
+     * decide pela regra: `const decision = comConviteDaFicha(compare(...))`.
+     */
+    trocouPaciente?: boolean;
+  },
 ): Comparison {
-  if (decision.kind !== "publish") return decision;
+  if (decision.kind === "converged")
+    return trocaDePaciente(decision, { trocou: ficha.trocouPaciente ?? false });
   if (!ficha.temEmail || ficha.eventoJaTemOEmail || ficha.cancelado) return decision;
   if (decision.groups.includes("guest")) return decision;
   return { ...decision, groups: [...decision.groups, "guest"] };
+}
+/**
+ * A TROCA DE PACIENTE vira `publish` do grupo `guest`, mesmo convergente.
+ *
+ * O carimbo do Google (`fn_google_projection_stamp`, migration 9015 §2)
+ * avança `google_local_revision` quando `contact_id` muda, mas o e-mail do
+ * paciente não entra em projeção nenhuma (mora em `contacts`) — então o
+ * `compare` dá `converged` e, sem este upgrade, o reconcile carimbava sync e
+ * o paciente ANTIGO ficava convidado no evento para sempre. Numa clínica
+ * isto é defeito de privacidade: o ex-paciente segue recebendo cada
+ * atualização do horário de outra pessoa.
+ *
+ * O preço conhecido: a lista de convidados é REFEITA (ver
+ * `removerDesconhecidos` em `delta`) — um e-mail que o dono adicionou À MÃO
+ * no Google cai junto na republicação. Ele não volta sozinho; o estado fica
+ * visível em `SincronizacaoDoCompromisso` e o dono readiciona. Trocar
+ * privacidade certa por conveniência incerta seria a escolha errada.
+ *
+ * Compromisso antigo que ninguém tocou continua `converged`: o sinal exige
+ * `local > synced` (algo local mudou desde o último aceite) E
+ * `revision_started_at` posterior ao sync (o DOMÍNIO virou — um ajuste só de
+ * espaço em título/observação avança a revisão do Google mas não a do
+ * domínio, e não entra). Decisão do dono (doc 36) preservada.
+ */
+export function trocaDePaciente(
+  decision: Comparison,
+  sinal: { trocou: boolean },
+): Comparison {
+  if (decision.kind !== "converged" || !sinal.trocou) return decision;
+  return { ...decision, kind: "publish", groups: ["guest"] };
 }
 export function checkpoint(
   base: Base | null,
@@ -244,6 +287,14 @@ export function delta(
   base: Base | null,
   changed: readonly Group[],
   shared: boolean,
+  /**
+   * TROCA DE PACIENTE (ver `trocaDePaciente`): a lista de convidados é
+   * refeita do zero em vez de incremental — só ficam organizador,
+   * acompanhante (`guest_email`) e paciente atual. Sem isto o paciente antigo
+   * SOBREVIVIA ao `kept` abaixo (o filtro só remove quem casa com o hash
+   * gerido, e o e-mail antigo nunca foi gerido) e a troca virava ADIÇÃO.
+   */
+  removerDesconhecidos = false,
 ): Record<string, unknown> {
   const body = paraEventoDoGoogle(a);
   const patch: Record<string, unknown> = {};
@@ -259,12 +310,18 @@ export function delta(
       const wantedGuest = a.guest_email?.trim().toLowerCase();
       const wantedContact = a.contact_email?.trim().toLowerCase();
       const existing = e.attendees ?? [];
-      const kept = existing.filter(
-        (p) =>
-          p.organizer ||
-          hash(p.email?.toLowerCase()) !== base?.remote.guest ||
-          p.email?.toLowerCase() === wantedGuest,
-      );
+      const emailÉ = (atual: string | null | undefined, esperado: string | null | undefined) =>
+        Boolean(esperado) && (atual?.trim().toLowerCase() ?? "") === esperado;
+      const kept = removerDesconhecidos
+        ? existing.filter(
+            (p) => p.organizer || emailÉ(p.email, wantedGuest) || emailÉ(p.email, wantedContact),
+          )
+        : existing.filter(
+            (p) =>
+              p.organizer ||
+              hash(p.email?.toLowerCase()) !== base?.remote.guest ||
+              p.email?.toLowerCase() === wantedGuest,
+          );
       if (wantedGuest && !kept.some((p) => p.email?.toLowerCase() === wantedGuest))
         kept.push({ email: wantedGuest, responseStatus: "needsAction" });
       // O e-mail da ficha não entra no hash `guest` (stamp SQL só vê
