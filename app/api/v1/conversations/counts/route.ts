@@ -18,7 +18,7 @@ import { traduzir } from "@/lib/i18n/dicionario";
 import { CONVERSATION_TERMINAL_STATUSES } from "@/lib/schemas";
 import { orgTemAutomatico } from "@/lib/ai/agents/org-tem-automatico";
 import { comandosDaFila } from "@/lib/inbox/comando-da-conversa";
-import { aplicarMarcadores, modoDeEtiqueta } from "@/lib/inbox/marcador-da-conversa";
+import { aplicarMarcadores, marcadoresEscolhidos, modoDeEtiqueta } from "@/lib/inbox/marcador-da-conversa";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -106,10 +106,16 @@ export async function GET(req: NextRequest): Promise<Response> {
   const marcadores = sp.getAll("tag");
   const modo = modoDeEtiqueta(sp.get("modo")) ?? "e";
 
-  const filtrosCache: Record<string, string> = {};
+  const filtrosCache: Record<string, string> = {
+    role: activeOrg.role,
+    visibility_mode: activeOrg.visibility_mode ?? "default",
+  };
   if (soNaoLidas) filtrosCache.unread = "true";
   for (const [coluna, valor] of auxiliares) filtrosCache[coluna] = String(valor);
-  for (const m of marcadores) filtrosCache[`tag:${m}`] = modo;
+  if (marcadores.length > 0) {
+    filtrosCache.tags = JSON.stringify(marcadoresEscolhidos(marcadores).sort());
+    filtrosCache.modo = modo;
+  }
 
   const cached = await lerContadoresCache(org, user.id, filtrosCache);
   if (cached) {

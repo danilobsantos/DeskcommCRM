@@ -15,6 +15,9 @@ import { isPublicPath } from "@/lib/auth/public-paths";
 import { McpAuthError } from "@/lib/mcp/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { listaAgendamentos } from "@/lib/agenda/consulta";
+import { donosDaAgenda } from "@/lib/agenda/donos-da-agenda";
+import { lerOcupacaoExterna } from "@/lib/agenda/ocupacao-externa";
 import {
   alterarAgendamentoHandler,
   cancelarAgendamentoHandler,
@@ -24,6 +27,9 @@ import {
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/ai/dispatcher/rate-limit", () => ({ checkRateLimit: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
+vi.mock("@/lib/agenda/consulta", () => ({ listaAgendamentos: vi.fn() }));
+vi.mock("@/lib/agenda/donos-da-agenda", () => ({ donosDaAgenda: vi.fn() }));
+vi.mock("@/lib/agenda/ocupacao-externa", () => ({ lerOcupacaoExterna: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: vi.fn(async () => null) }));
 vi.mock("./_handler", () => ({
@@ -80,6 +86,30 @@ beforeEach(() => {
   vi.mocked(createClient).mockResolvedValue(FAKE_SESSION_CLIENT);
   vi.mocked(createAdminClient).mockReturnValue(FAKE_ADMIN_CLIENT);
   vi.mocked(checkRateLimit).mockResolvedValue({ allowed: true } as never);
+});
+
+describe("GET /api/v1/agenda/agendamentos — páginas da grade", () => {
+  it("continua pelo cursor e traz a ocupação externa somente na primeira página", async () => {
+    sessaoOk();
+    vi.mocked(listaAgendamentos)
+      .mockResolvedValueOnce({ ok: true, agendamentos: [], proximo: "pagina-2" })
+      .mockResolvedValueOnce({ ok: true, agendamentos: [], proximo: null });
+    vi.mocked(donosDaAgenda).mockResolvedValue({ donos: [], erro: null });
+    vi.mocked(lerOcupacaoExterna).mockResolvedValue({ blocos: [], erro: null });
+    const { GET } = await import("./route");
+    const base = `http://localhost/api/v1/agenda/agendamentos?de=2026-10-06T00%3A00%3A00Z&ate=2026-10-07T00%3A00%3A00Z`;
+
+    const primeira = await GET(new NextRequest(base));
+    const segunda = await GET(new NextRequest(`${base}&depois_de=pagina-2`));
+
+    expect(primeira.status).toBe(200);
+    expect((await primeira.json()).meta.proximo).toBe("pagina-2");
+    expect(segunda.status).toBe(200);
+    expect((await segunda.json()).meta.proximo).toBeNull();
+    expect(listaAgendamentos).toHaveBeenLastCalledWith(FAKE_SESSION_CLIENT, ORG_ID,
+      expect.objectContaining({ depoisDe: "pagina-2" }));
+    expect(lerOcupacaoExterna).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("POST /api/v1/agenda/agendamentos — sessão de navegador", () => {

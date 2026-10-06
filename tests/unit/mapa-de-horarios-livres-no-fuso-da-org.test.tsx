@@ -38,6 +38,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgendaInterativa } from "@/components/agenda/AgendaInterativa";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agendamento, Pessoa } from "@/components/agenda/tipos";
 import { partesNoFuso } from "@/lib/agenda/fuso";
 import { ptBR } from "date-fns/locale";
@@ -79,8 +80,9 @@ const PAREDE_ESPERADA = "10:00";
 function montar(fuso: string) {
   const pessoas: Pessoa[] = [];
   const agendamentos: Agendamento[] = [];
+  const queryClient = new QueryClient();
   return render(
-    <AgendaInterativa
+    <QueryClientProvider client={queryClient}><AgendaInterativa
       visao="dia"
       ancora={new Date(2026, 8, 16, 12)}
       agora={new Date("2026-09-16T10:00:00Z")}
@@ -92,7 +94,7 @@ function montar(fuso: string) {
       tipos={[{ id: "t1", nome: "Consulta", duracaoMin: 30 }]}
       onEscolherTipo={vi.fn()}
       onMarcarEm={vi.fn()}
-    />,
+    /></QueryClientProvider>,
   );
 }
 

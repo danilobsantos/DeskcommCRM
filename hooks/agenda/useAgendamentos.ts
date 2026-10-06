@@ -37,36 +37,39 @@ export function useAgendamentos(recorte: RecorteDaGrade | null) {
   return useQuery({
     queryKey: ["agenda", "agendamentos", recorte],
     enabled: recorte !== null,
-    queryFn: async (): Promise<Agendamento[]> => {
+    queryFn: async ({ signal }): Promise<Agendamento[]> => {
       const todos: Agendamento[] = [];
       let cursor: string | undefined;
-      do {
-        const qs = new URLSearchParams({ de: recorte!.de, ate: recorte!.ate });
-        if (recorte!.owner_user_id) qs.set("owner_user_id", recorte!.owner_user_id);
-        if (recorte!.provider_id) qs.set("provider_id", recorte!.provider_id);
-        if (cursor) qs.set("depois_de", cursor);
-        const r = await apiClient.get<AgendamentosResponse>(
-          `/api/v1/agenda/agendamentos?${qs.toString()}`,
-        );
-        const lista =
-          (r as unknown as { data?: AgendamentoListado[] }).data ??
-          (r as unknown as AgendamentoListado[]);
-        for (const a of lista ?? []) {
-          todos.push({
-            id: a.id,
-            revision: a.revision,
-            titulo: a.titulo,
-            responsavelId: a.donoId ?? "",
-            comeca: a.iniciaEm,
-            termina: a.terminaEm,
-            origem: a.origem ?? "ui",
-            situacao: a.situacao as Agendamento["situacao"],
-            quemSeraAtendido: a.contatoNome ?? undefined,
-          });
-        }
-        cursor = r.meta?.proximo ?? undefined;
-      } while (cursor);
-      return todos;
+      try {
+        do {
+          const qs = new URLSearchParams({ de: recorte!.de, ate: recorte!.ate });
+          if (recorte!.owner_user_id) qs.set("owner_user_id", recorte!.owner_user_id);
+          if (recorte!.provider_id) qs.set("provider_id", recorte!.provider_id);
+          if (cursor) qs.set("depois_de", cursor);
+          const r = await apiClient.get<AgendamentosResponse>(
+            `/api/v1/agenda/agendamentos?${qs.toString()}`,
+            { signal },
+          );
+          for (const a of r.data) {
+            todos.push({
+              id: a.id,
+              revision: a.revision,
+              titulo: a.titulo,
+              responsavelId: a.donoId ?? "",
+              comeca: a.iniciaEm,
+              termina: a.terminaEm,
+              origem: a.origem ?? "ui",
+              situacao: a.situacao as Agendamento["situacao"],
+              quemSeraAtendido: a.contatoNome ?? undefined,
+            });
+          }
+          cursor = r.meta?.proximo ?? undefined;
+        } while (cursor);
+        return todos;
+      } catch (err) {
+        if (!signal.aborted) showApiError(err);
+        throw err;
+      }
     },
   });
 }

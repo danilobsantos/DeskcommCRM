@@ -108,6 +108,13 @@ const DISPENSADAS: Record<string, string> = {
     "blocos são LIVRES, e esta spec não lê isso. " +
     "⚠️ A dispensa VENCE se a camada passar a desenhar só os horários livres: aí `> 0` " +
     "volta a medir o calendário, e a spec precisa de `irParaASemanaSeguinte`.",
+  "agenda-profissionais-externos.spec.ts":
+    "não escolhe primeiro bloco livre da grade: semeia um profissional com jornada de " +
+    "segunda a sexta, fixa um dia útil futuro com pelo menos dois dias de aviso, " +
+    "consulta a disponibilidade pela API antes e depois de fechá-lo e navega pela " +
+    "data EXATA que semeou (`dia-fechado-${dia}`). A asserção não depende da " +
+    "quantidade de vagas restantes no dia de hoje. A dispensa vence se passar " +
+    "a clicar no primeiro bloco livre da grade ou a escolher data pela tela.",
 };
 
 /**

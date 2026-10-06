@@ -2679,9 +2679,6 @@ CREATE INDEX IF NOT EXISTS "idx_conversations_open_unassigned" ON "public"."conv
 
 CREATE INDEX IF NOT EXISTS "idx_conversations_org_last_msg" ON "public"."conversations" USING "btree" ("organization_id", "last_message_at" DESC NULLS LAST);
 
--- 0543: índice parcial para a aba Fila (conversas sem responsável e não-terminais).
-CREATE INDEX IF NOT EXISTS "idx_conversations_org_fila" ON "public"."conversations" USING "btree" ("organization_id", "awaiting_since" ASC NULLS LAST, "id" ASC) WHERE ("assigned_to_user_id" IS NULL AND "status" NOT IN ('closed', 'archived', 'resolved'));
-
 
 
 CREATE INDEX IF NOT EXISTS "idx_crm_lead_links_org_target" ON "public"."crm_lead_links" USING "btree" ("organization_id", "target_kind", "target_id");
@@ -47200,3 +47197,8 @@ drop index if exists public.calendar_appointments_pendente_no_google_idx;
 create index if not exists calendar_appointments_pendente_no_google_idx
  on public.calendar_appointments(google_next_attempt_at)
  where needs_google_push and (owner_user_id is not null or provider_id is not null);
+
+-- 9016: a Fila ordena conversas sem responsável e não-terminais por espera.
+create index if not exists idx_conversations_org_fila
+  on public.conversations (organization_id, awaiting_since asc nulls last, id asc)
+  where assigned_to_user_id is null and status not in ('closed', 'archived');

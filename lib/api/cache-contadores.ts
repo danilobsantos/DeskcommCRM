@@ -14,8 +14,23 @@ export interface ContadoresCache {
 }
 
 const TTL_SEGUNDOS = 45;
+const TIMEOUT_MS = 300;
 
 let _redis: Redis | null = null;
+
+async function semEsperarRedis<T>(pedido: Promise<T>): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pedido,
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), TIMEOUT_MS); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function getRedis(): Redis | null {
   if (_redis) return _redis;
@@ -49,7 +64,7 @@ export async function lerContadoresCache(
   if (!redis) return null;
   try {
     const chave = chaveContadores(organizationId, userId, filtros);
-    const cached = await redis.get<ContadoresCache>(chave);
+    const cached = await semEsperarRedis(redis.get<ContadoresCache>(chave));
     return cached ?? null;
   } catch {
     return null;
@@ -66,7 +81,7 @@ export async function gravarContadoresCache(
   if (!redis) return;
   try {
     const chave = chaveContadores(organizationId, userId, filtros);
-    await redis.set(chave, valores, { ex: TTL_SEGUNDOS });
+    await semEsperarRedis(redis.set(chave, valores, { ex: TTL_SEGUNDOS }));
   } catch {
     // Falha de Redis não pode derrubar a resposta — os counts já foram calculados.
   }

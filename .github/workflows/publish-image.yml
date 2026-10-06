@@ -290,6 +290,64 @@ jobs:
         if: always()
         run: docker rm -f smoke 2>/dev/null || true
 
+  # A matriz publica três imagens: PR constrói as três e prova o laço do worker
+  # e o crontab do scheduler, antes de qualquer push para production.
+  imagens-de-fundo-sobem:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build local do worker (sem push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.worker
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: conecta-worker:pr
+          cache-from: type=gha,scope=conecta-worker
+
+      - name: Build local do scheduler (sem push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.scheduler
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: conecta-scheduler:pr
+          cache-from: type=gha,scope=conecta-scheduler
+
+      - name: O laço do event_log carrega dentro da imagem?
+        run: |
+          set -euo pipefail
+          saida=$(docker run --rm --entrypoint pnpm \
+            -e NEXT_PUBLIC_SUPABASE_URL=https://exemplo.supabase.co \
+            -e NEXT_PUBLIC_SUPABASE_ANON_KEY=chave-de-mentira \
+            -e SUPABASE_SERVICE_ROLE_KEY=chave-de-mentira \
+            -e SENTRY_DSN=off \
+            conecta-worker:pr exec tsx scripts/sonda-do-laco-de-event-log.ts)
+          echo "$saida"
+          printf '%s' "$saida" | grep -q '"ok":true'
+          printf '%s' "$saida" | grep -q 'event-log drain: laço carregado'
+
+      - name: O scheduler agenda o drain?
+        run: |
+          set -euo pipefail
+          docker run -d --name cron-smoke -e INTERNAL_SECRET=segredo-de-teste conecta-scheduler:pr
+          docker exec cron-smoke grep -q 'api/v1/cron/event-log-drain' /etc/crontabs/root
+          docker rm -f cron-smoke
+
+      - name: Encerrar scheduler
+        if: always()
+        run: docker rm -f cron-smoke 2>/dev/null || true
+
   # O CANAL `stable` MOVE AQUI, E SÓ AQUI — depois que o conjunto está completo.
   #
   # Antes, `stable` era mais um `type=raw` na lista de tags da matriz, e por isso
@@ -318,7 +376,7 @@ jobs:
     # Sem `always()`, e isso é o ponto: `needs` só libera quando as DUAS entradas
     # deram `success`. Com `always()` o canal andaria por cima de uma irmã que
     # falhou, que é exatamente o defeito de volta com outra roupa.
-    needs: [build-and-push, imagem-do-app-sobe]
+    needs: [build-and-push, imagem-do-app-sobe, imagens-de-fundo-sobem]
     # As três condições, e cada uma barra um caminho medido. Sem `push`, um
     # dispatch numa release ANTIGA faria `stable` REGREDIR, e todo self-hoster no
     # default do compose sofreria downgrade silencioso no próximo `up -d` — app
@@ -377,18 +435,20 @@ jobs:
     # justificativa do teste antecipa — "um job novo nasce sem bloco e herda o
     # default de novo".
     permissions: {}
-    needs: [build-and-push, imagem-do-app-sobe]
+    needs: [build-and-push, imagem-do-app-sobe, imagens-de-fundo-sobem]
     steps:
       - name: Falhar se qualquer imagem não construiu — ou se o app não sobe
         run: |
           echo "build-and-push:     ${{ needs.build-and-push.result }}"
           echo "imagem-do-app-sobe: ${{ needs.imagem-do-app-sobe.result }}"
+          echo "imagens-de-fundo-sobem: ${{ needs.imagens-de-fundo-sobem.result }}"
           [ "${{ needs.build-and-push.result }}" = "success" ]
           [ "${{ needs.imagem-do-app-sobe.result }}" = "success" ]
+          [ "${{ needs.imagens-de-fundo-sobem.result }}" = "success" ]
 
   deploy-dokploy:
-    needs: [build-and-push, imagem-do-app-sobe, promover-stable, imagens-ok]
-    if: always() && github.event_name != 'pull_request' && needs.build-and-push.result == 'success' && needs.imagem-do-app-sobe.result == 'success' && needs.imagens-ok.result == 'success' && (needs.promover-stable.result == 'success' || needs.promover-stable.result == 'skipped')
+    needs: [build-and-push, imagem-do-app-sobe, imagens-de-fundo-sobem, promover-stable, imagens-ok]
+    if: always() && github.event_name != 'pull_request' && needs.build-and-push.result == 'success' && needs.imagem-do-app-sobe.result == 'success' && needs.imagens-de-fundo-sobem.result == 'success' && needs.imagens-ok.result == 'success' && (needs.promover-stable.result == 'success' || needs.promover-stable.result == 'skipped')
     runs-on: ubuntu-latest
     permissions: {}
     steps:

@@ -192,7 +192,7 @@ export async function listConversationsHandler(
     // Predicados físicos que o planner precisa para usar o índice parcial da Fila.
     // `comando=aguardando|automatico` implica sem responsável e não-terminal —
     // a função calculada não deixa isso explícito para o Postgres.
-    if (isQueue) {
+    if (isQueue && q.comando.every((comando) => comando === "aguardando" || comando === "automatico")) {
       query = query.is("assigned_to_user_id", null);
       query = query.not("status", "in", `(${CONVERSATION_TERMINAL_STATUSES.join(",")})`);
     }
