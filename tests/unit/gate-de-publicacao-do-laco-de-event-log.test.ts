@@ -119,17 +119,16 @@ describe("o gate de publicação das imagens de fundo (#604)", () => {
     const job = blocoDoJob(JOB_DE_FUNDO);
     expect(job).toContain("Dockerfile.worker");
     expect(job).toContain("Dockerfile.scheduler");
-    expect(job).toContain("deskcomm-worker:pr");
-    expect(job).toContain("deskcomm-scheduler:pr");
+    expect(job).toContain("conecta-worker:pr");
+    expect(job).toContain("conecta-scheduler:pr");
   });
 
   it("exige o laço carregado e a linha do event-log-drain no crontab — não só contêiner de pé", () => {
     const job = blocoDoJob(JOB_DE_FUNDO);
     expect(job).toContain("sonda-do-laco-de-event-log.ts");
     expect(job).toContain('"ok":true');
-    expect(job).toContain("event_log_drain");
-    expect(job).toContain("/healthz");
-    expect(job).toContain("api/v1/cron/event-log-drain");
+    expect(job).toContain("event-log drain: laço carregado");
+    expect(job).toContain("docker exec cron-smoke grep -q 'api/v1/cron/event-log-drain' /etc/crontabs/root");
     // "Contêiner de pé" seria `docker ps` e mais nada: o defeito da #648 passa
     // por esse teste. O job tem que falhar por conteúdo, não por existência.
     expect(job).not.toMatch(/^\s+run: \|\n\s+docker ps -q/m);
@@ -143,8 +142,8 @@ describe("o gate de publicação das imagens de fundo (#604)", () => {
     // inteira de desfechos é imagens-ok-so-aceita-pulo-declarado.test.ts.
     // Concatenação, e não template literal: dentro de um template, `${{` é
     // sintaxe de expressão e o arquivo não compila.
-    expect(fachada).toContain("FUNDO: ${{ needs." + JOB_DE_FUNDO + ".result }}");
-    expect(fachada).toContain('[ "$FUNDO" = "success" ]');
+    expect(fachada).toContain("imagens-de-fundo-sobem: ${{ needs." + JOB_DE_FUNDO + ".result }}");
+    expect(fachada).toContain('needs.imagens-de-fundo-sobem.result }}" = "success"');
     // `always()` na fachada é o que faz um job pulado reprovar em vez de sumir.
     expect(fachada).toContain("if: always()");
   });
