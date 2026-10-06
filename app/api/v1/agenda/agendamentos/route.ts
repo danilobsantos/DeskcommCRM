@@ -59,6 +59,7 @@ const listarSchema = z.object({
   ate: z.string().datetime({ offset: true }).optional(),
   situacao: z.enum(["pending", "confirmed", "cancelled", "completed", "no_show"]).optional(),
   limite: z.coerce.number().int().min(1).max(500).optional(),
+  depois_de: z.string().max(512).optional(),
 });
 
 /**
@@ -194,6 +195,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     ate: url.searchParams.get("ate") ?? undefined,
     situacao: url.searchParams.get("situacao") ?? undefined,
     limite: url.searchParams.get("limite") ?? undefined,
+    depois_de: url.searchParams.get("depois_de") ?? undefined,
   });
   if (!parsed.success) {
     return fail("validation_failed", t("Consulta inválida."), 422, {
@@ -213,6 +215,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     ate: parsed.data.ate ?? null,
     situacao: parsed.data.situacao ?? null,
     limite: parsed.data.limite ?? 200,
+    depoisDe: parsed.data.depois_de ?? null,
   });
 
   if (!resultado.ok) {
@@ -260,7 +263,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   // Falha aqui NÃO derruba a listagem: sem ocupação a grade fica pobre; sem
   // agendamento ela fica errada. São consequências de tamanhos diferentes.
   const externos: AgendamentoDaResposta[] = [];
-  if (parsed.data.de && parsed.data.ate) {
+  if (parsed.data.de && parsed.data.ate && !parsed.data.depois_de) {
     // Leitura ÚNICA da ocupação da tela (`lib/agenda/ocupacao-externa`): a
     // semente do servidor faz a MESMA pergunta e recebe a MESMA resposta. A
     // regra — recorte por INTERSEÇÃO de intervalos, como no motor de
@@ -318,7 +321,10 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
   }
 
-  return ok([...resultado.agendamentos, ...externos], { requestId });
+  return ok([...resultado.agendamentos, ...externos], {
+    requestId,
+    meta: { proximo: resultado.proximo ?? null },
+  });
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
