@@ -1,6 +1,6 @@
 "use client";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useRealtimeChannel } from "@/hooks/realtime/useRealtimeChannel";
 import { useRefetchDeSeguranca } from "@/hooks/realtime/useRefetchDeSeguranca";
 import { apiClient } from "@/lib/api/client";
@@ -123,6 +123,7 @@ export function useConversationsRealtime(
 ) {
   const qc = useQueryClient();
   const queryKey = useMemo(() => ["conversations", filters] as const, [filters]);
+  const coalesceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const query = useInfiniteQuery({
     queryKey,
@@ -181,7 +182,11 @@ export function useConversationsRealtime(
   });
 
   const onChange = useCallback(() => {
-    qc.invalidateQueries({ queryKey: ["conversations"] });
+    if (coalesceTimer.current !== null) return;
+    coalesceTimer.current = setTimeout(() => {
+      coalesceTimer.current = null;
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    }, 250);
   }, [qc]);
 
   // G4-01 (visibility_mode): a subscription postgres_changes HERDA a RLS de
@@ -237,6 +242,12 @@ export function useConversationsRealtime(
     ultimaEntrega,
     enabled: !!orgId,
   });
+
+  useEffect(() => {
+    return () => {
+      if (coalesceTimer.current !== null) clearTimeout(coalesceTimer.current);
+    };
+  }, []);
 
   return { ...query, realtimeStatus, seguranca };
 }

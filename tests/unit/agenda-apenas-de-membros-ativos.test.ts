@@ -255,9 +255,19 @@ export function filtroNoCaminho(fonte: string, nomeDoArquivo: string): { chamado
   const visitar = (no: ts.Node): void => {
     if (ts.isCallExpression(no) && ts.isIdentifier(no.expression) && no.expression.text === "apenasDeMembrosAtivos") {
       chamado = true;
-      const espera = ts.isAwaitExpression(no.parent) ? no.parent : null;
-      const declaracao = espera && ts.isVariableDeclaration(espera.parent) ? espera.parent : null;
-      if (declaracao && ts.isIdentifier(declaracao.name)) recebedores.push(declaracao.name.text);
+      let ancestral: ts.Node | undefined = no.parent;
+      while (ancestral && !ts.isVariableDeclaration(ancestral) && !ts.isExpressionStatement(ancestral)) {
+        ancestral = ancestral.parent;
+      }
+      if (ancestral && ts.isVariableDeclaration(ancestral)) {
+        if (ts.isIdentifier(ancestral.name)) recebedores.push(ancestral.name.text);
+        // O cron de push usa Promise.all([filtroDeUsuarios, filtroDeProfissionais]):
+        // só o PRIMEIRO elemento do destructuring consome este filtro.
+        if (ts.isArrayBindingPattern(ancestral.name) && ancestral.initializer) {
+          const primeiro = ancestral.name.elements[0];
+          if (primeiro && ts.isBindingElement(primeiro) && ts.isIdentifier(primeiro.name)) recebedores.push(primeiro.name.text);
+        }
+      }
     }
     ts.forEachChild(no, visitar);
   };

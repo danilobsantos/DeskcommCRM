@@ -135,12 +135,16 @@ function pgClient(): SupabaseClient {
           return q;
         },
         or: (s: string) => {
-          expect(s).toBe(
-            "needs_google_push.eq.true,and(google_event_id.not.is.null,google_conflict.is.null),google_conflict->resolution.not.is.null",
-          );
-          filters.push(
-            "(needs_google_push or (google_event_id is not null and google_conflict is null) or google_conflict->'resolution' is not null)",
-          );
+          if (s === "owner_user_id.not.is.null,provider_id.not.is.null") {
+            filters.push("(owner_user_id is not null or provider_id is not null)");
+          } else {
+            expect(s).toBe(
+              "needs_google_push.eq.true,and(google_event_id.not.is.null,google_conflict.is.null),google_conflict->resolution.not.is.null",
+            );
+            filters.push(
+              "(needs_google_push or (google_event_id is not null and google_conflict is null) or google_conflict->'resolution' is not null)",
+            );
+          }
           return q;
         },
         order: (s: string) => {
