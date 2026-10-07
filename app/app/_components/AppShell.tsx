@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { TopBar } from "@/components/shell/TopBar";
+import { BarraInferior } from "@/components/shell/BarraInferior";
 import { BarraDeProgressoNavegacao } from "@/components/shell/BarraDeProgressoNavegacao";
 import { useSinalDePresenca } from "@/hooks/atendimento/useSinalDePresenca";
 import { useInboundMessageAlerts } from "@/hooks/notifications/useInboundMessageAlerts";
@@ -40,7 +41,7 @@ export function AppShell({ sidebarCollapsed, podeAtender, children }: AppShellPr
   // decide a faixa que o conteúdo perde, e ninguém mais mede isso por fora.
   const ocupacaoDoRodape = useOcupacaoDoRodape();
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="flex min-h-dvh w-full bg-background">
       <BarraDeProgressoNavegacao />
       <div className="hidden md:block">
         <Sidebar collapsed={sidebarCollapsed} />
@@ -64,22 +65,50 @@ export function AppShell({ sidebarCollapsed, podeAtender, children }: AppShellPr
         SEGUNDA medida da mesma coisa — a que discordava e deixava a barra por
         cima da lista.
       */}
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
         <TopBar />
         {/*
-          O rodapé desconta o que as peças fixas ocupam (issue #1305):
-          `estiloDaReserva` devolve `undefined` sem peça registrada (o `p-6` de
-          sempre). `data-rodape-ocupado` é por onde o gate mede a faixa sem
-          depender de o jsdom computar `var()` (ele não computa).
+          O RODAPÉ DESCONTA O QUE AS PEÇAS FIXAS OCUPAM (issue #1305).
+
+          `estiloDaReserva` devolve `undefined` quando não há peça registrada —
+          nenhum estilo, e aí quem responde pela faixa de baixo é a classe
+          `pb-area-segura` —, e um `padding-bottom` que consome
+          `--rodape-ocupado` quando há. O que ele descontou está também no
+          atributo `data-rodape-ocupado`: é por ali que o gate mede esta faixa
+          sem depender de o jsdom computar `var()` (ele não computa), e é o que
+          aparece no inspetor quando alguém pergunta quanto o rodapé perdeu.
+
+          `p-4 sm:p-6`: 24px de margem em cada lado de uma tela de 360px come
+          13% da largura útil. O `AdminShell` já usava este par — aqui a casca
+          do tenant passa a usar o mesmo.
+
+          `pb-area-segura` é o piso da faixa de baixo quando NÃO há peça fixa:
+          `max(var(--space-6), env(safe-area-inset-bottom))`. Sem ela, no iOS em
+          tela cheia o fim do conteúdo ficava atrás do indicador de home — e com
+          peça fixa quem cobre isso é o terceiro termo do `max()` do contrato.
         */}
         <main
-          className="flex-1 overflow-auto p-6"
+          className="flex-1 overflow-auto p-4 pb-area-segura sm:p-6"
           style={estiloDaReserva(ocupacaoDoRodape)}
           data-rodape-ocupado={ocupacaoDoRodape}
         >
           {children}
         </main>
       </div>
+      {/*
+        A BARRA DE ABAS DO CELULAR, irmã do `<main>` e não filha dele.
+
+        Ela é `fixed`, então o lugar na árvore não decide onde ela desenha — mas
+        decide duas coisas que importam. Dentro do `<main>`, que tem
+        `overflow-auto`, ela entraria no contexto de rolagem do conteúdo; e o
+        `<main>` é justamente quem DESCONTA a faixa que ela ocupa, pelo contrato
+        de `rodape-ocupado`. Peça que mora dentro de quem a desconta é a receita
+        do laço.
+
+        Ela própria se esconde acima de `md` — o mesmo corte em que a barra
+        lateral aparece, logo acima.
+      */}
+      <BarraInferior />
     </div>
   );
 }
