@@ -777,6 +777,12 @@ async function marcarHorario(
     startsAt: string;
     contactId: string;
     ownerUserId?: string;
+    /**
+     * ROTEAMENTO A PROFISSIONAL (9017): o `find_and_book` não alcançava agenda
+     * de profissional — consultava e marcava na do atendente padrão. O campo
+     * viaja junto com a consulta que o achou, com a mesma exclusividade.
+     */
+    ownerProviderId?: string;
     title?: string;
     notes?: string;
   },
@@ -787,6 +793,7 @@ async function marcarHorario(
       starts_at: args.startsAt,
       contact_id: args.contactId,
       ...(args.ownerUserId !== undefined ? { owner_user_id: args.ownerUserId } : {}),
+      ...(args.ownerProviderId !== undefined ? { provider_id: args.ownerProviderId } : {}),
       ...(args.title !== undefined ? { title: args.title } : {}),
       ...(args.notes !== undefined ? { notes: args.notes } : {}),
     },
@@ -812,6 +819,15 @@ const consultarEMarcarShape = {
     ),
   contact_id: z.string().uuid().describe("quem vai ser atendido"),
   owner_user_id: z.string().uuid().optional(),
+  provider_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "o id do PROFISSIONAL externo (dentista sem login) quando a consulta é com ele. " +
+        "Use com exclusividade: não mande junto com owner_user_id. Sem ele, consulta e " +
+        "marcação caem na agenda do atendente padrão.",
+    ),
   title: z.string().min(1).max(200).optional(),
   notes: z.string().max(2000).optional(),
 };
@@ -850,7 +866,9 @@ export const crmFindAndBookAppointment: McpToolDefinition<typeof consultarEMarca
     "retorno ao falar com a pessoa. " +
     "⚠️ Alguns atendimentos exigem aprovação da equipe: nesses o retorno traz " +
     "`aguarda_confirmacao: true` — diga que separou o horário e que a equipe confirma, nunca que " +
-    "está confirmado.",
+    "está confirmado. " +
+    "Para profissional externo, passe `provider_id` (o `id` de `crm_list_providers`): sem ele, " +
+    "consulta e marcação caem na agenda do atendente padrão, que é outro calendário.",
   inputSchema: consultarEMarcarShape,
   category: "write",
   requiresRole: "ai_operator",
@@ -861,7 +879,8 @@ export const crmFindAndBookAppointment: McpToolDefinition<typeof consultarEMarca
 
     const consulta = await horariosLivresDaOrg(ctx.supabase, ctx.organizationId, {
       eventTypeSlug: input.event_type_slug,
-      ownerUserId: input.owner_user_id ?? null,
+      ownerUserId: input.provider_id ? null : input.owner_user_id ?? null,
+      ownerProviderId: input.provider_id ?? null,
       de,
       ate,
       agora,
@@ -913,6 +932,7 @@ export const crmFindAndBookAppointment: McpToolDefinition<typeof consultarEMarca
       startsAt: achado.inicio.toISOString(),
       contactId: input.contact_id,
       ...(input.owner_user_id !== undefined ? { ownerUserId: input.owner_user_id } : {}),
+      ...(input.provider_id !== undefined ? { ownerProviderId: input.provider_id } : {}),
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
     });
