@@ -1,5 +1,5 @@
 /**
- * A PORTA DA CONFERÊNCIA (#2234) — onde `crm_update_lead` decide se confere.
+ * A PORTA DA CONFERÊNCIA (#2234) — onde `crm_update_lead` e `crm_create_lead` decidem se conferem.
  *
  * Três decisões moram aqui, e nenhuma é regra inventada: são as da issue,
  * postas no ponto em que elas valem.
@@ -97,23 +97,47 @@ export async function mensagensPendentesDoTurno(
       const corpo = (m.body?.trim() ? m.body : m.media_derived_text) ?? "";
       if (corpo.trim() !== "") pendentes.unshift(corpo);
     }
-    return { conversationId, mensagens: pendentes.map(scrubMessage) };
+    // Sem os perfis de país (#2418): a pergunta ao Jev leva o valor CRU, e um
+    // `[CEP]` aqui faria a conferência recusar o CEP que o cliente digitou.
+    return { conversationId, mensagens: pendentes.map((m) => scrubMessage(m, { perfisDePais: false })) };
   } catch {
     return { conversationId: null, mensagens: [] };
   }
 }
 
-/** O rótulo que o dono deu ao campo no funil — `null` quando não deu para ler. */
-async function rotulosDoFunil(ctx: McpContext, leadId: string): Promise<Map<string, string>> {
+/**
+ * De onde sai o funil dos rótulos: o negócio que já existe (`crm_update_lead`)
+ * ou o funil em que ele vai nascer (`crm_create_lead`, #2297 — ainda não há
+ * linha em `crm_leads` para ler).
+ */
+export type AlvoDaConferencia = { leadId: string } | { pipelineId: string };
+
+/** O rótulo que o dono deu ao campo no funil — mapa vazio quando não deu para ler. */
+async function rotulosDoFunil(ctx: McpContext, alvo: AlvoDaConferencia): Promise<Map<string, string>> {
   try {
-    const { data, error } = await ctx.supabase
-      .from("crm_leads")
-      .select("pipeline_id")
-      .eq("organization_id", ctx.organizationId)
-      .eq("id", leadId)
-      .maybeSingle();
-    if (error || !data) return new Map();
-    const settings = await settingsDoFunil(ctx.supabase, (data as { pipeline_id?: string | null }).pipeline_id);
+    let settings: unknown;
+    if ("pipelineId" in alvo) {
+      // O id vem do ARGUMENTO do modelo, não de uma linha da organização: o
+      // filtro de organização aqui é o que impede o rótulo de um funil alheio
+      // de voltar no erro de ensino (o client do turno é service-role).
+      const { data, error } = await ctx.supabase
+        .from("crm_pipelines")
+        .select("settings")
+        .eq("organization_id", ctx.organizationId)
+        .eq("id", alvo.pipelineId)
+        .maybeSingle();
+      if (error || !data) return new Map();
+      settings = (data as { settings?: unknown }).settings;
+    } else {
+      const { data, error } = await ctx.supabase
+        .from("crm_leads")
+        .select("pipeline_id")
+        .eq("organization_id", ctx.organizationId)
+        .eq("id", alvo.leadId)
+        .maybeSingle();
+      if (error || !data) return new Map();
+      settings = await settingsDoFunil(ctx.supabase, (data as { pipeline_id?: string | null }).pipeline_id);
+    }
     return new Map(
       camposDoFunil(settings as Record<string, unknown> | null | undefined).map((c) => [c.key, c.label]),
     );
@@ -140,7 +164,7 @@ const SEM_CONFERENCIA = (estado: string): ConferenciaDeCampos => ({ recusados: [
  */
 export async function conferirCamposPersonalizados(
   ctx: McpContext,
-  leadId: string,
+  alvo: AlvoDaConferencia,
   campos: Record<string, unknown> | undefined,
   deps: DependenciasDoPonto = {},
 ): Promise<ConferenciaDeCampos> {
@@ -163,7 +187,7 @@ export async function conferirCamposPersonalizados(
   }
 
   const { conversationId, mensagens } = await mensagensPendentesDoTurno(ctx);
-  const rotulos = await rotulosDoFunil(ctx, leadId);
+  const rotulos = await rotulosDoFunil(ctx, alvo);
   const lista: CampoPersonalizado[] = Object.entries(campos).map(([chave, valor]) => ({
     chave,
     nome: rotulos.get(chave) ?? chave,

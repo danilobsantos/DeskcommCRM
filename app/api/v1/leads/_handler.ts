@@ -1,5 +1,6 @@
 import { observeServiceOrigin } from "@/lib/atendimento/origem";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { idsDeContatosPessoais } from "@/app/api/v1/conversations/_handler";
 /**
  * Core handlers para /api/v1/leads.
  *
@@ -152,7 +153,7 @@ async function ownerPatchOrThrow(
 async function contatoDaOrgOrThrow(supabase: SB, ctx: HandlerCtx, contactId: string): Promise<void> {
   const { data: contato, error: contatoErr } = await supabase
     .from("contacts")
-    .select("id")
+    .select("id, is_personal")
     .eq("id", contactId)
     .eq("organization_id", ctx.organization_id)
     .maybeSingle();
@@ -167,6 +168,61 @@ async function contatoDaOrgOrThrow(supabase: SB, ctx: HandlerCtx, contactId: str
       undefined,
       ctx.requestId,
       traduzir("Contato não encontrado.", ctx.idioma ?? "pt-BR"),
+    );
+  }
+  // Contato pessoal está fora da operação (spec 21, decisão 3): nenhum negócio
+  // nasce nem muda de dono/etapa para ele — 403 sem vazar dado do contato.
+  if ((contato as { is_personal?: boolean }).is_personal === true) {
+    throw new ApiError(
+      403,
+      "forbidden",
+      undefined,
+      ctx.requestId,
+      traduzir("Contato marcado como pessoal.", ctx.idioma ?? "pt-BR"),
+    );
+  }
+}
+
+/**
+ * O contato EFETIVO do negócio é pessoal? (spec 21, decisão 3).
+ *
+ * `contatoDaOrgOrThrow` cobre o contato NOVO que o corpo pede; aqui fica o que
+ * ela não vê: o contato que o negócio JÁ tem (update sem trocar contato, mover,
+ * retomar) e a leitura (get lista/ficha). Sem esta pergunta, marcar depois de
+ * abrir o negócio deixaria a escrita passar pela porta que já estava aberta.
+ * Ausente = não é pessoal (o 404 de quem não existe é de outra guarda).
+ */
+async function contatoEfetivoEhPessoal(
+  supabase: SB,
+  ctx: HandlerCtx,
+  contactId: string | null | undefined,
+): Promise<boolean> {
+  if (!contactId) return false;
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("is_personal")
+    .eq("id", contactId)
+    .eq("organization_id", ctx.organization_id)
+    .maybeSingle();
+  if (error) {
+    throw new ApiError(500, "internal_error", undefined, ctx.requestId, error.message);
+  }
+  return (data as { is_personal?: boolean } | null)?.is_personal === true;
+}
+
+/** Recusa 403 padrão de escrita para pessoal (mesma mensagem do veto de envio). */
+async function recusaPessoalNaEscrita(
+  supabase: SB,
+  ctx: HandlerCtx,
+  contactId: string | null | undefined,
+): Promise<void> {
+  if (await contatoEfetivoEhPessoal(supabase, ctx, contactId)) {
+    throw new ApiError(
+      403,
+      "forbidden",
+      undefined,
+      ctx.requestId,
+      traduzir("Contato marcado como pessoal.", ctx.idioma ?? "pt-BR"),
     );
   }
 }
@@ -304,6 +360,13 @@ export async function listLeadsHandler(
   if (q.status) query = query.eq("status", q.status);
   if (q.owner_user_id) query = query.eq("owner_user_id", q.owner_user_id);
   if (q.contact_id) query = query.eq("contact_id", q.contact_id);
+  // Negócio de pessoal não é listado (spec 21, etapa 12 — leitura exclui):
+  // a MESMA primitiva de ids da lista do inbox (`conversations/_handler.ts`),
+  // antes do limite, para cursor e `has_more` descreverem o conjunto visível.
+  const pessoais = await idsDeContatosPessoais(supabase, ctx.organization_id);
+  if (pessoais.length > 0) {
+    query = query.not("contact_id", "in", `(${pessoais.join(",")})`);
+  }
   // #1537 — perda por motivo e por categoria. A categoria NÃO é coluna: ela
   // sai do `settings.lost_reasons` do funil, então o caminho é achar os rótulos
   // da categoria e filtrar por eles. Só os PERDIDOS têm motivo que valha; um
@@ -394,6 +457,18 @@ export async function getLeadHandler(
       traduzir("Lead não encontrado.", ctx.idioma ?? "pt-BR"),
     );
   }
+  // Negócio de pessoal some até por link direto (spec 21, etapa 12): o mesmo
+  // 404 de "não existe", para não revelar que ele está lá — espelha o 404 da
+  // conversa de pessoal em `conversations/_handler.ts`.
+  if (await contatoEfetivoEhPessoal(supabase, ctx, (data as { contact_id?: string | null }).contact_id)) {
+    throw new ApiError(
+      404,
+      "not_found",
+      undefined,
+      ctx.requestId,
+      traduzir("Lead não encontrado.", ctx.idioma ?? "pt-BR"),
+    );
+  }
   return data as Record<string, unknown>;
 }
 
@@ -432,6 +507,19 @@ export async function createLeadHandler(
      */
     retomado_de_lead_id?: string | null;
   },
+  opcoes: {
+    /**
+     * `false` SÓ no webhook de captação (`app/api/v1/webhooks/in/[token]`): o
+     * lead de formulário entra no funil mesmo que a etapa padrão da fonte exija
+     * um campo que o formulário não mandou. Decisão de produto (#2295), não
+     * consequência da régua — reverter é tirar o argumento daquela rota.
+     *
+     * É opção e não `ctx.actor.type`: `webhook_source` também é o ator da
+     * automação `create_or_move_lead` e da prospecção, que continuam na régua.
+     * E não vem do corpo da requisição, como os demais internos.
+     */
+    exigirCamposDaEtapa?: boolean;
+  } = {},
 ): Promise<Record<string, unknown>> {
   // Validate stage belongs to pipeline within active org.
   const { data: stage, error: stageErr } = await supabase
@@ -460,6 +548,50 @@ export async function createLeadHandler(
       ctx.requestId,
       traduzir("Stage não pertence ao pipeline informado.", ctx.idioma ?? "pt-BR"),
     );
+  }
+
+  // ── A ETAPA EM QUE O NEGÓCIO NASCE TAMBÉM É UMA ENTRADA (issue #1710) ──────
+  //
+  // Criar direto numa etapa exigente é o MESMO gatilho do arrasto: o funil que
+  // exige um campo para RECEBER o negócio o exige aqui também. Sem esta pergunta
+  // a criação nascia na coluna com o campo em branco e a exigência só era cobrada
+  // na PRÓXIMA escrita — o negócio já estava lá.
+  //
+  // Este handler é o escritor de criação de TODOS os clientes (REST `POST
+  // /api/v1/leads`, a tool MCP `crm_create_lead`, o `NewLeadDialog` com
+  // `stage_id`, o import de planilha, a automação `create_or_move_lead` — criação
+  // e transferência de funil — e a prospecção), então a régua é a MESMA função de
+  // todos os outros caminhos, e a recusa é o MESMO 422 com `details.faltando`.
+  // A exceção é o webhook de captação, que passa `exigirCamposDaEtapa: false`
+  // (ver `opcoes` acima).
+  //
+  // O `settings` perguntado é o do funil de DESTINO — `input.pipeline_id`, que a
+  // checagem acima acabou de provar ser o da etapa. `desfecho: null`, como no
+  // clone e na retomada: criar não fecha o negócio, então `ao_ganhar`/`ao_perder`
+  // não entram nesta pergunta. O valor que a régua lê é o que o negócio VAI ter:
+  // `custom_fields` do corpo.
+  //
+  // FAIL-OPEN igual ao resto da régua (`settingsDoFunil` devolve `null` quando a
+  // leitura falha): um funil sem `obrigatorio_em` valida `faltando: []` e a
+  // criação acontece byte a byte como antes — a regra continua opt-in.
+  if (opcoes.exigirCamposDaEtapa !== false) {
+    const settingsDaCriacao = await settingsDoFunil(supabase, input.pipeline_id);
+    const vereditoDeCampos = validaCamposExigidos({
+      lead: { custom_fields: input.custom_fields ?? {} },
+      settingsDoFunil: settingsDaCriacao,
+      destino: { stageId: stage.id, desfecho: null },
+      motivoDeGanho: null,
+    });
+    if (vereditoDeCampos.faltando.length > 0) {
+      const recusa = recusaDeCamposObrigatorios(vereditoDeCampos.faltando, ctx.idioma);
+      throw new ApiError(
+        422,
+        recusa.codigo,
+        { faltando: vereditoDeCampos.faltando },
+        ctx.requestId,
+        recusa.mensagem,
+      );
+    }
   }
 
   if (input.contact_id) await contatoDaOrgOrThrow(supabase, ctx, input.contact_id);
@@ -656,6 +788,17 @@ export async function updateLeadHandler(
   if (input.contact_id && input.contact_id !== existing.contact_id) {
     await contatoDaOrgOrThrow(supabase, ctx, input.contact_id);
   }
+  // ...mas o contato EFETIVO (trocado ou mantido) não pode ser pessoal: sem
+  // esta linha, marcar depois de abrir o negócio deixava a edição passar pela
+  // porta que já estava aberta (spec 21, etapa 12).
+  await recusaPessoalNaEscrita(
+    supabase,
+    ctx,
+    (input.contact_id ?? (existing as { contact_id?: string | null }).contact_id) as
+      | string
+      | null
+      | undefined,
+  );
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.title !== undefined) patch.title = input.title;
@@ -963,6 +1106,12 @@ export async function moveLeadHandler(
       traduzir("Lead não encontrado.", ctx.idioma ?? "pt-BR"),
     );
   }
+  // Mover negócio de pessoal é escrita para fora da operação (spec 21, etapa 12).
+  await recusaPessoalNaEscrita(
+    supabase,
+    ctx,
+    (lead as { contact_id?: string | null }).contact_id,
+  );
 
   const { data: stage, error: stageErr } = await supabase
     .from("crm_stages")
@@ -1378,6 +1527,9 @@ export async function retomarLeadHandler(
     custom_fields?: Record<string, unknown> | null;
     lost_reason?: string | null;
   };
+  // Retomar para pessoal abriria um negócio novo para fora da operação: a
+  // retomada é escrita e recusa como as outras (spec 21, etapa 12).
+  await recusaPessoalNaEscrita(supabase, ctx, origemTipada.contact_id);
   if (origemTipada.status === "open") {
     throw new ApiError(
       422,
