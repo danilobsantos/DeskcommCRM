@@ -58,6 +58,11 @@ const PLAYBOOK_FALA_DE: Record<string, string[]> = {
     "crm_book_appointment",
     "crm_reschedule_appointment",
     "crm_cancel_appointment",
+    // O ROTEAMENTO A PROFISSIONAL (9016): sem citar `crm_list_providers` o
+    // playbook não tem como ensinar o `provider_id` — medido em produção
+    // (2026-10-07): 20/20 consultas sem dono, zero marcações em 1h, porque a
+    // cadeia caía na agenda do atendente padrão.
+    "crm_list_providers",
   ],
 };
 
