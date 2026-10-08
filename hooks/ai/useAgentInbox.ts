@@ -5,6 +5,11 @@ import { apiClient } from "@/lib/api/client";
 import type { AgentInboxSeverity } from "@/lib/ai/agent-inbox-copy";
 import type { DestinoDoAviso } from "@/lib/ai/inbox-destino";
 
+export interface ContatoDoAvisoNaTela {
+  nome: string | null;
+  telefone: string | null;
+}
+
 export interface AgentInboxItem {
   id: string;
   kind: string;
@@ -16,25 +21,39 @@ export interface AgentInboxItem {
   status: "open" | "ack" | "resolved";
   created_at: string;
   destination: DestinoDoAviso;
+  /** Ausente em respostas antigas; a linha do contato só desenha quando há. */
+  contato?: ContatoDoAvisoNaTela | null;
 }
 
 export interface AgentInboxData {
   items: AgentInboxItem[];
   open_count: number;
+  /** Ausente em respostas antigas; a tela usa `items.length >= limit` então. */
+  has_more?: boolean;
 }
 
+export type FiltroDeGravidade = AgentInboxSeverity | "todas";
+
 /** Central de avisos do runtime (F1). Polling 30s — avisos nascem no worker. */
-export function useAgentInbox(status: "open" | "resolved" = "open") {
+export function useAgentInbox(
+  status: "open" | "resolved" = "open",
+  opcoes?: { gravidade?: FiltroDeGravidade; limite?: number },
+) {
   const podeConsultar = usePermission("ai.inbox.view");
+  const gravidade = opcoes?.gravidade ?? "todas";
+  const limite = opcoes?.limite ?? 50;
+  const params = new URLSearchParams({ status, limit: String(limite) });
+  if (gravidade !== "todas") params.set("severity", gravidade);
+  const query = params.toString();
   return useQuery({
     enabled: podeConsultar,
-    queryKey: ["agent-inbox", status],
+    queryKey: ["agent-inbox", status, gravidade, limite],
     // 30 s: é esta leitura que toca o som da etapa que avisa e do pedido de
     // pessoa (`useSonsDaCentral`) — um minuto de atraso num pedido de pessoa pesa.
     refetchInterval: 30_000,
     queryFn: () =>
       apiClient
-        .get<{ data: AgentInboxData }>(`/api/v1/ai/inbox?status=${status}`)
+        .get<{ data: AgentInboxData }>(`/api/v1/ai/inbox?${query}`)
         .then((r) => r.data),
   });
 }

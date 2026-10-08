@@ -14,8 +14,10 @@ import {
   useResolveAllInboxItems,
   useUpdateInboxItem,
   type AgentInboxItem,
+  type FiltroDeGravidade,
 } from "@/hooks/ai/useAgentInbox";
 import { kindLabel, SEVERITY_LABEL, type AgentInboxSeverity } from "@/lib/ai/agent-inbox-copy";
+import { phoneForDisplay } from "@/lib/channels/phone-variants";
 import { Bell, Check } from "@/lib/ui/icons";
 import { useT } from "@/hooks/i18n/useT";
 import { ApiError } from "@/lib/api/types";
@@ -26,19 +28,42 @@ const SEVERITY_VARIANT: Record<AgentInboxSeverity, "info" | "warning" | "error">
   critical: "error",
 };
 
+const FILTROS_DE_GRAVIDADE: FiltroDeGravidade[] = ["todas", "critical", "warn", "info"];
+
+const PASSO_DO_CARREGAR_MAIS = 50;
+
 export function AgentInboxList({ canResolve }: { canResolve: boolean }) {
   const t = useT();
   const [tab, setTab] = useState<"open" | "resolved">("open");
-  const { data: cachedData, error, isLoading, isError, refetch, isFetching } = useAgentInbox(tab);
+  const [filtro, setFiltro] = useState<FiltroDeGravidade>("todas");
+  const [limite, setLimite] = useState(PASSO_DO_CARREGAR_MAIS);
+  const { data: cachedData, error, isLoading, isError, refetch, isFetching } = useAgentInbox(tab, {
+    gravidade: filtro,
+    limite,
+  });
   const acessoNegado = error instanceof ApiError && (error.status === 401 || error.status === 403);
   const data = acessoNegado ? undefined : cachedData;
   const update = useUpdateInboxItem();
   const resolveAll = useResolveAllInboxItems();
+  // O "Carregar mais" é limite cumulativo (a ordem por camadas sai do
+  // servidor): tem mais quando o excedente `+1` da rota acusou — ou, em
+  // resposta antiga sem o campo, quando a página veio cheia.
+  const temMais = data ? (data.has_more ?? data.items.length >= limite) : false;
+
+  function trocarAba(v: "open" | "resolved") {
+    setTab(v);
+    setLimite(PASSO_DO_CARREGAR_MAIS);
+  }
+
+  function trocarFiltro(v: FiltroDeGravidade) {
+    setFiltro(v);
+    setLimite(PASSO_DO_CARREGAR_MAIS);
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "open" | "resolved")}>
+        <Tabs value={tab} onValueChange={(v) => trocarAba(v as "open" | "resolved")}>
           <TabsList>
             <TabsTrigger value="open">
               {t("Abertos")}{data ? ` (${data.open_count})` : ""}
@@ -57,6 +82,21 @@ export function AgentInboxList({ canResolve }: { canResolve: boolean }) {
             {t("Marcar todos resolvidos")}
           </Button>
         ) : null}
+      </div>
+
+      {/* Filtro por gravidade: chips que afunilam a fila sem trocar de aba. */}
+      <div className="flex flex-wrap gap-2" role="group" aria-label={t("Filtrar por gravidade")}>
+        {FILTROS_DE_GRAVIDADE.map((f) => (
+          <Button
+            key={f}
+            size="sm"
+            variant={filtro === f ? "default" : "outline"}
+            data-testid={`filtro-severidade-${f}`}
+            onClick={() => trocarFiltro(f)}
+          >
+            {f === "todas" ? t("Todos") : t(SEVERITY_LABEL[f])}
+          </Button>
+        ))}
       </div>
 
       {isError ? (
@@ -90,7 +130,7 @@ export function AgentInboxList({ canResolve }: { canResolve: boolean }) {
         </div>
       ) : (
         <>
-        {tab === "open" ? (
+        {tab === "open" && filtro === "todas" ? (
           <p className="-mb-2 text-xs text-muted-foreground">
             {t("Os mais graves primeiro; entre iguais, os mais recentes.")}
           </p>
@@ -106,6 +146,18 @@ export function AgentInboxList({ canResolve }: { canResolve: boolean }) {
             />
           ))}
         </ul>
+        {temMais ? (
+          <div className="flex justify-center pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isFetching}
+              onClick={() => setLimite((l) => l + PASSO_DO_CARREGAR_MAIS)}
+            >
+              {t("Carregar mais")}
+            </Button>
+          </div>
+        ) : null}
         </>
       )}
     </div>
@@ -129,6 +181,14 @@ function InboxRow({
     addSuffix: true,
     locale: localeDaData,
   });
+  // Nome/número vêm PRONTOS do servidor (nunca por t(): dado de gente, como
+  // título e corpo — ver o comentário abaixo). Linha ausente = sem contato.
+  const nomeDoCard = item.contato?.nome?.trim() || null;
+  const numeroDoCard = item.contato?.telefone?.trim() || null;
+  const contatoDoCard =
+    nomeDoCard && numeroDoCard && numeroDoCard !== nomeDoCard
+      ? `${nomeDoCard} • ${phoneForDisplay(numeroDoCard)}`
+      : (nomeDoCard ?? (numeroDoCard ? phoneForDisplay(numeroDoCard) : null));
   return (
     <li className="flex flex-wrap items-start gap-3 px-4 py-3" data-testid="inbox-item">
       <Badge variant={SEVERITY_VARIANT[item.severity]} className="mt-0.5 shrink-0">
@@ -146,6 +206,11 @@ function InboxRow({
             O que continua traduzido é o que é NOSSO: severidade, rótulo do kind,
             orientação e rótulo do destino. */}
         <p className="text-sm font-medium">{item.title}</p>
+        {contatoDoCard ? (
+          <p className="text-xs font-medium" data-testid="inbox-contato">
+            {contatoDoCard}
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           {kindLabel(item.kind, t)} · {when}
         </p>

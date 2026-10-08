@@ -37,6 +37,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const DONO = "00000000-0000-4000-8000-0000000000aa";
+const DONO2 = "00000000-0000-4000-8000-0000000000ab";
+const PROV = "00000000-0000-4000-8000-0000000000c1";
+const PROV_FORA = "00000000-0000-4000-8000-0000000000c2";
 const TIPO = "00000000-0000-4000-8000-0000000000dd";
 const TIPO_LONGO = "00000000-0000-4000-8000-0000000000dc";
 const APPT = "00000000-0000-4000-8000-0000000000ee";
@@ -87,6 +90,7 @@ function sbDeTeste(opcoes: {
   atual?: Record<string, unknown> | null;
   tipos?: Record<string, Record<string, unknown>>;
   contatos?: Record<string, Record<string, unknown>>;
+  provedores?: Record<string, Record<string, unknown>>;
   patches: Record<string, unknown>[];
   inseridos: Record<string, unknown>[];
 }) {
@@ -124,6 +128,10 @@ function sbDeTeste(opcoes: {
           if (tabela === "contacts") {
             const contato = (opcoes.contatos ?? {})[filtros.id as string];
             return { data: contato ?? null, error: null };
+          }
+          if (tabela === "providers") {
+            const provedor = (opcoes.provedores ?? {})[filtros.id as string];
+            return { data: provedor ?? null, error: null };
           }
           return { data: null, error: null };
         },
@@ -360,5 +368,120 @@ describe("migration 9015 e baseline aplicam as mesmas colunas", () => {
     // O carimbo do Google vigia o paciente nos dois.
     expect(migracao).toContain(STAMP);
     expect(baseline).toContain(STAMP);
+  });
+
+  it("a 9018 aplica o par do profissional nos dois artefatos", () => {
+    const migracao = readFileSync(
+      join(RAIZ, "supabase/migrations/20261008000000_9018_edicao_troca_profissional.sql"),
+      "utf8",
+    );
+    const baseline = readFileSync(join(RAIZ, "supabase/baseline.sql"), "utf8");
+    for (const chave of ["p_patch?'owner_user_id'", "p_patch?'provider_id'"]) {
+      expect(migracao, `9018 sem ${chave}`).toContain(chave);
+      expect(baseline, `baseline sem ${chave}`).toContain(chave);
+    }
+  });
+});
+
+describe("PATCH owner_user_id/provider_id: troca de profissional (9018)", () => {
+  const PROVEDORES = { [PROV]: { id: PROV, active: true } };
+
+  it("atendente → externo: grava o par, revalida a grade nova e audita o de/para sem remarcar", async () => {
+    const patches: Record<string, unknown>[] = [];
+    const inseridos: Record<string, unknown>[] = [];
+    const sb = sbDeTeste({ atual: atualDe(), tipos: TIPOS, contatos: CONTATOS, provedores: PROVEDORES, patches, inseridos });
+
+    await alterarAgendamentoHandler(sb, ctxDe(), { id: APPT, revision: 3, owner_user_id: null, provider_id: PROV });
+
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toMatchObject({ owner_user_id: null, provider_id: PROV });
+    // Mesmo horário: a grade do novo foi conferida, mas sem notícia de remarcação.
+    expect(patches[0]).not.toHaveProperty("starts_at");
+    expect(consulta.horarios).toHaveBeenCalled();
+    expect(deps.audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "agenda.appointment_updated",
+        metadata: expect.objectContaining({
+          owner_user_id_anterior: DONO,
+          owner_user_id_novo: null,
+          provider_id_anterior: null,
+          provider_id_novo: PROV,
+        }),
+      }),
+    );
+  });
+
+  it("externo → atendente: o par inverte e a grade do atendente é conferida", async () => {
+    const patches: Record<string, unknown>[] = [];
+    const inseridos: Record<string, unknown>[] = [];
+    const atual = { ...atualDe(), owner_user_id: null, provider_id: PROV };
+    const sb = sbDeTeste({ atual, tipos: TIPOS, contatos: CONTATOS, provedores: PROVEDORES, patches, inseridos });
+
+    await alterarAgendamentoHandler(sb, ctxDe("agent", DONO2), { id: APPT, revision: 3, owner_user_id: DONO2, provider_id: null });
+
+    expect(patches[0]).toMatchObject({ owner_user_id: DONO2, provider_id: null });
+    expect(consulta.horarios).toHaveBeenCalled();
+  });
+
+  it("mesmo responsável: devolve inalterado SEM escrita", async () => {
+    const patches: Record<string, unknown>[] = [];
+    const inseridos: Record<string, unknown>[] = [];
+    const sb = sbDeTeste({ atual: atualDe(), tipos: TIPOS, contatos: CONTATOS, provedores: PROVEDORES, patches, inseridos });
+
+    const r = await alterarAgendamentoHandler(sb, ctxDe(), { id: APPT, revision: 3, owner_user_id: DONO });
+
+    expect(r).toMatchObject({ id: APPT });
+    expect(patches).toHaveLength(0);
+  });
+
+  it("os dois lados preenchidos: 422 SEM escrita", async () => {
+    const patches: Record<string, unknown>[] = [];
+    const inseridos: Record<string, unknown>[] = [];
+    const sb = sbDeTeste({ atual: atualDe(), tipos: TIPOS, contatos: CONTATOS, provedores: PROVEDORES, patches, inseridos });
+
+    await expect(
+      alterarAgendamentoHandler(sb, ctxDe(), { id: APPT, revision: 3, owner_user_id: DONO2, provider_id: PROV }),
+    ).rejects.toMatchObject({ status: 422, code: "agenda_dono_duplo" });
+
+    expect(patches).toHaveLength(0);
+    expect(deps.audit).not.toHaveBeenCalled();
+  });
+
+  it("zerar os dois lados: 422 SEM escrita", async () => {
+    const patches: Record<string, unknown>[] = [];
+    const inseridos: Record<string, unknown>[] = [];
+    const sb = sbDeTeste({ atual: atualDe(), tipos: TIPOS, contatos: CONTATOS, provedores: PROVEDORES, patches, inseridos });
+
+    await expect(
+      alterarAgendamentoHandler(sb, ctxDe(), { id: APPT, revision: 3, owner_user_id: null, provider_id: null }),
+    ).rejects.toMatchObject({ status: 422, code: "agenda_sem_responsavel" });
+
+    expect(patches).toHaveLength(0);
+  });
+
+  it("profissional de outra organização: 404 SEM escrita", async () => {
+    const patches: Record<string, unknown>[] = [];
+    const inseridos: Record<string, unknown>[] = [];
+    const sb = sbDeTeste({ atual: atualDe(), tipos: TIPOS, contatos: CONTATOS, provedores: PROVEDORES, patches, inseridos });
+
+    await expect(
+      alterarAgendamentoHandler(sb, ctxDe(), { id: APPT, revision: 3, owner_user_id: null, provider_id: PROV_FORA }),
+    ).rejects.toMatchObject({ status: 404, code: "not_found" });
+
+    expect(patches).toHaveLength(0);
+    expect(deps.audit).not.toHaveBeenCalled();
+  });
+
+  it("profissional inativo: 422 SEM escrita", async () => {
+    const patches: Record<string, unknown>[] = [];
+    const inseridos: Record<string, unknown>[] = [];
+    const provedores = { [PROV]: { id: PROV, active: false } };
+    const sb = sbDeTeste({ atual: atualDe(), tipos: TIPOS, contatos: CONTATOS, provedores, patches, inseridos });
+
+    await expect(
+      alterarAgendamentoHandler(sb, ctxDe(), { id: APPT, revision: 3, owner_user_id: null, provider_id: PROV }),
+    ).rejects.toMatchObject({ status: 422, code: "agenda_tipo_desativado" });
+
+    expect(patches).toHaveLength(0);
   });
 });

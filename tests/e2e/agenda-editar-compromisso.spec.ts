@@ -5,9 +5,9 @@ import { test, expect, type Page } from "./helpers/test";
 import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
 
 /**
- * EDITAR COMPROMISSO PELA TELA (9015) — título, paciente, horário, tipo e
- * observação gravam pelo PATCH e aparecem no detalhe; a troca de paciente
- * pede confirmação antes de sair.
+ * EDITAR COMPROMISSO PELA TELA (9015) — título, paciente, horário, tipo,
+ * profissional e observação gravam pelo PATCH e aparecem no detalhe; a troca
+ * de paciente pede confirmação antes de sair (a de profissional, não).
  *
  * O molde de fixture é o de `agenda-presenca-recuperacao.spec.ts`: org, dono
  * admin, tipo com jornada e contato criados via service role, e o detalhe
@@ -227,4 +227,43 @@ test("trocar o paciente pede confirmação antes de gravar", async ({ page }) =>
   await expect(verContato).toHaveAttribute("href", `/app/contacts/${pacienteB}`, {
     timeout: 20_000,
   });
+});
+
+test("trocar o profissional grava o par SEM confirmação e mantém o horário", async ({ page }) => {
+  const f = await fixture();
+  const paciente = await contato(f, "Paciente Profissional");
+  const prov = await insert("providers", {
+    organization_id: f.org,
+    name: "Dr. Externo Edicao",
+    active: true,
+    schedule: {
+      timezone: "America/Sao_Paulo",
+      windows: [0, 1, 2, 3, 4, 5, 6].map((dow) => ({ dow, start: "00:00", end: "23:59" })),
+    },
+  });
+  const id = await agendamento(f, paciente, "Consulta de edicao");
+  await entrar(page, f.email);
+  await abrirEdicao(page, id, "Consulta de edicao");
+
+  // O seletor nasce no atendente atual; a troca vai para o grupo Profissionais.
+  await expect(page.getByTestId("editar-profissional")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("editar-profissional").selectOption(prov);
+
+  const patch = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/v1/agenda/agendamentos" && r.request().method() === "PATCH",
+  );
+  await page.getByTestId("salvar-edicao").click();
+  expect((await patch).status()).toBe(200);
+
+  // Sem alertdialog no caminho: profissional não troca convidado.
+  await expect(page.getByTestId("editar-profissional")).toBeHidden({ timeout: 20_000 });
+
+  const { data, error } = await db
+    .from("calendar_appointments")
+    .select("owner_user_id, provider_id")
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+  expect(data.provider_id).toBe(prov);
+  expect(data.owner_user_id).toBeNull();
 });

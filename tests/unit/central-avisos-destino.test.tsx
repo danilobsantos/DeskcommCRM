@@ -71,4 +71,21 @@ describe("Central: navegação separada da resolução", () => {
     dados(); view.rerender(<AgentInboxList canResolve />);
     expect(screen.queryByRole("alert")).toBeNull(); expect(screen.getByRole("link")).toBeVisible();
   });
+  it("contato do aviso sai na linha, sem virar link nem pedir clique", () => {
+    dados({ ...item, contato: { nome: "Maria Silva", telefone: "+5511999990001" } }); render(<AgentInboxList canResolve />);
+    const linha = screen.getByTestId("inbox-contato");
+    expect(linha).toHaveTextContent("Maria Silva");
+    expect(linha).toHaveTextContent("+55");
+    expect(screen.getByRole("link", { name: "Abrir conversa" })).toBeVisible();
+  });
+  it("sem contato, nenhuma linha extra; chips filtram e carregar mais pede a próxima página", () => {
+    const hook = vi.mocked(useAgentInbox);
+    hook.mockReturnValue({ data: { items: [item], open_count: 60, has_more: true }, isLoading: false } as unknown as ReturnType<typeof useAgentInbox>);
+    render(<AgentInboxList canResolve />);
+    expect(screen.queryByTestId("inbox-contato")).toBeNull();
+    fireEvent.click(screen.getByTestId("filtro-severidade-critical"));
+    expect(hook).toHaveBeenLastCalledWith("open", { gravidade: "critical", limite: 50 });
+    fireEvent.click(screen.getByRole("button", { name: "Carregar mais" }));
+    expect(hook).toHaveBeenLastCalledWith("open", { gravidade: "critical", limite: 100 });
+  });
 });
