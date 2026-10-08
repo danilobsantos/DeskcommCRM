@@ -23,6 +23,8 @@ export interface AgentInboxItem {
   destination: DestinoDoAviso;
   /** Ausente em respostas antigas; a linha do contato só desenha quando há. */
   contato?: ContatoDoAvisoNaTela | null;
+  /** Só nos avisos da cobrança, e só para quem administra: o link que paga em um clique. */
+  link_de_pagamento?: string | null;
 }
 
 export interface AgentInboxData {

@@ -81,7 +81,12 @@ services:
       SUPABASE_DB_URL: ${SUPABASE_DB_URL_DOCKER:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
     ports:
-      - "8787:8787"
+      # Só 127.0.0.1: /healthz e /metrics do worker não têm autenticação e o
+      # /metrics conta filas, sessões e custo de todas as empresas. Sem endereço
+      # de bind o Docker publica em 0.0.0.0 — qualquer um na mesma rede (Wi-Fi
+      # do café, LAN do escritório) lia os números. O healthcheck roda DENTRO do
+      # container e não depende desta linha.
+      - "127.0.0.1:8787:8787"
     healthcheck:
       # 127.0.0.1 explícito: localhost resolve p/ ::1 e o healthz escuta só IPv4.
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8787/healthz"]
