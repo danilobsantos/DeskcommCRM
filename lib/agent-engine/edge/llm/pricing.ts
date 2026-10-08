@@ -118,11 +118,6 @@ const USD_PER_MTOK: Record<string, Preco> = {
   // (06/10/2026). O armazenamento de cache ($1/MTok/h) não é por chamada.
   'gemini-3.5-flash-lite': { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   'gemini-3.1-pro-preview': { input: 2, output: 12, cacheRead: 0.2, cacheWrite5m: 2, cacheWrite1h: 2 },
-  // Lite da 3.x (migration 9007): o piso de custo da geração 3. Preços em USD
-  // convertidos do `ai_models` (centavos/1M ÷ 100); leitura = 0.1× a entrada,
-  // a mesma regra do caching implícito acima.
-  'gemini-3.1-flash-lite': { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite5m: 0.25, cacheWrite1h: 0.25 },
-  'gemini-3.5-flash-lite': { input: 0.15, output: 1.25, cacheRead: 0.015, cacheWrite5m: 0.15, cacheWrite1h: 0.15 },
   'gemini-2.5-pro': { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite5m: 1.25, cacheWrite1h: 1.25 },
   'gemini-2.5-flash': { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.3 },
   'gemini-2.5-flash-lite': { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite5m: 0.1, cacheWrite1h: 0.1 },

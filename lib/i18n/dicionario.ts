@@ -15036,7 +15036,6 @@ export const DICIONARIO: Traducoes = {
   "Já paguei": { es: "Ya pagué" },
   "Gerenciar pagamento": { es: "Gestionar pago" },
   "Trocar de plano": { es: "Cambiar de plan" },
-  "Confirmar troca": { es: "Confirmar cambio" },
   "Cancelar assinatura": { es: "Cancelar suscripción" },
   "Confirmar cancelamento": { es: "Confirmar cancelación" },
   "Você mantém o acesso até o fim do período já pago. Não há reembolso proporcional.": { es: "Mantienes el acceso hasta el fin del período ya pagado. No hay reembolso proporcional." },
