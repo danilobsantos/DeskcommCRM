@@ -41,6 +41,44 @@ const NEGOCIO_FORA_DA_CONVERSA = {
 } as const;
 
 /**
+ * A recusa de pessoal na ficha de negócio (spec 21, etapa 12).
+ *
+ * `getLeadHandler` responde 404 tanto para "não existe" quanto para "é de
+ * pessoal" (igual à conversa). Só no 404 esta leitura diagnóstica distingue —
+ * e o motivo honesto passa na frente do genérico de fora-da-conversa.
+ */
+const NEGOCIO_CONTATO_PESSOAL = {
+  permitido: false,
+  motivo: "contato_pessoal",
+  mensagem:
+    "este negócio é de um contato marcado como pessoal — fora da operação: não leia " +
+    "nem escreva aqui; siga a conversa com quem está falando.",
+} as const;
+
+async function recusaSeLeadDePessoal(
+  ctx: McpContext,
+  leadId: string,
+): Promise<typeof NEGOCIO_CONTATO_PESSOAL | null> {
+  const { data: lead } = await ctx.supabase
+    .from("crm_leads")
+    .select("contact_id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("id", leadId)
+    .maybeSingle();
+  const contactId = (lead as { contact_id?: string | null } | null)?.contact_id;
+  if (!contactId) return null;
+  const { data: contato } = await ctx.supabase
+    .from("contacts")
+    .select("is_personal")
+    .eq("organization_id", ctx.organizationId)
+    .eq("id", contactId)
+    .maybeSingle();
+  return (contato as { is_personal?: boolean } | null)?.is_personal === true
+    ? NEGOCIO_CONTATO_PESSOAL
+    : null;
+}
+
+/**
  * A unidade de `value_cents` DITA AO MODELO. O negócio guarda o valor × 100 em
  * QUALQUER moeda — inclusive guarani, que não tem centavo (ver
  * `formatValorDoNegocio` em `lib/money.ts`) —, e o catálogo não: `preco_cents`
@@ -174,19 +212,27 @@ export const crmGetLead: McpToolDefinition<typeof getInputShape> = {
   requiresScope: "mcp:read",
   handler: async (input, ctx) => {
     const doTurno = ctx.contatoDoTurno;
-    const lead = await getLeadHandler(
-      ctx.supabase,
-      {
-        organization_id: ctx.organizationId,
-        actor: ctx.actor,
-        requestId: ctx.requestId,
-      },
-      input.lead_id,
-    ).catch((e: unknown) => {
+    let lead: Record<string, unknown> | null = null;
+    try {
+      lead = await getLeadHandler(
+        ctx.supabase,
+        {
+          organization_id: ctx.organizationId,
+          actor: ctx.actor,
+          requestId: ctx.requestId,
+        },
+        input.lead_id,
+      );
+    } catch (e: unknown) {
       // Com turno, o `404` vira a MESMA recusa do negócio de outro cliente.
-      if (doTurno && e instanceof ApiError && e.status === 404) return null;
-      throw e;
-    });
+      if (!(e instanceof ApiError) || e.status !== 404) throw e;
+      // ...exceto quando o negócio EXISTE e é de pessoal: motivo honesto nos
+      // dois ingressos. Diagnóstico só neste 404 — fora dele, nada muda.
+      const recusa = await recusaSeLeadDePessoal(ctx, input.lead_id);
+      if (recusa) return recusa;
+      if (!doTurno) throw e;
+      lead = null;
+    }
     if (doTurno && (!lead || lead.contact_id !== doTurno)) return NEGOCIO_FORA_DA_CONVERSA;
     if (!lead) throw new Error("not_found");
     if ((lead as { organization_id?: string }).organization_id !== ctx.organizationId) {
@@ -219,6 +265,18 @@ const createInputShape = {
     .optional(),
   tags: z.array(z.string()).optional(),
   source: z.string().optional(),
+  /**
+   * Os campos que o DONO declarou em `pipeline.settings.fields` (#2297).
+   *
+   * Sem esta chave a ferramenta não tem como criar um negócio numa etapa
+   * exigente nem quando o agente JÁ SABE o valor: `z.object` descarta a chave
+   * que não declarou, o valor morria antes do `createLeadHandler` — quem
+   * pergunta a régua —, e a recusa (422 `required_fields_missing`) acontecia
+   * sem que houvesse como evitá-la. Mesmo desenho do `crm_update_lead`, que já
+   * declarava a chave; o schema de criação do REST continua sem ela porque lá
+   * ela é gerida pelo servidor (o valor entra por fora do `parse`, no handler).
+   */
+  custom_fields: z.record(z.string(), z.unknown()).optional(),
 };
 
 export const crmCreateLead: McpToolDefinition<typeof createInputShape> = {
@@ -246,6 +304,16 @@ export const crmCreateLead: McpToolDefinition<typeof createInputShape> = {
       tags: input.tags ?? [],
       source: input.source ?? "ai_agent",
     });
+    // #2234 na CRIAÇÃO (#2302): a mesma conferência do `crm_update_lead`. Sem
+    // ela, a chave nova deixava a IA cumprir a régua da etapa com um valor que
+    // o cliente não disse. O campo recusado sai do insert; se a etapa o exige,
+    // a régua devolve o 422 — coerente: o cliente não disse.
+    const conferencia = await conferirCamposPersonalizados(
+      ctx,
+      { pipelineId: input.pipeline_id },
+      input.custom_fields,
+    );
+    const custom_fields = conferencia.custom_fields ?? input.custom_fields;
     const lead = await createLeadHandler(
       ctx.supabase,
       {
@@ -253,9 +321,26 @@ export const crmCreateLead: McpToolDefinition<typeof createInputShape> = {
         actor: ctx.actor,
         requestId: ctx.requestId,
       },
-      parsed,
+      // `custom_fields` entra POR FORA do `createLeadSchema.parse`, que é o
+      // mesmo lugar de onde ele sairia: o schema de criação não declara a chave
+      // (server-managed no REST) e o `parse` descarta o que não declara. É a
+      // interseção que o webhook de captação também monta. Sem isto o argumento
+      // do agente morria aqui dentro, antes da régua que ele precisa satisfazer
+      // (#2297, caminho 2).
+      {
+        ...parsed,
+        ...(custom_fields === undefined ? {} : { custom_fields }),
+      },
     );
-    return { lead };
+    return {
+      lead,
+      ...(conferencia.recusados.length > 0
+        ? {
+            campos_nao_gravados: conferencia.recusados,
+            erro_de_ensino: conferencia.recusados.map((r) => r.mensagem).join(" "),
+          }
+        : {}),
+    };
   },
 };
 
@@ -312,7 +397,7 @@ export const crmUpdateLead: McpToolDefinition<typeof updateInputShape> = {
     // dinheiro em código, o degrau 2 pergunta ao Jev o que sobrou, e o que o
     // cliente não disse volta como ERRO DE ENSINO para o modelo, com os outros
     // campos da mesma chamada seguindo gravando (`lib/mcp/conferencia-de-campos`).
-    const conferencia = await conferirCamposPersonalizados(ctx, lead_id, parsed.custom_fields);
+    const conferencia = await conferirCamposPersonalizados(ctx, { leadId: lead_id }, parsed.custom_fields);
     const lead = await updateLeadHandler(
       ctx.supabase,
       {
@@ -354,12 +439,22 @@ const moveInputShape = {
    * cliente ou passa para o humano — nunca move calado.
    */
   won_reason: z.string().max(500).optional(),
+  /**
+   * O motivo da perda, quando o destino é etapa de perda (issue #917). O banco
+   * confere contra o vocabulário do funil (canônico + `settings.lost_reasons`) e
+   * recusa a perda sem ele. O `moveLeadHandler` já aceitava; a tool descartava.
+   * Sem `.min(1)`: motivo em branco é tratado em lib/leads/motivo-da-perda.ts como
+   * ausente — a mesma régua do moveLeadSchema e do won_reason; string vazia
+   * morrendo no zod daria uma mensagem diferente da recusa de negócio.
+   */
+  lost_reason: z.string().max(500).optional(),
 };
 
 export const crmMoveLeadStage: McpToolDefinition<typeof moveInputShape> = {
   name: "crm_move_lead_stage",
   description:
     "Move um lead para outro stage dentro do MESMO pipeline. Audit registra from/to stage e reason. " +
+    "Mover para uma etapa de perda exige lost_reason, com um motivo do vocabulário do funil. " +
     // "use clone" apontava para uma porta que o agente NÃO tem: não existe tool
     // de clone em lib/mcp/tools/, e ele não faz HTTP autenticado por cookie de
     // sessão. Instrução que não pode ser cumprida faz o modelo prometer ao
@@ -385,6 +480,7 @@ export const crmMoveLeadStage: McpToolDefinition<typeof moveInputShape> = {
         position_in_stage: input.position_in_stage,
         reason: input.reason,
         won_reason: input.won_reason,
+        lost_reason: input.lost_reason,
       },
     );
     return { lead };

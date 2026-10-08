@@ -77,6 +77,8 @@ interface ContactBits {
   title: string;
   avatarStoragePath?: string | null;
   isAnonymized?: boolean;
+  /** Spec 21, caminho 1: pessoal não entrega aviso — a linha já traz a marca. */
+  pessoal: boolean;
 }
 
 const contactCache = new Map<string, ContactBits>();
@@ -93,7 +95,7 @@ async function getContactBits(contactId: string): Promise<ContactBits> {
   // A rota devolve o contato FLAT em `data` (`ok(contact)`); o nome sai do
   // módulo `nomeDoContato`, não de concatenação local.
   const row = await contatoDaRota(contactId);
-  if (!row) return { title: "Nova mensagem" };
+  if (!row) return { title: "Nova mensagem", pessoal: false };
   const bits: ContactBits = {
     title:
       nomeDoContato(row as { display_name?: string | null; name?: string | null } | null) ??
@@ -101,13 +103,20 @@ async function getContactBits(contactId: string): Promise<ContactBits> {
     avatarStoragePath:
       typeof row.avatar_storage_path === "string" ? row.avatar_storage_path : null,
     isAnonymized: row.is_anonymized === true,
+    pessoal: (row as { is_personal?: boolean } | null)?.is_personal === true,
   };
   contactCache.set(contactId, bits);
   return bits;
 }
 
-export async function contactNotifyBits(contactId: string): Promise<{ title: string; icon?: string }> {
+export async function contactNotifyBits(contactId: string): Promise<{
+  title: string;
+  icon?: string;
+  /** Spec 21, caminho 1: pessoal não entrega aviso — a linha já traz a marca. */
+  pessoal: boolean;
+}> {
   const bits = await getContactBits(contactId);
+  const title = bits.title;
   let icon: string | undefined;
 
   // Só busca a foto se o contato realmente tem foto no Storage e não foi anonimizado.
@@ -123,8 +132,7 @@ export async function contactNotifyBits(contactId: string): Promise<{ title: str
       // sem foto ou erro de rede: badge da marca
     }
   }
-
-  return { title: bits.title, icon };
+  return { title, icon, pessoal: bits.pessoal };
 }
 
 async function contactIdFromRow(
@@ -174,7 +182,10 @@ export function useInboundMessageAlerts(): void {
       const contactId = await contactIdFromRow(row, conversationId);
       const bits = contactId
         ? await contactNotifyBits(contactId)
-        : { title: "Nova mensagem" as const, icon: undefined };
+        : { title: "Nova mensagem" as const, icon: undefined, pessoal: false };
+      // Pessoal não avisa (spec 21, caminho 1): nem toast, nem push de tela —
+      // o choke é aqui, antes do `entregarAviso`; `emit`/`sounds` não mudam.
+      if (bits.pessoal) return;
       entregarAviso({
         category: "message",
         kind: "message_inbound",

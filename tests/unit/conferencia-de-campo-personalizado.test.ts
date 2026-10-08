@@ -169,7 +169,7 @@ async function turno(
     })),
     pipelineSettings: { fields: [{ key: "quartos", label: "Quartos", type: "number" }] },
   };
-  const resultado = await conferirCamposPersonalizados(ctxDoAgente(bancoFalso(f)), LEAD, campos, {
+  const resultado = await conferirCamposPersonalizados(ctxDoAgente(bancoFalso(f)), { leadId: LEAD }, campos, {
     ...CHAVE,
     fetchImpl: jev(r),
   });
@@ -198,7 +198,7 @@ describe("catraca por origem — tela, API de terceiros e automação não confe
     };
     const r = await conferirCamposPersonalizados(
       ctxDoAgente(bancoFalso(f), { role: "manager" }),
-      LEAD,
+      { leadId: LEAD },
       { quartos: 1 },
       { ...CHAVE, fetchImpl: jev({ respostas: {}, chamadas: [] }) },
     );
@@ -210,7 +210,7 @@ describe("catraca por origem — tela, API de terceiros e automação não confe
 
   it("sem custom_fields nada muda", async () => {
     const f: FalsoBanco = { inseridas: {}, lidas: [], settings: DECIDINDO, conversa: null, mensagens: [], pipelineSettings: null };
-    const r = await conferirCamposPersonalizados(ctxDoAgente(bancoFalso(f)), LEAD, undefined);
+    const r = await conferirCamposPersonalizados(ctxDoAgente(bancoFalso(f)), { leadId: LEAD }, undefined);
     expect(r.estado).toBe("nao_conferida");
     expect(f.lidas).toEqual([]);
   });
@@ -259,6 +259,30 @@ describe("os quatro exemplos da issue, em decidindo", () => {
   });
 });
 
+describe("na CRIAÇÃO (crm_create_lead, #2302) — o funil vem do argumento, não do negócio", () => {
+  it("com pipelineId lê os rótulos do funil SEM ler crm_leads, e confere igual", async () => {
+    const f: FalsoBanco = {
+      inseridas: {},
+      lidas: [],
+      settings: DECIDINDO,
+      conversa: "55555555-5555-4555-8555-555555555555",
+      mensagens: [{ direction: "inbound", body: "procuro algo pequeno", created_at: "2026-09-01T10:00:00.000Z" }],
+      pipelineSettings: { fields: [{ key: "quartos", label: "Quartos", type: "number" }] },
+    };
+    const r: RespostasDoJev = { respostas: { dito_quartos: 0.2, contrario_quartos: 0.1 }, chamadas: [] };
+    const resultado = await conferirCamposPersonalizados(
+      ctxDoAgente(bancoFalso(f)),
+      { pipelineId: "66666666-6666-4666-8666-666666666666" },
+      { quartos: 1 },
+      { ...CHAVE, fetchImpl: jev(r) },
+    );
+    expect(resultado.custom_fields).toEqual({});
+    expect(resultado.recusados[0]?.mensagem).toContain("Quartos");
+    expect(f.lidas).toContain("crm_pipelines");
+    expect(f.lidas).not.toContain("crm_leads");
+  });
+});
+
 describe("fail-open — tarefa desligada, sem credencial ou provedor fora grava como hoje", () => {
   it("tarefa desligada: grava, não lê a conversa e não chama o Jev", async () => {
     const r: RespostasDoJev = { respostas: {}, chamadas: [] };
@@ -284,7 +308,7 @@ describe("fail-open — tarefa desligada, sem credencial ou provedor fora grava 
       mensagens: [{ direction: "inbound", body: "procuro algo pequeno", created_at: "2026-09-01T10:00:00.000Z" }],
       pipelineSettings: null,
     };
-    const r = await conferirCamposPersonalizados(ctxDoAgente(bancoFalso(f)), LEAD, { quartos: 1 }, {
+    const r = await conferirCamposPersonalizados(ctxDoAgente(bancoFalso(f)), { leadId: LEAD }, { quartos: 1 }, {
       buscarChave: () => Promise.resolve(null),
       fetchImpl: jev({ respostas: {}, chamadas: [] }),
     });
@@ -400,6 +424,20 @@ describe("as mensagens do turno — o Conversador antes da resposta, o Operador 
   it("Operador, com a resposta deste turno já enviada: o MESMO bloco, não lista vazia", async () => {
     const depois = [...historico, msg("outbound", "anotado!", 4), msg("outbound", "vou ver opções", 5)];
     expect(await pendentes(depois)).toEqual(["procuro algo pequeno", "pra mim e meu cachorro"]);
+  });
+
+  // A pergunta ao Jev leva o valor CRU ("CEP é 01310-100?"). Se a mensagem
+  // chegasse com `[CEP]` — a máscara de telemetria do #2418 —, a conferência
+  // recusaria o CEP que o cliente acabou de digitar. CPF segue mascarado.
+  it("CEP e telefone com hífen chegam como o cliente digitou; CPF segue mascarado", async () => {
+    expect(
+      await pendentes([
+        msg("outbound", "qual o seu cep?", 0),
+        msg("inbound", "meu cep é 01310-100", 1),
+        msg("inbound", "zap +55-11-98765-4321", 2),
+        msg("inbound", "cpf 123.456.789-09", 3),
+      ]),
+    ).toEqual(["meu cep é 01310-100", "zap +55-11-98765-4321", "cpf [CPF]"]);
   });
 
   it("conversa longa (mais que as 1000 linhas do PostgREST): lê as mais recentes, nunca as do começo", async () => {

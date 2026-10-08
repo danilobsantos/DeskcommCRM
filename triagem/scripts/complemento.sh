@@ -140,7 +140,7 @@ else p tabela_nova "n/a"; fi
 
 # --- security definer exposta ---
 if c -qi 'security definer'; then
-  c -qiE 'revoke execute on function.*from.*(public|anon)' && p definer_revoke "tem revoke" || p definer_revoke "security definer SEM revoke — as DUAS origens"
+  c -qiE 'revoke (execute|all( privileges)?) on function.*from.*(public|anon)' && p definer_revoke "tem revoke" || p definer_revoke "security definer SEM revoke — as DUAS origens"
 fi
 
 # --- 4. console.log (no-console é warn, o CI não reprova) ---
