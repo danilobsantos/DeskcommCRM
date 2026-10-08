@@ -38,7 +38,12 @@ describe("destinos da Central", () => {
       expect(item?.destination.estado).toBe(state);
       if (state === "disponivel") expect(item?.destination).toMatchObject({ href: `/app/agenda?compromisso=${ID}`, rotulo: "Abrir compromisso" });
       else expect(item?.destination).not.toHaveProperty("href");
-      expect(l.queries).toEqual(role === "viewer" ? [] : [{ table: "calendar_appointments", org: ORG, ids: [ID] }]);
+      // Um lote por tipo em CADA resolvedor (destino + contato), nunca por
+      // aviso — por isso a mesma tabela aparece duas vezes.
+      expect(l.queries).toEqual(role === "viewer" ? [] : [
+        { table: "calendar_appointments", org: ORG, ids: [ID] },
+        { table: "calendar_appointments", org: ORG, ids: [ID] },
+      ]);
     }
     const l = leitor();
     const [invalidPair] = await resolverDestinosDosAvisos(l.client, ORG, "admin", [aviso("handoff", "appointment")]);
@@ -63,13 +68,24 @@ describe("destinos da Central", () => {
   it("consulta por tipo e deduplica IDs, não N+1", async () => {
     const l = leitor();
     await resolverDestinosDosAvisos(l.client, ORG, "agent", [...Array.from({ length: 150 }, () => aviso()), aviso("handoff", "contact")]);
-    expect(l.queries).toEqual([{ table: "conversations", org: ORG, ids: [ID] }, { table: "contacts", org: ORG, ids: [ID] }]);
+    // Destino lê conversations+contacts; o contato relê os dois lotes (um por
+    // tipo em cada resolvedor). 150 avisos, 4 leituras — nunca 150.
+    expect(l.queries).toEqual([
+      { table: "conversations", org: ORG, ids: [ID] },
+      { table: "contacts", org: ORG, ids: [ID] },
+      { table: "conversations", org: ORG, ids: [ID] },
+      { table: "contacts", org: ORG, ids: [ID] },
+    ]);
   });
   it("negócio sem funil visível não abre coleção genérica ou outro tenant", async () => {
     const l = leitor([ID], false, false);
     const [item] = await resolverDestinosDosAvisos(l.client, ORG, "agent", [aviso("other", "lead")]);
     expect(item?.destination.estado).toBe("indisponivel");
-    expect(l.queries).toEqual([{ table: "crm_leads", org: ORG, ids: [ID] }, { table: "crm_pipelines", org: ORG, ids: [PIPELINE] }]);
+    expect(l.queries).toEqual([
+      { table: "crm_leads", org: ORG, ids: [ID] },
+      { table: "crm_pipelines", org: ORG, ids: [PIPELINE] },
+      { table: "crm_leads", org: ORG, ids: [ID] },
+    ]);
   });
   it.each(["agent", "manager"] as const)("%s não recebe conexão admin", async role => {
     const l = leitor(); const [item] = await resolverDestinosDosAvisos(l.client, ORG, role, [aviso("qr_rescan", "channel_session")]);
@@ -89,7 +105,7 @@ describe("destinos da Central", () => {
     const denied = await resolverDestinosDosAvisos(leitor([]).client, ORG, "agent", [aviso()]);
     const error = await resolverDestinosDosAvisos(leitor([ID], true).client, ORG, "agent", [aviso()]);
     expect(error).toEqual(denied);
-    expect(logger.warn).toHaveBeenLastCalledWith(expect.any(String), { referencia: "conversation", quantidade: 1 });
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), { referencia: "conversation", quantidade: 1 });
   });
   it.each(["budget_exceeded", "risk_backlog_seeded", "reactivation_expired"])("%s aceita apenas org ativa", async kind => {
     const ref = kind === "budget_exceeded" ? "ai_budget" : "organization";

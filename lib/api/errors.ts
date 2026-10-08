@@ -53,6 +53,7 @@ export const ApiErrorCodes = {
   agenda_fora_da_jornada: "agenda_fora_da_jornada",
   agenda_tipo_desativado: "agenda_tipo_desativado",
   agenda_sem_responsavel: "agenda_sem_responsavel",
+  agenda_dono_duplo: "agenda_dono_duplo",
   agenda_disponibilidade_invalida: "agenda_disponibilidade_invalida",
   agenda_ja_cancelado: "agenda_ja_cancelado",
   agenda_listagem_sem_recorte: "agenda_listagem_sem_recorte",

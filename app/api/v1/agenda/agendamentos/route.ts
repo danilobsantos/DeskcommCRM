@@ -115,10 +115,16 @@ const alterarSchema = z
      * EDIÇÃO DE COMPROMISSO (9015): título livre, observação publicável (vai
      * para o Google; `""` limpa), paciente (uuid ou null para desvincular) e
      * tipo (recalcula o fim e revalida a disponibilidade no handler).
+     *
+     * Troca de profissional: `owner_user_id` (atendente) ou `provider_id`
+     * (profissional externo) — `null` limpa o lado, ausente não mexe. Os dois
+     * preenchidos juntos recusam no handler (a tabela só aceita um dono).
      */
     title: z.string().min(1).max(200).optional(),
     description: z.string().max(2000).optional(),
     contact_id: z.string().uuid().nullable().optional(),
+    owner_user_id: z.string().uuid().nullable().optional(),
+    provider_id: z.string().uuid().nullable().optional(),
     /**
      * Conversa vinculada: anda JUNTO com o paciente (a tela limpa ao trocar
      * e religa ao escolher). Aceita e grava como na criação, sem validação
@@ -138,7 +144,9 @@ const alterarSchema = z
       c.description !== undefined ||
       c.contact_id !== undefined ||
       c.conversation_id !== undefined ||
-      c.event_type_id !== undefined,
+      c.event_type_id !== undefined ||
+      c.owner_user_id !== undefined ||
+      c.provider_id !== undefined,
     {
       message: "Informe pelo menos um campo para alterar.",
     },

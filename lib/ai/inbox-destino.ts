@@ -2,12 +2,24 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { InboxKind } from "@/lib/agent-engine/db/repository";
 import { ROLE_RANK, type Role } from "@/lib/auth/types";
+import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { logger } from "@/lib/logger";
 
 /** DTO projetado no servidor. O browser nunca deriva URLs de referências livres. */
 export type DestinoDoAviso =
   | { estado: "disponivel"; rotulo: string; href: string; orientacao?: string }
   | { estado: "sem_permissao" | "indisponivel" | "sem_destino"; orientacao: string };
+
+/**
+ * Contato ligado ao aviso, para o card mostrar nome/número sem abrir o
+ * destino. `null` = sem contato identificável (sem referência, sem permissão
+ * ou referência removida). Nome sai de `nomeDoContato` (nunca identificador
+ * técnico); telefone é o E.164 como está no banco, e a tela formata.
+ */
+export interface ContatoDoAviso {
+  nome: string | null;
+  telefone: string | null;
+}
 
 interface ReferenciaDoAviso { kind: string; ref_kind: string | null; ref_id: string | null }
 interface Alvo { tabela: string; papel: Role; rotulo: string; href: (id: string, pipelineId?: string) => string; ativo?: boolean }
@@ -188,7 +200,7 @@ function semPermissao(minimo: Role): DestinoDoAviso {
  */
 export async function resolverDestinosDosAvisos<T extends ReferenciaDoAviso>(
   leitor: SupabaseClient, organizationId: string, papel: Role, itens: T[],
-): Promise<Array<T & { destination: DestinoDoAviso }>> {
+): Promise<Array<T & { destination: DestinoDoAviso; contato: ContatoDoAviso | null }>> {
   const grupos = new Map<string, Set<string>>();
   for (const item of itens) {
     const p = politica(item), a = alvo(item.ref_kind);
@@ -219,11 +231,12 @@ export async function resolverDestinosDosAvisos<T extends ReferenciaDoAviso>(
         }
         visiveis.set(ref, new Set(funilPorLead.keys()));
       } else visiveis.set(ref, new Set(((data ?? []) as unknown as Array<{ id: string }>).map(linha => linha.id)));
-    } catch {
+      } catch {
       // Somente catálogo fechado e contagem. Nunca erro bruto, título, UUID ou payload.
       logger.warn("[inbox] contexto indisponível na projeção", { referencia: ref, quantidade: ids.size });
     }
   }));
+  const contatos = await resolverContatosDosAvisos(leitor, organizationId, papel, itens);
   return itens.map((item) => {
     const p = politica(item);
     let destination: DestinoDoAviso = SEM_DESTINO;
@@ -249,6 +262,147 @@ export async function resolverDestinosDosAvisos<T extends ReferenciaDoAviso>(
         } else destination = { estado: "sem_destino", orientacao: p.orientacao };
       }
     }
-    return { ...item, destination };
+    return { ...item, destination, contato: contatos.get(item) ?? null };
   });
+}
+
+/**
+ * Nome/número do contato de cada aviso, em lote (uma consulta por tipo, nunca
+ * por aviso — o mesmo desenho do resolvedor de destinos acima).
+ *
+ * Caminhos: `contact` direto; `conversation` via `conversations.contact_id`;
+ * `lead`/`appointment`/`proposal` via o `contact_id` da linha; `agent_case`
+ * via `agent_cases.conversation_id` e dali ao contato. O resto (`channel_*`,
+ * `ai_*`, `followup_*`, `organization`…) não tem pessoa — volta `null`, e a
+ * tela simplesmente não desenha a linha. Leitura pelo client autenticado (a
+ * RLS continua dona); ausência ou erro vira `null`, nunca exceção.
+ */
+export async function resolverContatosDosAvisos(
+  leitor: SupabaseClient,
+  organizationId: string,
+  papel: Role,
+  itens: ReadonlyArray<ReferenciaDoAviso>,
+): Promise<Map<ReferenciaDoAviso, ContatoDoAviso>> {
+  const saida = new Map<ReferenciaDoAviso, ContatoDoAviso>();
+  const diretos = new Set<string>();
+  const conversas = new Set<string>();
+  const leads = new Set<string>();
+  const compromissos = new Set<string>();
+  const propostas = new Set<string>();
+  const casos = new Set<string>();
+  for (const item of itens) {
+    // Par inválido falha fechado aqui como no destino: sem política para o
+    // kind, ou com referência fora da política, nem o contato é procurado — o
+    // item cai em "sem destino" sem nenhuma leitura.
+    const pol: Politica | undefined = Object.hasOwn(POLITICAS_DE_AVISO, item.kind)
+      ? POLITICAS_DE_AVISO[item.kind as InboxKind]
+      : undefined;
+    if (!pol || !pol.refs.includes(item.ref_kind as InboxRefKind)) continue;
+    // O mesmo veto de papel do destino: sem permissão para abrir o contexto,
+    // nem o nome do contato é resolvido.
+    const destino = item.ref_kind ? alvo(item.ref_kind) : undefined;
+    if (destino && !permite(papel, destino.papel)) continue;
+    if (!item.ref_id || !uuid.safeParse(item.ref_id).success) continue;
+    switch (item.ref_kind) {
+      case "contact": diretos.add(item.ref_id); break;
+      case "conversation": conversas.add(item.ref_id); break;
+      case "lead": leads.add(item.ref_id); break;
+      case "appointment": compromissos.add(item.ref_id); break;
+      case "proposal": propostas.add(item.ref_id); break;
+      case "agent_case": casos.add(item.ref_id); break;
+    }
+  }
+  if (
+    diretos.size + conversas.size + leads.size + compromissos.size + propostas.size + casos.size ===
+    0
+  ) {
+    return saida;
+  }
+  async function lote<T>(tabela: string, ids: Set<string>, colunas: string): Promise<T[]> {
+    if (ids.size === 0) return [];
+    try {
+      const { data, error } = await leitor
+        .from(tabela)
+        .select(colunas)
+        .eq("organization_id", organizationId)
+        .in("id", [...ids]);
+      if (error) throw new Error("consulta_indisponivel");
+      return (data ?? []) as T[];
+    } catch {
+      logger.warn("[inbox] contato indisponível na projeção", { tabela, quantidade: ids.size });
+      return [];
+    }
+  }
+  // Caso → conversa, para cair no mesmo caminho da conversa direta.
+  const conversaDoCaso = new Map<string, string>();
+  for (const linha of await lote<{ id: string; conversation_id: string | null }>(
+    "agent_cases",
+    casos,
+    "id, conversation_id",
+  )) {
+    if (linha.conversation_id && uuid.safeParse(linha.conversation_id).success) {
+      conversaDoCaso.set(linha.id, linha.conversation_id);
+      conversas.add(linha.conversation_id);
+    }
+  }
+  const contatoDaConversa = new Map<string, string>();
+  for (const linha of await lote<{ id: string; contact_id: string | null }>(
+    "conversations",
+    conversas,
+    "id, contact_id",
+  )) {
+    if (linha.contact_id && uuid.safeParse(linha.contact_id).success) {
+      contatoDaConversa.set(linha.id, linha.contact_id);
+    }
+  }
+  const contatoDoAlvo = new Map<string, string>();
+  const pares: Array<[Set<string>, string]> = [
+    [leads, "crm_leads"],
+    [compromissos, "calendar_appointments"],
+    [propostas, "crm_proposals"],
+  ];
+  for (const [ids, tabela] of pares) {
+    for (const linha of await lote<{ id: string; contact_id: string | null }>(
+      tabela,
+      ids,
+      "id, contact_id",
+    )) {
+      if (linha.contact_id && uuid.safeParse(linha.contact_id).success) {
+        contatoDoAlvo.set(`${tabela}:${linha.id}`, linha.contact_id);
+      }
+    }
+  }
+  const todosContatos = new Set<string>(diretos);
+  for (const id of contatoDaConversa.values()) todosContatos.add(id);
+  for (const id of contatoDoAlvo.values()) todosContatos.add(id);
+  const porId = new Map<string, ContatoDoAviso>();
+  for (const linha of await lote<{
+    id: string;
+    display_name: string | null;
+    name: string | null;
+    phone_number: string | null;
+  }>( "contacts", todosContatos, "id, display_name, name, phone_number")) {
+    const telefone = (linha.phone_number ?? "").trim() || null;
+    porId.set(linha.id, { nome: nomeDoContato(linha), telefone });
+  }
+  const tabelaDe: Record<string, string> = {
+    lead: "crm_leads",
+    appointment: "calendar_appointments",
+    proposal: "crm_proposals",
+  };
+  for (const item of itens) {
+    if (!item.ref_id) continue;
+    let idDoContato: string | null = null;
+    if (item.ref_kind === "contact") idDoContato = item.ref_id;
+    else if (item.ref_kind === "conversation") idDoContato = contatoDaConversa.get(item.ref_id) ?? null;
+    else if (item.ref_kind === "agent_case") {
+      const conversa = conversaDoCaso.get(item.ref_id);
+      idDoContato = conversa ? (contatoDaConversa.get(conversa) ?? null) : null;
+    } else if (item.ref_kind && tabelaDe[item.ref_kind]) {
+      idDoContato = contatoDoAlvo.get(`${tabelaDe[item.ref_kind]}:${item.ref_id}`) ?? null;
+    }
+    const contato = idDoContato ? porId.get(idDoContato) : undefined;
+    if (contato) saida.set(item, contato);
+  }
+  return saida;
 }

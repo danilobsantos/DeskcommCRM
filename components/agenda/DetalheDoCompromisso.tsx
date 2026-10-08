@@ -12,6 +12,7 @@ import { useT } from "@/hooks/i18n/useT";
 import { useTagDeIdioma } from "@/hooks/i18n/useLocaleDeData";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { rotuloDoLocal } from "@/lib/agenda/locais";
+import type { Pessoa } from "./tipos";
 
 type Detalhe = {
   meeting?: MeetingDetail | null;
@@ -36,6 +37,13 @@ type Detalhe = {
   contact_id: string | null;
   conversation_id: string | null;
   event_type_id: string | null;
+  /**
+   * Quem atende — um lado só (`dono_unico`): `owner_user_id` (atendente) ou
+   * `provider_id` (profissional externo). A tela resolve os dois num seletor
+   * único e manda o par (novo + null no outro lado) no PATCH.
+   */
+  owner_user_id: string | null;
+  provider_id: string | null;
   outcome_source_kind: string | null;
   outcome_recorded_at: string | null;
   recovery: {
@@ -59,10 +67,16 @@ export function DetalheDoCompromisso({
   id,
   onClose,
   podeEditar = true,
+  pessoas,
 }: {
   id: string | null;
   onClose: () => void;
   podeEditar?: boolean;
+  /**
+   * O roster da grade (equipe + profissionais externos). Ausente = a tela não
+   * oferece a troca de profissional — o PATCH continua aceitando por API.
+   */
+  pessoas?: Pessoa[];
 }) {
   const t = useT();
   const tagDoIdioma = useTagDeIdioma();
@@ -81,6 +95,10 @@ export function DetalheDoCompromisso({
   const [editTipo, setEditTipo] = useState("");
   const [editInicio, setEditInicio] = useState("");
   const [editObservacao, setEditObservacao] = useState("");
+  // Quem atende: o id na lista única (`pessoas`). Vazio = sem responsável
+  // atual e sem escolha — nesse caso o PATCH não leva o par (a rota recusa
+  // zerar os dois lados, então "não escolher" é "não mexer").
+  const [editProfissional, setEditProfissional] = useState("");
   const [confirmandoTroca, setConfirmandoTroca] = useState(false);
   const tipos = useQuery({
     queryKey: ["agenda", "tipos"],
@@ -173,6 +191,11 @@ export function DetalheDoCompromisso({
     setEditTipo(a.event_type_id ?? "");
     setEditInicio(paraInputDataHora(a.starts_at));
     setEditObservacao(a.description ?? "");
+    // Só pré-seleciona quem está no roster: dono fora da equipe (ex.:
+    // revogado) não tem <option> — pré-selecionar o id o mostraria em branco e
+    // ligaria o Salvar sem mudança visível. Vazio = "não mexer".
+    const responsavel = a.provider_id ?? a.owner_user_id ?? "";
+    setEditProfissional(pessoas?.some((p) => p.id === responsavel) ? responsavel : "");
     setConfirmandoTroca(false);
     setEditando(true);
   }
@@ -195,6 +218,21 @@ export function DetalheDoCompromisso({
       patch.conversation_id = editConversa || null;
     }
     if (editTipo && editTipo !== a.event_type_id) patch.event_type_id = editTipo;
+    // Trocar o profissional manda o PAR (novo + null no outro lado): mandar
+    // só um lado com o outro preenchido é recusado na rota (`agenda_dono_duplo`).
+    // Sem confirmação — diferente do paciente, não troca convidado — e a
+    // disponibilidade do novo é revalidada no handler.
+    const responsavelAtual = a.provider_id ?? a.owner_user_id ?? null;
+    if (editProfissional && editProfissional !== responsavelAtual) {
+      const pessoaNova = pessoas?.find((p) => p.id === editProfissional);
+      if (pessoaNova?.tipo === "profissional") {
+        patch.provider_id = editProfissional;
+        patch.owner_user_id = null;
+      } else {
+        patch.owner_user_id = editProfissional;
+        patch.provider_id = null;
+      }
+    }
     if (editInicio && minuto(new Date(editInicio).toISOString()) !== minuto(a.starts_at)) {
       patch.starts_at = new Date(editInicio).toISOString();
     }
@@ -220,6 +258,7 @@ export function DetalheDoCompromisso({
       (editPaciente || null) !== a.contact_id ||
       (editConversa || null) !== (a.conversation_id ?? null) ||
       (editTipo !== "" && editTipo !== a.event_type_id) ||
+      (editProfissional !== "" && editProfissional !== (a.provider_id ?? a.owner_user_id ?? null)) ||
       (editInicio !== "" &&
         Math.floor(Date.parse(new Date(editInicio).toISOString()) / 60000) !==
           Math.floor(Date.parse(a.starts_at) / 60000)) ||
@@ -284,7 +323,8 @@ export function DetalheDoCompromisso({
             {/*
               EDIÇÃO DE COMPROMISSO (9015). O formulário abre AQUI, logo abaixo
               da sincronização — e não no fim da folha, onde ninguém procura.
-              Os campos editáveis — título, paciente, horário, tipo e observação —
+              Os campos editáveis — título, paciente, horário, tipo, profissional e
+              observação —
               com a mesma revisão otimista dos botões de presença (`decide` +
               `staleDraft`): quem salvou por fora no meio do caminho continua
               recebendo o 409 e o aviso. O que muda no banco publicável sobe ao
@@ -352,6 +392,44 @@ export function DetalheDoCompromisso({
                 </label>
                 {tipos.isError ? (
                   <p role="alert">{t("Não foi possível carregar os tipos. Tente novamente.")}</p>
+                ) : null}
+                {pessoas && pessoas.length > 0 ? (
+                  <label className="block">
+                    {t("Profissional")}
+                    <select
+                      data-testid="editar-profissional"
+                      className="mt-2 w-full rounded-md border bg-surface p-2"
+                      value={editProfissional}
+                      onChange={(e) => {
+                        beginDraft();
+                        setEditProfissional(e.target.value);
+                      }}
+                    >
+                      {editProfissional ? null : (
+                        <option value="">{t("Selecionar…")}</option>
+                      )}
+                      <optgroup label={t("Equipe")}>
+                        {pessoas
+                          .filter((p) => p.tipo !== "profissional")
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nome}
+                            </option>
+                          ))}
+                      </optgroup>
+                      {pessoas.some((p) => p.tipo === "profissional") ? (
+                        <optgroup label={t("Profissionais")}>
+                          {pessoas
+                            .filter((p) => p.tipo === "profissional")
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.nome}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ) : null}
+                    </select>
+                  </label>
                 ) : null}
                 <label className="block">
                   {t("Observação")}{" "}

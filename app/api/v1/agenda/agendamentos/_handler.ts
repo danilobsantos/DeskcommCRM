@@ -135,6 +135,15 @@ export interface AlterarInput {
    * parcial, com a mesma `transicao` e o mesmo audit de remarcar.
    */
   event_type_id?: string;
+  /**
+   * Profissional: `owner_user_id` (atendente) ou `provider_id` (externo).
+   * `null` limpa o lado, ausente não mexe — e os dois preenchidos juntos
+   * recusam (a tabela só aceita um dono). O externo é resolvido contra a org
+   * (404/422), como na criação; a troca revalida a disponibilidade na agenda
+   * nova, sem confirmação — diferente do paciente, ela não troca convidado.
+   */
+  owner_user_id?: string | null;
+  provider_id?: string | null;
 }
 
 export interface CancelarInput {
@@ -627,6 +636,47 @@ export async function alterarAgendamentoHandler(
     if (input.conversation_id === undefined) mudanca.conversation_id = null;
   }
   if (input.conversation_id !== undefined) mudanca.conversation_id = input.conversation_id;
+  // Troca de profissional: o externo resolve contra a org (404 sem dizer se o
+  // id existe noutro lugar; 422 se inativo), como na criação. Os dois lados
+  // preenchidos recusam — a tabela só aceita um dono (`dono_unico`) — e zerar
+  // os dois recusa com o mesmo `agenda_sem_responsavel` da criação: sem
+  // responsável não se marca, e quem veio sem também não fica.
+  const donoAnterior = (atual.owner_user_id as string | null) ?? null;
+  const profissionalAnterior = (atual.provider_id as string | null) ?? null;
+  const donoNovo = input.owner_user_id !== undefined ? input.owner_user_id : donoAnterior;
+  const profissionalNovo = input.provider_id !== undefined ? input.provider_id : profissionalAnterior;
+  const trocouProfissional =
+    (input.owner_user_id !== undefined || input.provider_id !== undefined) &&
+    (donoNovo !== donoAnterior || profissionalNovo !== profissionalAnterior);
+  if (input.owner_user_id !== undefined || input.provider_id !== undefined) {
+    if (donoNovo && profissionalNovo) {
+      throw new ApiError(422, "agenda_dono_duplo", undefined, ctx.requestId, "Escolha um responsável: atendente ou profissional externo, não os dois.");
+    }
+    if (!donoNovo && !profissionalNovo) {
+      throw new ApiError(422, "agenda_sem_responsavel", undefined, ctx.requestId, "Todo compromisso precisa de um responsável.");
+    }
+    if (profissionalNovo && profissionalNovo !== profissionalAnterior) {
+      const { data: prof, error: erroProf } = await supabase
+        .from("providers")
+        .select("id, active")
+        .eq("id", profissionalNovo)
+        .eq("organization_id", ctx.organization_id)
+        .maybeSingle();
+      if (erroProf) {
+        throw new ApiError(500, "internal_error", undefined, ctx.requestId, erroProf.message);
+      }
+      if (!prof) {
+        throw new ApiError(404, "not_found", undefined, ctx.requestId, "Profissional não encontrado.");
+      }
+      if (!(prof as { active: boolean }).active) {
+        throw new ApiError(422, "agenda_tipo_desativado", undefined, ctx.requestId, "Este profissional está inativo.");
+      }
+    }
+    if (trocouProfissional) {
+      mudanca.owner_user_id = donoNovo;
+      mudanca.provider_id = profissionalNovo;
+    }
+  }
   let transicao: Transicao | null = null;
   // Só existe quando o paciente mudou (o bloco acima só grava nesse caso) —
   // alimenta o audit e o nome do contato na resposta.
@@ -639,7 +689,7 @@ export async function alterarAgendamentoHandler(
   if (input.event_type_id !== undefined && input.event_type_id !== atual.event_type_id) {
     mudanca.event_type_id = input.event_type_id;
   }
-  if (input.starts_at || mudanca.event_type_id !== undefined) {
+  if (input.starts_at || mudanca.event_type_id !== undefined || trocouProfissional) {
     const { data: tipo } = await supabase
       .from("calendar_event_types")
       .select("id, name, is_active, duration_minutes")
@@ -659,26 +709,32 @@ export async function alterarAgendamentoHandler(
     const novoFim = new Date(novoInicio.getTime() + tipo.duration_minutes * 60_000);
     // ⚠️ O PRÓPRIO COMPROMISSO OCUPA O HORÁRIO DELE. Remarcar para o mesmo
     // instante é no-op — sem esta guarda ele se veria como conflito e recusaria
-    // a si mesmo.
+    // a si mesmo. A troca de profissional NÃO pega esta carona: o dono novo
+    // precisa da grade DELE conferida, então revalida mesmo no mesmo horário.
     const mesmoHorario = new Date(atual.starts_at as string).getTime() === novoInicio.getTime() &&
       new Date(atual.ends_at as string).getTime() === novoFim.getTime();
-    if (!mesmoHorario) {
+    if (!mesmoHorario || trocouProfissional) {
      // REMARCAR segue a mesma assimetria de marcar (`exigeHorarioLivre`): a
       // pessoa que combinou o encaixe por fora da grade precisa poder movê-lo
       // também, senão o compromisso nasce possível e fica preso.
-      const providerId = (atual.provider_id as string | null) ?? null;
+      const providerId = profissionalNovo;
       const consulta = await exigeHorarioLivre(supabase, ctx, {
         eventTypeId: tipo.id,
-        donoId: providerId ?? (atual.owner_user_id as string),
+        donoId: providerId ?? donoNovo!,
         providerId,
         inicio: novoInicio,
         fim: novoFim,
         ignorarAgendamentoId: atual.id as string,
       });
-      mudanca.starts_at = novoInicio.toISOString();
-      mudanca.ends_at = novoFim.toISOString();
-      mudanca.time_zone = consulta.fusoDaRegra;
-      transicao = "rescheduled";
+      // Só vira remarcação quando o horário MUDOU: trocar só o profissional no
+      // mesmo horário confere a grade nova e grava o dono, sem inventar notícia
+      // de remarcação na timeline (o audit abaixo registra o de/para).
+      if (!mesmoHorario) {
+        mudanca.starts_at = novoInicio.toISOString();
+        mudanca.ends_at = novoFim.toISOString();
+        mudanca.time_zone = consulta.fusoDaRegra;
+        transicao = "rescheduled";
+      }
     }
   }
 
@@ -744,14 +800,16 @@ export async function alterarAgendamentoHandler(
     void audit({action: transicao === "rescheduled" ? "agenda.appointment_rescheduled" : transicao === "completed" || transicao === "no_show" ? "agenda.appointment_outcome_recorded" : "agenda.appointment_updated",
       actorUserId:ctx.actor.type === "user" ? ctx.actor.id : null,organizationId:ctx.organization_id,
       resourceType:"calendar_appointment",resourceId:input.id,requestId:ctx.requestId,
-      metadata:{status:salvo.status,revision:salvo.revision,outcome_source_kind:salvo.outcome_source_kind,outcome_message_id:salvo.outcome_message_id}});
+      metadata:{status:salvo.status,revision:salvo.revision,outcome_source_kind:salvo.outcome_source_kind,outcome_message_id:salvo.outcome_message_id,
+        ...(trocouProfissional ? {owner_user_id_anterior:donoAnterior,owner_user_id_novo:donoNovo,provider_id_anterior:profissionalAnterior,provider_id_novo:profissionalNovo} : {})}});
 
   }
 
   if (!transicao) void audit({action:"agenda.appointment_updated",actorUserId:ctx.actor.type==="user"?ctx.actor.id:null,
     organizationId:ctx.organization_id,resourceType:"calendar_appointment",resourceId:input.id,requestId:ctx.requestId,
     metadata:{revision:salvo.revision,confirmation_next_at:salvo.confirmation_next_at,
-      ...(trocouPaciente ? {contact_id_anterior:contatoAnterior,contact_id_novo:mudanca.contact_id} : {})}});
+      ...(trocouPaciente ? {contact_id_anterior:contatoAnterior,contact_id_novo:mudanca.contact_id} : {}),
+      ...(trocouProfissional ? {owner_user_id_anterior:donoAnterior,owner_user_id_novo:donoNovo,provider_id_anterior:profissionalAnterior,provider_id_novo:profissionalNovo} : {})}});
   return salvo as Record<string, unknown>;
 }
 
