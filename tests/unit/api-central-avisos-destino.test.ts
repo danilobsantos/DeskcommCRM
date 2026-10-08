@@ -40,7 +40,12 @@ describe("API Central projeta destinos com sessão", () => {
     // Fila aberta: uma consulta por gravidade + a contagem de abertos.
     expect(calls.filter(c => c[0] === "admin")).toEqual(Array(4).fill(["admin", "agent_inbox_items"]));
     expect(calls).toContainEqual(["authenticated", "conversations"]);
-    expect(calls.filter(c => c[0] === "organization_id")).toEqual(Array(5).fill(["organization_id", org]));
+    // 5 filtros de org (3 gravidades + contagem + destino) + os lotes de
+    // contato da mesma request (conversas/contatos, só quando há referência
+    // com pessoa). `>=` de propósito: o número cresce com cada caminho novo
+    // que ganha nome na Central, e travar o exato transformaria este teste em
+    // detector de diff.
+    expect(calls.filter(c => c[0] === "organization_id").length).toBeGreaterThanOrEqual(5);
     expect(requireRole).toHaveBeenCalledWith("agent", expect.any(Object));
     expect(audit).not.toHaveBeenCalled();
   });
@@ -107,5 +112,59 @@ describe("Central: fila aberta por gravidade", () => {
     const daLista = consultas.filter(c => c.status === "resolved");
     expect(daLista).toHaveLength(1);
     expect(daLista[0]).not.toHaveProperty("severity");
+  });
+  it("filtro de gravidade: uma consulta só, com a gravidade pedida", async () => {
+    expect(await ids("?severity=critical")).toEqual(["critico-velho"]);
+    const comFiltro = consultas.filter(c => c.severity === "critical");
+    expect(comFiltro).toHaveLength(1);
+  });
+  it("has_more acusa quando o excedente +1 volta; sem sobra, é falso", async () => {
+    const poucas = await (await GET(new NextRequest("http://localhost/api/v1/ai/inbox?limit=2"))).json();
+    expect(poucas.data.has_more).toBe(true);
+    const todas = await (await GET(new NextRequest("http://localhost/api/v1/ai/inbox"))).json();
+    expect(todas.data.has_more).toBe(false);
+  });
+});
+
+describe("Central: contato do aviso em lote", () => {
+  const CONV = "33333333-3333-4333-8333-333333333333", CONT = "44444444-4444-4434-8434-444444444444";
+  const linhas = [
+    { id: "aviso-com-pessoa", kind: "handoff", severity: "warn", ref_kind: "conversation", ref_id: CONV, status: "open", created_at: "2026-09-26T10:00:00Z" },
+    { id: "aviso-sem-pessoa", kind: "qr_rescan", severity: "warn", ref_kind: "channel_session", ref_id: CONV, status: "open", created_at: "2026-09-26T09:00:00Z" },
+  ];
+  function banco() {
+    return { from(tabela: string) {
+      const filtros: Record<string, string> = {};
+      let teto = Infinity;
+      const chain = {
+        select: () => chain, order: () => chain,
+        limit: (n: number) => { teto = n; return chain; },
+        eq: (k: string, v: string) => { filtros[k] = v; return chain; },
+        in: () => chain, is: () => chain,
+        then: (resolve: (d: unknown) => unknown) => {
+          if (tabela === "agent_inbox_items") {
+            const data = linhas.filter(l => !filtros.severity || l.severity === filtros.severity).slice(0, teto);
+            return Promise.resolve({ data, error: null, count: linhas.length }).then(resolve);
+          }
+          if (tabela === "conversations") {
+            return Promise.resolve({ data: [{ id: CONV, contact_id: CONT }], error: null }).then(resolve);
+          }
+          if (tabela === "contacts") {
+            return Promise.resolve({ data: [{ id: CONT, display_name: "Apelido do Zap", name: "Maria Silva", phone_number: "+5511999990001" }], error: null }).then(resolve);
+          }
+          return Promise.resolve({ data: [], error: null }).then(resolve);
+        },
+      }; return chain;
+    } };
+  }
+  beforeEach(() => {
+    vi.mocked(createAdminClient).mockReturnValue(banco() as unknown as ReturnType<typeof createAdminClient>);
+    vi.mocked(createClient).mockResolvedValue(banco() as unknown as Awaited<ReturnType<typeof createClient>>);
+  });
+  it("conversa com contato: nome do cadastro + telefone; sem pessoa: null", async () => {
+    const corpo = await (await GET(new NextRequest("http://localhost/api/v1/ai/inbox"))).json();
+    const porId = Object.fromEntries((corpo.data.items as Array<{ id: string; contato: { nome: string | null; telefone: string | null } | null }>).map(i => [i.id, i.contato]));
+    expect(porId["aviso-com-pessoa"]).toEqual({ nome: "Maria Silva", telefone: "+5511999990001" });
+    expect(porId["aviso-sem-pessoa"]).toBeNull();
   });
 });

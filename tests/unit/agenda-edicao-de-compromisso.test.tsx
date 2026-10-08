@@ -28,6 +28,13 @@ const TIPO_A = "00000000-0000-4000-8000-0000000000dd";
 const TIPO_B = "00000000-0000-4000-8000-0000000000dc";
 const PACIENTE_A = "00000000-0000-4000-8000-000000000a01";
 const PACIENTE_B = "00000000-0000-4000-8000-000000000a02";
+const ATENDENTE = "00000000-0000-4000-8000-0000000000aa";
+const EXTERNO = "00000000-0000-4000-8000-0000000000c1";
+
+const PESSOAS = [
+  { id: ATENDENTE, nome: "Dra. Ana", trilha: 1 as const },
+  { id: EXTERNO, nome: "Dr. Externo", trilha: 2 as const, tipo: "profissional" as const },
+];
 
 const detalhe = {
   id: "appointment",
@@ -44,6 +51,8 @@ const detalhe = {
   contact_id: PACIENTE_A,
   conversation_id: null,
   event_type_id: TIPO_A,
+  owner_user_id: ATENDENTE,
+  provider_id: null,
   outcome_source_kind: null,
   outcome_recorded_at: null,
   recovery: null,
@@ -81,11 +90,11 @@ afterEach(() => {
   client.clear();
 });
 
-function open() {
+function open(pessoas?: typeof PESSOAS) {
   render(
     <IdiomaProvider locale="pt-BR">
       <QueryClientProvider client={client}>
-        <DetalheDoCompromisso id="appointment" onClose={() => {}} />
+        <DetalheDoCompromisso id="appointment" onClose={() => {}} pessoas={pessoas} />
       </QueryClientProvider>
     </IdiomaProvider>,
   );
@@ -167,4 +176,25 @@ it("troca de tipo entra no PATCH e o horário pode ir junto", async () => {
       expect.objectContaining({ id: "appointment", revision: 1, event_type_id: TIPO_B }),
     ),
   );
+});
+
+it("troca de profissional manda o par SEM confirmação e sem tocar no paciente", async () => {
+  await open(PESSOAS);
+  fireEvent.click(screen.getByRole("button", { name: "Editar compromisso" }));
+
+  const seletor = await screen.findByTestId("editar-profissional");
+  expect(seletor).toHaveValue(ATENDENTE);
+  fireEvent.change(seletor, { target: { value: EXTERNO } });
+  fireEvent.click(screen.getByTestId("salvar-edicao"));
+
+  // Direto ao PATCH: profissional não troca convidado, então não há alertdialog.
+  await waitFor(() =>
+    expect(api.patch).toHaveBeenCalledWith("/api/v1/agenda/agendamentos", {
+      id: "appointment",
+      revision: 1,
+      provider_id: EXTERNO,
+      owner_user_id: null,
+    }),
+  );
+  expect(screen.queryByRole("alertdialog")).toBeNull();
 });

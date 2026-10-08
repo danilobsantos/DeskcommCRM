@@ -2432,6 +2432,7 @@ export const DICIONARIO: Traducoes = {
   "Buscar contato": { es: "Buscar contacto" },
   "Todos os status": { es: "Todos los estados" },
   "Filtrar por fluxo": { es: "Filtrar por flujo" },
+  "Filtrar por gravidade": { es: "Filtrar por gravedad" },
   "Todos os fluxos": { es: "Todos los flujos" },
   "Nenhum item na fila": { es: "Ningún elemento en la cola" },
   "Enrollments ativos e promessas de retorno agendadas pela IA aparecem aqui.": {
@@ -8945,6 +8946,7 @@ export const DICIONARIO: Traducoes = {
     es: "La tarjeta sale del embudo con el historial de actividades. El contacto y las conversaciones se mantienen. Esta acción no se puede deshacer.",
   },
   "Selecionar": { es: "Seleccionar" },
+  "Selecionar…": { es: "Seleccionar…" },
   "Selecionar todos em": { es: "Seleccionar todos en" },
   "Desmarcar todos em": { es: "Desmarcar todos en" },
   "Abrir esta conversa no Inbox": { es: "Abrir esta conversación en Inbox" },

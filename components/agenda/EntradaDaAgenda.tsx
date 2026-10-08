@@ -3,10 +3,14 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { usePermission } from "@/hooks/auth/AuthProvider";
 import { useEffect } from "react";
 import { DetalheDoCompromisso } from "./DetalheDoCompromisso";
+import type { Pessoa } from "./tipos";
 export function EntradaDaAgenda({
   onContext,
+  pessoas,
 }: {
   onContext: (contact: string, conversation: string) => void;
+  /** O roster da grade (equipe + profissionais): alimenta a troca de profissional. */
+  pessoas?: Pessoa[];
 }) {
   const podeEditar = usePermission("inbox.reply");
   const params = useSearchParams();
@@ -30,6 +34,7 @@ export function EntradaDaAgenda({
       key={params.get("compromisso")}
       podeEditar={podeEditar}
       id={params.get("compromisso")}
+      pessoas={pessoas}
       onClose={() => {
         // O `?tipo=` escolhido na grade ATRAVESSA o fecho do detalhe: sem
         // esta linha, abrir um compromisso e fechar apagava a query inteira —

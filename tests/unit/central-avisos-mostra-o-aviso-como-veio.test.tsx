@@ -23,7 +23,7 @@
  * `t()` da tela inteira satisfaria este arquivo.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 
 import { AgentInboxList } from "@/app/app/ai/inbox/_components/AgentInboxList";
 import {
@@ -100,7 +100,12 @@ describe("Central de avisos: o dado sai como veio", () => {
     // devolveria a Central em português para quem escolheu espanhol.
     render(<AgentInboxList canResolve />);
 
-    expect(screen.getByText("ES:atenção"), "severidade").toBeVisible();
+    // A severidade sai no selo do card E no chip do filtro — os dois pelo
+    // dicionário. O que este caso cobra é o selo, então o alcance é o card.
+    expect(
+      within(screen.getByTestId("inbox-item")).getByText("ES:atenção"),
+      "severidade",
+    ).toBeVisible();
     expect(
       screen.getByText(/^ES:O assistente passou um atendimento para um humano/),
       "rótulo do kind",
