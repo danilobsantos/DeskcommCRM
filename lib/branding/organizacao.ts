@@ -78,6 +78,10 @@ export function marcaDaOrganizacaoDeSettings(settings: unknown): MarcaDaOrganiza
   return {
     app_name: texto(envelope.app_name),
     accent_hex: texto(envelope.accent_hex),
+    // A segunda semente (#2482), pelo MESMO tratamento dos campos do par: só
+    // vira chave quando é string — um `accent_dark_hex` numérico desceria para
+    // `envelopeDeSemente` e apontaria o campo errado no diagnóstico.
+    ...(texto(envelope.accent_dark_hex) ? { accent_dark_hex: texto(envelope.accent_dark_hex) } : {}),
     logo_path: texto(envelope.logo_path),
     // Caminho no bucket, nunca URL — quem grava é `fn_definir_logo_por_tema_da_organizacao`
     // (migration 0406), que assevera o prefixo contra o `organization_id` DENTRO

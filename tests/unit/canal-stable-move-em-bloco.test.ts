@@ -96,7 +96,7 @@ describe("o canal `stable` move em bloco", () => {
     ).toEqual([]);
   });
 
-  it("o job de promoção espera as três imagens E o boot do app — nem uma a menos", () => {
+  it("o job de promoção espera o build, o boot do app E as imagens de fundo — nem uma a menos", () => {
     const needs = /needs:\s*\[([^\]]*)\]/.exec(corpo(publish, "promover-stable"))?.[1];
     expect(needs, "o job de promoção não declara `needs`").toBeDefined();
     // Conjunto exato, não `toContain`: exigir a presença de um deixaria remover
@@ -104,6 +104,10 @@ describe("o canal `stable` move em bloco", () => {
     expect(needs?.split(",").map((s) => s.trim()).sort()).toEqual([
       "build-and-push",
       "imagem-do-app-sobe",
+      // As imagens de fundo entram na #604: `conecta-worker` e
+      // `conecta-scheduler` construíam e publicavam sem que nenhum job as
+      // executasse — e o canal `stable` andava sobre um laço morto.
+      "imagens-de-fundo-sobem",
     ]);
   });
 
@@ -111,9 +115,33 @@ describe("o canal `stable` move em bloco", () => {
     expect(corpo(publish, "promover-stable")).not.toMatch(/always\(\)/);
   });
 
-  it("as três imagens são promovidas — o canal não anda pela metade nem aqui", () => {
+  it("as três imagens são conferidas E promovidas — o canal não anda pela metade nem aqui", () => {
     const t = corpo(publish, "promover-stable");
-    for (const img of IMAGENS) expect(t, `a promoção não cita ${img}`).toContain(img);
+    const lacos = [...t.matchAll(/for img in ([^;]+); do/g)].map((m) =>
+      m[1]!.trim().split(/\s+/).sort(),
+    );
+    expect(
+      lacos,
+      "o job promover-stable deve ter dois `for img in ...`: conferir o conjunto, depois mover",
+    ).toHaveLength(2);
+    const esperadas = [...IMAGENS].sort();
+    for (const [i, imagens] of lacos.entries()) {
+      expect(imagens, `o laço #${i + 1} de promover-stable divergiu da matriz`).toEqual(esperadas);
+    }
+  });
+
+  it("toda conferência de plataforma vem ANTES do primeiro ponteiro movido", () => {
+    // Conferir dentro do laço que move faz uma falha na 3ª imagem deixar a 1ª e
+    // a 2ª já em `stable` — o canal dividido da #488, agora por erro de rede.
+    const t = corpo(publish, "promover-stable");
+    const primeiroMove = t.indexOf("imagetools create");
+    const ultimaConferencia = t.lastIndexOf("manifesto_tem_plataforma");
+    expect(primeiroMove, "o job não move o canal").toBeGreaterThan(-1);
+    expect(ultimaConferencia, "o job não confere plataforma nenhuma").toBeGreaterThan(-1);
+    expect(
+      ultimaConferencia,
+      "há `manifesto_tem_plataforma` depois do primeiro `imagetools create`: o canal pode mover pela metade",
+    ).toBeLessThan(primeiroMove);
   });
 
   it("a promoção REAPONTA o manifesto publicado, nunca reconstrói", () => {

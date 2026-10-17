@@ -9,6 +9,7 @@ import { desvinculoGoogleSchema, vinculoGoogleSchema } from "@/lib/agenda/provid
 import { podeAdministrarEmpresa } from "@/lib/auth/pode-administrar-empresa";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { ipDoCliente } from "@/lib/http/ip-do-cliente";
 import { supportWriteError } from "@/lib/impersonate/support";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -138,7 +139,7 @@ export async function vincularGoogleDoProfissional(
     resourceType: "provider",
     resourceId: parsed.data.provider_id,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     metadata: { calendar_id: parsed.data.calendar_id },
   });
@@ -191,7 +192,7 @@ export async function desvincularGoogleDoProfissional(
     resourceType: "provider",
     resourceId: parsed.data.provider_id,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     metadata: { calendars: (linhas as { id: string }[]).map((l) => l.id) },
   });

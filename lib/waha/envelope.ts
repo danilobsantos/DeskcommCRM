@@ -44,6 +44,19 @@ const booleano = z.boolean().nullish();
 const wahaMediaSchema = z.looseObject({
   url: texto,
   mimetype: texto,
+  /**
+   * Nome ORIGINAL do arquivo, só quando a mensagem TEM um (`"some-file.pdf"`;
+   * imagem e áudio vêm `null`) — é o campo `media.filename` documentado pelo
+   * WAHA em "Receive messages" (waha.devlike.pro/docs/how-to/receive-messages).
+   *
+   * Ganha tipo porque o código passa a LÊ-lo sem guarda própria
+   * (`mediaFilenameOf`, em `lib/waha/ingest.ts`) e gravá-lo em
+   * `metadata.media_filename`, que o cartão do Inbox já usa (#2613). `nullish`
+   * idem `url`/`mimetype`: WAHA escreve `null` para "não tenho este campo", e
+   * recusar o payload por isso transformaria mensagem com anexo em mensagem
+   * descartada.
+   */
+  filename: texto,
 });
 
 /**
@@ -110,6 +123,20 @@ export const wahaPayloadSchema = z.looseObject({
   /** Id da mensagem ORIGINAL nos eventos `message.edited` / `message.revoked`. */
   editedMessageId: texto,
   revokedMessageId: texto,
+  /**
+   * O miolo do evento `message.reaction` — `{ text, messageId }` medido na doc
+   * do WAHA ("Receive messages" > message.reaction): `text` é o emoji (string
+   * VAZIA quando o autor removeu a reação) e `messageId`, o id da mensagem
+   * reagida.
+   *
+   * Ganha tipo porque o código consome `messageId` sem guarda própria
+   * (`handleReaction`, em `ingest.ts`) — é o ponteiro para o alvo, e sem ele a
+   * reação vira linha cega. `unknown` e não `looseObject({...})` de propósito:
+   * `objetoSimples` confere objeto e forma lá na frente, e exigir o shape aqui
+   * transformaria uma mudança de formato do WAHA em reação descartada em
+   * silêncio — a mesma regressão que este arquivo existe para evitar.
+   */
+  reaction: z.unknown().optional(),
   _data: z.looseObject({
     notifyName: texto,
     pushName: texto,

@@ -13,6 +13,7 @@ import { IDIOMAS } from "@/lib/i18n/idiomas";
 import { MOEDAS_SERVIDAS } from "@/lib/money";
 
 import { conversationTagSchema } from "./messaging";
+import { mostrarQuandoSchema } from "./mostrar-quando";
 
 /**
  * Os idiomas que a interface REALMENTE serve.
@@ -168,12 +169,29 @@ export const customFieldSchema = z.object({
     "date",
     "select",
     "multiselect",
+    "searchable_select",
     "boolean",
     "email",
     "phone",
     "url",
   ]),
   required: z.boolean().optional(),
+  /**
+   * A QUE PERTENCE O CAMPO (issue #2791): ao NEGÓCIO (`negocio`) ou ao CONTATO
+   * (`contato`).
+   *
+   * A AUSÊNCIA é `negocio` — o comportamento de sempre: toda definição que já
+   * existe aparece no card e no dossiê do negócio e é gravada em
+   * `crm_leads.custom_fields`. `contato` tira o campo do card e o leva para a
+   * ficha do contato, cujo valor mora em `contacts.custom_fields`.
+   *
+   * Sem `.default()` de propósito: gravar `negocio` em cima de um funil que não
+   * tem a chave faria toda definição existente mudar de forma ao salvar (o
+   * `handleSave` regrava `fields` inteiro). A ausência é LIDA como `negocio` em
+   * `lib/leads/campos-do-funil.ts`, e a tela só escreve a chave quando é
+   * `contato`.
+   */
+  escopo: z.enum(["negocio", "contato"]).optional(),
   /**
    * QUANDO este campo passa a OBRIGAR (issue #1536).
    *
@@ -196,8 +214,45 @@ export const customFieldSchema = z.object({
     })
     .optional(),
   options: z
-    .array(z.object({ value: z.string().min(1), label: z.string().min(1) }))
+    .array(
+      z.object({
+        value: z.string().min(1),
+        label: z.string().min(1),
+        /**
+         * APELIDOS da opção (issue #2521): outras grafias que devem casar com
+         * ela. `Nova York` ← `New York`, `NY`, `NYC`. Alimentam a busca e a
+         * normalização do `searchable_select` (iguais a `value`/`label`, sem
+         * caixa, acento nem espaço a mais). Opcional e ausente por padrão — a
+         * lista de quem só digitou valores continua idêntica à de antes.
+         */
+        aliases: z.array(z.string().min(1).max(80)).max(20).optional(),
+      }),
+    )
     .optional(),
+  /**
+   * QUANDO este campo aparece (issue #2728) — "mostrar só quando outro tem
+   * determinado valor".
+   *
+   * A condição é montada no editor de campos do funil (campo + operador +
+   * valor) e lida por `lib/schemas/mostrar-quando.ts`, que os quatro pontos de
+   * renderização consultam. Esconder NÃO apaga valor: quem filtra é a lista
+   * que a tela renderiza, e o `custom_fields` gravado segue intacto.
+   *
+   * Ausente é o caminho de todo funil instalado hoje — a régua continua
+   * opt-in, igual a `obrigatorio_em`.
+   */
+  mostrar_quando: mostrarQuandoSchema.optional(),
+  /**
+   * PERMITIR VALOR NOVO (issue #2521) — só faz sentido no `searchable_select`.
+   *
+   * LIGADO, a pessoa pode cadastrar na ficha um valor que não está na lista e
+   * ele é gravado como digitado. DESLIGADO (o padrão, e a chave ausente em toda
+   * definição que já existe), a escrita só aceita um valor que case com uma
+   * opção (por `value`, `label` ou apelido), gravando o `value` CANÔNICO.
+   * Hoje a régua vale na ficha (CustomFieldsEditor); `validarValorPesquisavel`
+   * existe pronta para as escritas do servidor, ainda não plugada (#2521).
+   */
+  allow_new: z.boolean().optional(),
 });
 export type CustomFieldDef = z.infer<typeof customFieldSchema>;
 
@@ -297,6 +352,21 @@ export const platformBrandingSchema = z.object({
     .trim()
     .refine(ehHexValido, { message: "Use uma cor no formato #rrggbb" })
     .nullable(),
+  /**
+   * A cor da marca NO TEMA ESCURO (#2482) — o par de `accent_hex`, do mesmo
+   * jeito que a tela já tem o par de logo.
+   *
+   * `.nullable()` como os irmãos: `null` é "apague", e os dois temas voltam a
+   * derivar da cor principal. A retrocompatibilidade que a issue pede não mora
+   * aqui — ela mora no BANCO (`accent_dark_hex` pode ser `null` em toda linha
+   * gravada antes da coluna) e no envelope (`corEscura` some do objeto
+   * resolvido), que são os dois lados que código antigo lê.
+   */
+  accent_dark_hex: z
+    .string()
+    .trim()
+    .refine(ehHexValido, { message: "Use uma cor no formato #rrggbb" })
+    .nullable(),
   show_powered_by: z.boolean(),
 });
 export type PlatformBrandingInput = z.infer<typeof platformBrandingSchema>;
@@ -323,6 +393,12 @@ export type PlatformBrandingInput = z.infer<typeof platformBrandingSchema>;
 export const marcaDaOrganizacaoSchema = z.object({
   app_name: z.string().trim().min(1).max(120).nullable(),
   accent_hex: z
+    .string()
+    .trim()
+    .refine(ehHexValido, { message: "Use uma cor no formato #rrggbb" })
+    .nullable(),
+  /** A cor do TEMA ESCURO (#2482) — o par de `accent_hex`, mesma validação. */
+  accent_dark_hex: z
     .string()
     .trim()
     .refine(ehHexValido, { message: "Use uma cor no formato #rrggbb" })
@@ -406,4 +482,33 @@ export function colegasPodemMexerNaAgendaLigado(settings: unknown): boolean {
       ? (settings as Record<string, unknown>)
       : undefined;
   return raiz?.colegas_podem_mexer_na_agenda !== false;
+}
+
+/**
+ * A opção "MEET ABERTO" (#2063) — reunião criada pelo CRM com o link que
+ * qualquer um com o link entra, sem "pedir para participar".
+ *
+ * RÉGUA "SÓ O `true` EXPLÍCITO LIGA", como `settings.crm.cliente_pela_agenda`:
+ * a opção NASCE DESLIGADA em toda organização que já instalou, e o risco é
+ * parte do desenho — quem tiver o link entra sem pedir. Ausente, `false`, a
+ * string `"true"` ou qualquer lixo é desligado.
+ *
+ * Mora em chave PRÓPRIA de topo (`settings.google_meet_acesso_aberto`), no
+ * mesmo espírito de `colegas_podem_mexer_na_agenda`: NÃO fica em
+ * `settings.agenda`, porque `fn_agenda_settings` SUBSTITUI o objeto `agenda`
+ * inteiro e recusa chave que não as duas que conhece — a chave seria apagada na
+ * primeira vez que um Gerente salvasse os prazos.
+ *
+ * Nunca lança: um jsonb torto não pode derrubar Configurações.
+ */
+/** O AVISO DE RISCO da opção — a frase que a tela mostra ao lado do interruptor. */
+export const AVISO_MEET_ABERTO =
+  "⚠ Com o Meet aberto, quem tiver o link da reunião entra sozinho, sem que ninguém o admita. O link é a porta: não o publique onde circula livremente.";
+
+export function meetAbertoLigado(settings: unknown): boolean {
+  const raiz =
+    settings && typeof settings === "object" && !Array.isArray(settings)
+      ? (settings as Record<string, unknown>)
+      : undefined;
+  return raiz?.google_meet_acesso_aberto === true;
 }
