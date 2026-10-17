@@ -391,6 +391,8 @@ jobs:
       # fora do repo, muda num clique e não passa por PR.
       packages: write
     steps:
+      - uses: actions/checkout@v7
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -403,12 +405,19 @@ jobs:
           VERSAO: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          source hostgator-setup-kit/_manifestos.sh
           # `imagetools create` REAPONTA o índice que já foi publicado — não
           # reconstrói. Reconstruir o mesmo commit dá um digest DIFERENTE (foi o
           # que fez `stable` e `1.3.0` divergirem com o mesmo `revision`), e aí o
           # canal deixaria de ser o mesmo manifesto que a versão.
           dono=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           numero="${VERSAO#v}"
+          # Confere o conjunto INTEIRO antes de mover QUALQUER ponteiro. Conferir
+          # dentro do laço de mover deixava uma falha na 3ª imagem com app e
+          # worker já em `stable` — o canal dividido da #488, agora por erro de rede.
+          for img in conecta-app conecta-worker conecta-scheduler; do
+            manifesto_tem_plataforma "${REGISTRY}/${dono}/${img}:${numero}" linux/amd64
+          done
           for img in conecta-app conecta-worker conecta-scheduler; do
             echo "::group::${img}"
             docker buildx imagetools create \

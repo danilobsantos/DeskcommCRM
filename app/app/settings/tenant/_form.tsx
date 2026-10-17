@@ -24,12 +24,20 @@ import { FUSOS_OFERECIDOS } from "@/lib/tempo/fusos";
 
 interface Props {
   initial: TenantInput;
+  /**
+   * Quem grava. Padrão: a server action do próprio tenant (Configurações ›
+   * Empresa). A gestão de tenants do admin da plataforma passa a rota dela —
+   * mesmos campos, mesma validação, outra autoridade.
+   */
+  onSave?: (dados: TenantInput) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Chamado depois de gravar com sucesso (ex.: fechar o diálogo do admin). */
+  onSaved?: () => void;
 }
 
 // A mesma lista de toda tela de fuso — ver `lib/tempo/fusos.ts`.
 const TIMEZONES = FUSOS_OFERECIDOS.map((f) => f.codigo);
 
-export function TenantForm({ initial }: Props) {
+export function TenantForm({ initial, onSave, onSaved }: Props) {
   const t = useT();
   const [form, setForm] = useState<TenantInput>(initial);
   const [isPending, startTransition] = useTransition();
@@ -52,9 +60,11 @@ export function TenantForm({ initial }: Props) {
       return;
     }
     startTransition(async () => {
-      const r = await updateTenant(parsed.data);
-      if (r.ok) toast.success(t("Organização atualizada."));
-      else toast.error(`${t("Erro")}: ${r.error}`);
+      const r = await (onSave ?? updateTenant)(parsed.data);
+      if (r.ok) {
+        toast.success(t("Organização atualizada."));
+        onSaved?.();
+      } else toast.error(`${t("Erro")}: ${r.error}`);
     });
   }
 
@@ -153,7 +163,18 @@ export function TenantForm({ initial }: Props) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="country">{t("País")}</Label>
-            <Select value={form.country ?? "BR"} onValueChange={(v) => set("country", v)}>
+            <Select
+              value={form.country ?? "BR"}
+              onValueChange={(v) => {
+                // Escolher o país SUGERE o fuso dele (issue #2347, item 4): uma
+                // organização de Portugal que nunca trocou o fuso ficava com o
+                // `America/Sao_Paulo` do padrão e mandava ao titular datas em
+                // GMT-3. A sugestão entra no campo logo acima — e quem quiser
+                // outro fuso ainda pode recusá-la, que é só trocar ali.
+                const sugerido = perfilDoPais(v).fusoDoSugerido;
+                setForm((f) => ({ ...f, country: v, timezone: sugerido }));
+              }}
+            >
               <SelectTrigger id="country">
                 <SelectValue />
               </SelectTrigger>

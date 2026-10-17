@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 
 import { audit } from "@/lib/audit";
 import { escritaDeAdminOuRecusa } from "@/lib/auth/escritaDeAdminOuRecusa";
+import { ipDoCliente } from "@/lib/http/ip-do-cliente";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type UpdateProvidersFeatureResult =
@@ -59,7 +60,7 @@ export async function updateProvidersFeature(
     resourceType: "organization",
     resourceId: organizationId,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     actingAsPlatformAdmin: true,
     metadata: { feature: "providers_enabled", enabled },
@@ -118,7 +119,7 @@ export async function updateProvidersGoogleFeature(
     resourceType: "organization",
     resourceId: organizationId,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     actingAsPlatformAdmin: true,
     metadata: { feature: "providers_google_enabled", enabled },
