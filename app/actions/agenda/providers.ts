@@ -9,6 +9,7 @@ import { providerCreateSchema, providerUpdateSchema } from "@/lib/agenda/provide
 import { podeAdministrarEmpresa } from "@/lib/auth/pode-administrar-empresa";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { ipDoCliente } from "@/lib/http/ip-do-cliente";
 import { supportWriteError } from "@/lib/impersonate/support";
 import { availabilityScheduleSchema } from "@/lib/schemas/routing";
 import { createClient } from "@/lib/supabase/server";
@@ -57,7 +58,7 @@ export async function criarProfissional(input: {
     resourceType: "provider",
     resourceId: data.id,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     metadata: { name: parsed.data.name },
   });
@@ -107,7 +108,7 @@ export async function atualizarProfissional(
     resourceType: "provider",
     resourceId: providerId,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     metadata: { edicao: true, ...patch },
   });
@@ -176,7 +177,7 @@ export async function excluirProfissional(providerId: string): Promise<ProviderA
     resourceType: "provider",
     resourceId: providerId,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     metadata: { name: (removido as { name: string }).name },
   });
@@ -216,7 +217,7 @@ export async function alternarProfissionalAtivo(
     resourceType: "provider",
     resourceId: providerId,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     metadata: { active },
   });
@@ -259,7 +260,7 @@ export async function salvarJornadaProfissional(
     resourceType: "provider",
     resourceId: providerId,
     requestId: cabecalhos.get("x-request-id") ?? undefined,
-    ip: cabecalhos.get("x-forwarded-for") ?? undefined,
+    ip: ipDoCliente(cabecalhos) ?? undefined,
     userAgent: cabecalhos.get("user-agent") ?? undefined,
     metadata: { jornada: true },
   });

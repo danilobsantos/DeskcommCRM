@@ -108,7 +108,7 @@ export async function PATCH(req: Request) {
     });
     return ok({ saved: true }, { requestId });
   } catch (e) {
-    const stale = e instanceof Error && "code" in e && e.code === "40001";
+    const stale = e instanceof Error && "code" in e && (e.code === "PT409" || e.code === "40001");
     return fail(
       stale ? "conflict" : "forbidden",
       stale

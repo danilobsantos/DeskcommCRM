@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { provedorDaInstalacao } from "@/lib/cobranca/configuracao";
+import { sugestaoDoCadastro } from "@/lib/cobranca/documento";
 import { lerUsoDaOrganizacao, type UsoDaOrganizacao } from "@/lib/cobranca/uso";
-import type { EstadoDaAssinatura, Modo } from "@/lib/cobranca/vocabulario";
+import type { EstadoDaAssinatura, Modo, ProvedorDeCobranca } from "@/lib/cobranca/vocabulario";
 
 export interface AssinaturaDoPainel {
   estado: EstadoDaAssinatura;
@@ -15,6 +17,10 @@ export interface AssinaturaDoPainel {
   link_de_pagamento: string | null;
   assinaturas_vivas: number;
   plano_agendado: { id: string; nome: string } | null;
+  periodo_pago_desde: string | null;
+  troca_pagamento_url: string | null;
+  troca_status: string | null;
+  pagamento_inicial_pendente: boolean;
 }
 
 export interface PlanoParaTroca {
@@ -22,6 +28,9 @@ export interface PlanoParaTroca {
   nome: string;
   preco_cents: number;
   intervalo: string;
+  max_assentos: number | null;
+  max_canais: number | null;
+  teto_ia_usd_cents: number | null;
 }
 
 export interface DadosDoPainel {
@@ -42,6 +51,12 @@ export interface DadosDoPainel {
   planosParaTroca: PlanoParaTroca[];
   /** IANA da empresa (`organizations.timezone`): as datas do painel e do recado saem nele. */
   fuso: string | null;
+  /**
+   * O que o "Assinar" precisa saber: QUEM cobra — o provedor da assinatura; sem
+   * ele, o da instalação (D-8) — e o CNPJ do cadastro, só se o dígito confere,
+   * para pré-preencher o documento que o Asaas exige.
+   */
+  checkout: { provedor: ProvedorDeCobranca | null; documentoDoCadastro: string | null };
 }
 
 interface PlanoLido extends PlanoParaTroca {
@@ -63,19 +78,20 @@ export async function lerPainelDaAssinatura(db: SupabaseClient, orgId: string): 
   const { data: a, error } = await db
     .from("cobranca_assinaturas")
     .select(
-      "plano_id, plano_agendado_id, estado, trial_ate, prazo_extra_ate, proximo_vencimento, vencida_desde, cancela_no_fim, modo, provedor, link_de_pagamento, assinaturas_vivas",
+      "plano_id, plano_agendado_id, estado, trial_ate, prazo_extra_ate, proximo_vencimento, vencida_desde, cancela_no_fim, modo, provedor, link_de_pagamento, assinaturas_vivas, periodo_pago_desde, troca_pagamento_url, troca_status, pagamento_inicial_pendente",
     )
     .eq("organization_id", orgId)
     .maybeSingle();
   if (error) throw new Error(`painel da assinatura: leitura falhou (${error.code})`);
 
-  const [planos, uso, gasto, org] = await Promise.all([
+  const [planos, uso, gasto, org, daInstalacao] = await Promise.all([
     db
       .from("cobranca_planos")
       .select("id, nome, preco_cents, intervalo, max_assentos, max_canais, teto_ia_usd_cents, arquivado_em, oferecido_ao_cliente"),
     lerUsoDaOrganizacao(db, orgId),
     db.rpc("fn_gasto_de_ia_do_mes", { p_org: orgId }),
-    db.from("organizations").select("timezone").eq("id", orgId).maybeSingle(),
+    db.from("organizations").select("timezone, cnpj").eq("id", orgId).maybeSingle(),
+    provedorDaInstalacao(),
   ]);
   if (planos.error || !uso || gasto.error || org.error) throw new Error("painel da assinatura: leitura falhou");
 
@@ -96,6 +112,10 @@ export async function lerPainelDaAssinatura(db: SupabaseClient, orgId: string): 
           link_de_pagamento: a.link_de_pagamento,
           assinaturas_vivas: a.assinaturas_vivas,
           plano_agendado: agendado ? { id: agendado.id, nome: agendado.nome } : null,
+          periodo_pago_desde: a.periodo_pago_desde,
+          troca_pagamento_url: a.troca_pagamento_url,
+          troca_status: a.troca_status,
+          pagamento_inicial_pendente: a.pagamento_inicial_pendente,
         }
       : null,
     plano: plano
@@ -107,10 +127,15 @@ export async function lerPainelDaAssinatura(db: SupabaseClient, orgId: string): 
     uso,
     gastoIaUsdCents: Number(gasto.data ?? 0),
     fuso: (org.data as { timezone: string | null } | null)?.timezone ?? null,
+    checkout: {
+      provedor: (a?.provedor as ProvedorDeCobranca | null | undefined) ?? daInstalacao,
+      documentoDoCadastro: sugestaoDoCadastro((org.data as { cnpj: string | null } | null)?.cnpj ?? null),
+    },
     planosParaTroca: plano
       ? todos
           .filter((p) => p.arquivado_em === null && p.oferecido_ao_cliente && p.intervalo === plano.intervalo && p.id !== plano.id)
-          .map((p) => ({ id: p.id, nome: p.nome, preco_cents: p.preco_cents, intervalo: p.intervalo }))
+          .map((p) => ({ id: p.id, nome: p.nome, preco_cents: p.preco_cents, intervalo: p.intervalo,
+            max_assentos: p.max_assentos, max_canais: p.max_canais, teto_ia_usd_cents: p.teto_ia_usd_cents }))
       : [],
   };
 }
