@@ -101,6 +101,14 @@ function criarBancoFalso(iniciais: Pedido[]) {
       this.ops.push((p) => termos.some((t) => avaliarTermo(p, t.trim())));
       return this;
     }
+    is(col: string, val: unknown) {
+      this.ops.push((p) => (val === null ? p[col] == null : p[col] === val));
+      return this;
+    }
+    lt(col: string, val: string) {
+      this.ops.push((p) => p[col] != null && String(p[col]) < val);
+      return this;
+    }
     select(_colunas: string) {
       return this;
     }

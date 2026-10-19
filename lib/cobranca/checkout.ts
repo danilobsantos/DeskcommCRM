@@ -112,14 +112,24 @@ export async function gerarLinkDePagamento(
   // Fase 1: a reserva. Quem chegar junto perde o compare-and-set. O ISO dela é a
   // "posse": liberar e gravar o link filtram por ele, para uma requisição lenta
   // não soltar nem sobrescrever a reserva de outra.
+  //
+  // Duas requisições disjuntas (expira nula → expira vencida) em vez de um
+  // `.or()` unindo os dois: `or=` + RETURNING na mesma requisição é o combo
+  // que o PostgREST ≤14.3 quebra (42703 em coluna que existe; pin v12.2.11 do
+  // Supabase, corrigido só no 14.4) — a reserva viraria 409
+  // "checkout_em_preparo" para todo mundo, sempre.
   const reserva = new Date(agora.getTime() + RESERVA_MS).toISOString();
-  const { data: reservada, error: erroDaReserva } = await admin
-    .from("cobranca_assinaturas")
-    .update({ checkout_url: null, checkout_expira_em: reserva, checkout_sessao_id: null })
-    .eq("organization_id", orgId)
-    .or(`checkout_expira_em.is.null,checkout_expira_em.lt."${agora.toISOString()}"`)
-    .select("organization_id")
-    .maybeSingle();
+  const pedir = (nuncaReservada: boolean) => {
+    const q = admin.from("cobranca_assinaturas").update({ checkout_url: null, checkout_expira_em: reserva, checkout_sessao_id: null }).eq("organization_id", orgId);
+    return nuncaReservada
+      ? q.is("checkout_expira_em", null)
+      : q.lt("checkout_expira_em", agora.toISOString());
+  };
+  const primeiraReserva = await pedir(true).select("organization_id").maybeSingle();
+  const { data: reservada, error: erroDaReserva } =
+    primeiraReserva.data && !primeiraReserva.error
+      ? primeiraReserva
+      : await pedir(false).select("organization_id").maybeSingle();
   if (erroDaReserva) return recusar(500, "internal_error", "Não foi possível reservar o pagamento.");
   if (!reservada) return recusar(409, "checkout_em_preparo", "Já estamos gerando o seu link de pagamento. Aguarde alguns segundos.");
 

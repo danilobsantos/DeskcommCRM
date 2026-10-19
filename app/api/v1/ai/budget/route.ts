@@ -321,23 +321,34 @@ async function retratarAvisos(d: {
   afrouxou: boolean;
 }): Promise<boolean> {
   if (!d.afrouxou) return false;
-  const { data, error } = await d.admin
-    .from("agent_inbox_items")
-    .update({ status: "resolved" })
-    .eq("organization_id", d.orgId)
-    .in("kind", ["budget_exceeded", "budget_warning"])
-    // Só os itens do orçamento da ORG e o legado sem referência (gravado antes
-    // de o insert ter ref). O do teto do PLANO não é afrouxado por esta tela.
-    .or("ref_kind.is.null,ref_kind.eq.ai_budget")
-    .eq("status", "open")
-    .select("id");
-  if (error) {
+  // Só os itens do orçamento da ORG (kinds limitados) e o legado sem
+  // referência (gravado antes de o insert ter ref); o do teto do PLANO
+  // (ref_kind='plano') não é afrouxado por esta tela.
+  //
+  // Dois updates disjuntos em vez de um `.or("ref_kind.is.null,…,ref_kind.eq.ai_budget")`
+  // junto do RETURNING: PostgREST ≤14.3 quebra `or=` + `select=` na mesma
+  // requisição (42703 em coluna que existe; pin v12.2.11 do Supabase,
+  // corrigido só no 14.4) — o warn de baixo engoliria o erro e o aviso de
+  // teto nunca fecharia.
+  const base = () =>
+    d.admin
+      .from("agent_inbox_items")
+      .update({ status: "resolved" })
+      .eq("organization_id", d.orgId)
+      .in("kind", ["budget_exceeded", "budget_warning"])
+      .eq("status", "open");
+  const [legado, doOrcamento] = await Promise.all([
+    base().is("ref_kind", null).select("id"),
+    base().eq("ref_kind", "ai_budget").select("id"),
+  ]);
+  if (legado.error || doOrcamento.error) {
     logger.warn("ai-budget: avisos de orçamento não puderam ser retratados", {
       organization_id: d.orgId,
       request_id: d.requestId,
-      causa: error.message,
+      // Só o código: a mensagem do Postgres pode trazer a linha.
+      causa: (legado.error ?? doOrcamento.error)?.code ?? "sem_codigo",
     });
     return false;
   }
-  return (data?.length ?? 0) > 0;
+  return (legado.data?.length ?? 0) > 0 || (doOrcamento.data?.length ?? 0) > 0;
 }

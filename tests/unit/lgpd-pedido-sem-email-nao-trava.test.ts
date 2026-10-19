@@ -94,6 +94,9 @@ vi.mock("@/lib/supabase/admin", () => ({
           eq: () => q,
           neq: () => q,
           or: () => q,
+          // Os recortes disjuntos do claim (#2751/#4932: relida nula → vencida).
+          is: () => q,
+          lt: () => q,
           select: () => q,
           then: (ok: (v: unknown) => unknown) => Promise.resolve(resposta).then(ok),
         };

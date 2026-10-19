@@ -66,19 +66,33 @@ function admin() {
       const eqs: Array<[string, unknown]> = [];
       const ors: string[] = [];
       let patch: Linha | null = null;
-      let soContar = false;
+      // `sem` = mutação sem RETURNING; `linha` = pediu linhas de volta;
+      // `contagem` = o `head: true` do distrato `open_count` (GET).
+      let modo: "sem" | "linha" | "contagem" = "sem";
       const alvo = () =>
-        tabela.filter((l) => eqs.every(([c, v]) => l[c] === v) && ors.every((f) => casaOr(l, f)));
+        tabela.filter((l) => eqs.every(([c, v]) => v === null ? l[c] === null : l[c] === v) && ors.every((f) => casaOr(l, f)));
       const resultado = () => {
+        // O PostgREST ≤14.3 na produção (v12.2.11) devolve 42703 quando uma
+        // MUTAÇÃO pede `or=` E RETURNING na mesma requisição — é o bug que
+        // derrubou "Marcar resolvido" (supabase #47332, corrigido só no 14.4).
+        // O dublê CORROMPE esse caminho; quem voltar a mandar `.select()` numa
+        // cadeia de update que leva `.or()` reprova aqui, como o banco real.
+        if (patch && ors.length > 0 && modo === "linha") {
+          return {
+            data: null,
+            count: null,
+            error: { code: "42703", message: `column agent_inbox_items.para_user_id does not exist`, details: null, hint: null },
+          };
+        }
         const linhas = alvo();
         if (patch) for (const l of linhas) Object.assign(l, patch);
-        return soContar
+        return modo === "contagem"
           ? { data: null, count: linhas.length, error: null }
           : { data: linhas.map((l) => ({ ...l })), error: null };
       };
       const cadeia = {
         select(_c?: string, opts?: { head?: boolean }) {
-          soContar = Boolean(opts?.head);
+          modo = opts?.head ? "contagem" : "linha";
           return cadeia;
         },
         update(p: Linha) {
@@ -86,6 +100,10 @@ function admin() {
           return cadeia;
         },
         eq(c: string, v: unknown) {
+          eqs.push([c, v]);
+          return cadeia;
+        },
+        is(c: string, v: unknown) {
           eqs.push([c, v]);
           return cadeia;
         },
@@ -97,7 +115,7 @@ function admin() {
         limit: () => cadeia,
         maybeSingle: async () => {
           const r = resultado();
-          return { data: r.data?.[0] ?? null, error: null };
+          return { data: r.data?.[0] ?? null, error: r.error };
         },
         then: (resolve: (r: unknown) => unknown) => Promise.resolve(resultado()).then(resolve),
       };
