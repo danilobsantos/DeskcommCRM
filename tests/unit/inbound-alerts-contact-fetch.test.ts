@@ -75,11 +75,13 @@ describe("useInboundMessageAlerts — busca de contatos para notificação", () 
             }),
           };
         }
-        if (url === `/api/v1/contacts/${contactId}/avatar`) {
+        if (url === `/api/v1/contacts/${contactId}/avatar?formato=json`) {
+          // O 307 cross-origin era recusado por CORS; o JSON é same-origin e
+          // devolve a URL assinada no corpo.
           return {
             ok: true,
             status: 200,
-            url: "https://storage.supabase.co/signed/foto.jpg",
+            json: async () => ({ data: { url: "https://storage.supabase.co/signed/foto.jpg" } }),
           };
         }
         return { ok: false, status: 404 };
@@ -97,7 +99,7 @@ describe("useInboundMessageAlerts — busca de contatos para notificação", () 
     expect(bits.icon).toBe("https://storage.supabase.co/signed/foto.jpg");
     expect(fetchCalls).toEqual([
       `/api/v1/contacts/${contactId}`,
-      `/api/v1/contacts/${contactId}/avatar`,
+      `/api/v1/contacts/${contactId}/avatar?formato=json`,
     ]);
   });
 });
