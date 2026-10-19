@@ -423,6 +423,13 @@ export const agendaSettingsWriteSchema = z.strictObject({
    * decidindo naquele instante.
    */
   pending_expires_after_minutes: z.number().int().min(15).max(10080).default(1440),
+  /**
+   * Desliga o aviso de confirmação de presença na Central de avisos.
+   *
+   * Opcional de propósito: PATCH antigo não manda a chave, e o banco preserva o
+   * valor gravado (não religa o pedido). Ausente aqui = ligado.
+   */
+  pedir_presenca: z.boolean().optional(),
 }).refine(v => v.unknown_protection_minutes >= v.confirmation_delay_minutes, {message:"O prazo de proteção deve ser maior que o prazo de confirmação."});
 export const agendaSettingsSchema = agendaSettingsWriteSchema.catch({confirmation_delay_minutes:10,unknown_protection_minutes:1440,pending_expires_after_minutes:1440});
 
@@ -469,9 +476,9 @@ export function clientePelaAgendaLigado(settings: unknown): boolean {
  *
  * ⚠️ NÃO mora em `settings.agenda`, e isso é decisão, não acaso:
  * `fn_agenda_settings` SUBSTITUI o objeto `settings.agenda` inteiro e recusa
- * chave que não sejam as duas que ele conhece, então a chave seria recusada por
- * ele e apagada na primeira vez que um Gerente salvasse os prazos. Chave
- * própria de topo, no mesmo espírito do `settings.crm` da migration 0262.
+ * qualquer chave que ele não conheça, então a chave seria recusada por ele e
+ * apagada na primeira vez que um Gerente salvasse os prazos. Chave própria de
+ * topo, no mesmo espírito do `settings.crm` da migration 0262.
  *
  * Nunca lança: a tela mostra a regra que o banco aplica, e um jsonb torto não
  * pode derrubar Configurações.
@@ -496,8 +503,8 @@ export function colegasPodemMexerNaAgendaLigado(settings: unknown): boolean {
  * Mora em chave PRÓPRIA de topo (`settings.google_meet_acesso_aberto`), no
  * mesmo espírito de `colegas_podem_mexer_na_agenda`: NÃO fica em
  * `settings.agenda`, porque `fn_agenda_settings` SUBSTITUI o objeto `agenda`
- * inteiro e recusa chave que não as duas que conhece — a chave seria apagada na
- * primeira vez que um Gerente salvasse os prazos.
+ * inteiro e recusa chave que não conhece — a chave seria apagada na primeira
+ * vez que um Gerente salvasse os prazos.
  *
  * Nunca lança: um jsonb torto não pode derrubar Configurações.
  */

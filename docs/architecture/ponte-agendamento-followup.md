@@ -8,9 +8,9 @@ Contrato implementado na Task6 da comunidade 360, migration 0224. A auditoria CA
 
 A revisão muda com horário, vínculo, cancelamento e desfecho. Notas, checkpoints de sincronização e metadados Meet não a incrementam. Fonte, ator, mensagem e instante do desfecho referenciam dados existentes; a timeline e o audit guardam a ação humana. Referências apagadas por retenção viram nulas, sem desfazer o fato registrado.
 
-`organizations.settings.agenda` usa schema compartilhado e UI em Configurações → Agenda: `confirmation_delay_minutes` (10 por padrão) e `unknown_protection_minutes` (1440). O horizonte não pode ser menor que a espera inicial. Valores legados inválidos degradam para os defaults, sem interromper o sweep.
+`organizations.settings.agenda` usa schema compartilhado e UI em Configurações → Agenda: `confirmation_delay_minutes` (10 por padrão), `unknown_protection_minutes` (1440) e `pedir_presenca` (ausente = ligado). O horizonte não pode ser menor que a espera inicial. Valores legados inválidos degradam para os defaults, sem interromper o sweep.
 
-O cron existente de follow-up chama `fn_appointment_confirmation_sweep`. Após fim + espera inicial, abre aviso por compromisso/revisão; snooze resolve e reabre o mesmo aviso. Após o horizonte, escala o desconhecido. Tempo nunca muda estado para falta nem inicia recuperação.
+O cron existente de follow-up chama `fn_appointment_confirmation_sweep`. Após fim + espera inicial, abre aviso por compromisso/revisão; snooze resolve e reabre o mesmo aviso. Após o horizonte, escala o desconhecido. Tempo nunca muda estado para falta nem inicia recuperação. Organização com `pedir_presenca:false` é pulada pelo sweep, e os avisos dessa organização que estavam abertos são encerrados na passagem seguinte.
 
 ## Uma regra de proteção
 

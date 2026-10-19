@@ -27,3 +27,11 @@ it('gestão autorizada altera a organização da sessão e audita autoria',async
 it('prazo inválido não chega à escrita',async()=>{
  expect((await PATCH(request({...settings,unknown_protection_minutes:1}))).status).toBe(422);expect(deps.rpc).not.toHaveBeenCalled();expect(deps.audit).not.toHaveBeenCalled();
 });
+it('desligar o pedido de presença chega à RPC',async()=>{
+ expect((await PATCH(request({...settings,pedir_presenca:false}))).status).toBe(200);
+ expect(deps.rpc).toHaveBeenCalledWith('fn_agenda_settings',{p_org:'trusted-org',p_config:{...gravado,pedir_presenca:false}});
+});
+it('pedir_presenca que não é booleano não chega à escrita',async()=>{
+ expect((await PATCH(request({...settings,pedir_presenca:'nao'}))).status).toBe(422);
+ expect(deps.rpc).not.toHaveBeenCalled();expect(deps.audit).not.toHaveBeenCalled();
+});
