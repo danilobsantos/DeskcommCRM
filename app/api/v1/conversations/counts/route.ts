@@ -2,7 +2,7 @@
  * GET /api/v1/conversations/counts — contagens por visão do inbox (G4-02).
  *
  * Usa o client user-scoped (cookie session) → toda contagem HERDA a RLS de
- * SELECT de `conversations` (fn_can_view_conversation, migration 0035). Um agent
+ * SELECT de `conversations` (visibilidade set-based, migration 9021). Um agent
  * em modo own* recebe a contagem do SEU escopo, NUNCA o total da org — a mesma
  * garantia do listing. Head count (count:'exact', head:true) não devolve linhas.
  */
@@ -155,6 +155,16 @@ export async function GET(req: NextRequest): Promise<Response> {
     return q;
   };
 
+  // Fila e Automático são, por definição do comando, sem responsável e
+  // não-terminais. Declarar isso como predicado FÍSICO é o que permite ao
+  // Postgres usar `idx_conversations_org_fila` (9016) em vez de varrer a tabela
+  // e calcular o comando por linha. `resolved` fica fora do corte por ser
+  // terminal no comando — o filtro de comando continua sendo a régua.
+  const countFila = (filtrosDaAba: readonly FiltroDeContagem[] = auxiliares) =>
+    countExact(filtrosDaAba)
+      .is("assigned_to_user_id", null)
+      .not("status", "in", `(${CONVERSATION_TERMINAL_STATUSES.join(",")})`);
+
   // Espelha tabToFilter (InboxLayout): unassigned = fila aberta sem dono;
   // mine = atribuídas a mim e ainda ABERTAS; all = tudo que o usuário VÊ.
   //
@@ -177,10 +187,10 @@ export async function GET(req: NextRequest): Promise<Response> {
     // `tests/unit/fila-tem-uma-definicao-so.test.ts` e
     // `tests/invariants/gov-5b-inbox-scope-counts.test.ts`, porque um badge que conta o
     // que a aba não mostra manda o atendente procurar trabalho que não existe.
-    countExact().in("comando_da_conversa", comandosDaFila(automaticoDaOrg)),
+    countFila().in("comando_da_conversa", comandosDaFila(automaticoDaOrg)),
     // A aba "Automático". Antes ela pedia `status='ai_handling'`, escrito por UM
     // caminho só em produção — por isso vivia quase vazia.
-    countExact().eq("comando_da_conversa", "automatico"),
+    countFila().eq("comando_da_conversa", "automatico"),
     // Minhas IGNORA o atendente escolhido pelo gerente: a lista da aba pede
     // `assigned_to=me`, que vence a escolha. Com o atendente aqui, o badge
     // contava `eu E ele` (zero) enquanto a aba listava as do gerente.

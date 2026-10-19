@@ -12,11 +12,18 @@
  * Contato anonimizado NUNCA devolve foto, mesmo que sobrasse arquivo: a
  * anonimização é irreversível por contrato, e uma rota de leitura não pode ser
  * a brecha que devolve o rosto de quem pediu remoção.
+ *
+ * `?formato=json` devolve `{ data: { url } }` em vez do 307. O aviso do
+ * navegador (Notification) busca o ícone SEM cookie: seguindo o redirect
+ * cross-origin, o browser recusava a resposta por CORS (o Kong responde
+ * `Access-Control-Allow-Origin: *`, que não vale para requisição com
+ * credenciais). O JSON é same-origin e autenticado; a URL assinada viaja no
+ * corpo e é consumida como ícone, não como fetch.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
-import { fail } from "@/lib/api/wrappers";
+import { fail, ok } from "@/lib/api/wrappers";
 import { loadAuthUser } from "@/lib/auth/server";
 import { orgAtivaDaApi } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -47,7 +54,7 @@ const SIGNED_TTL_SECONDS = 300;
 const BROWSER_CACHE_SECONDS = 240;
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const requestId = randomUUID();
@@ -86,12 +93,24 @@ export async function GET(
     return new Response(null, { status: 404 });
   }
 
+  const url = toPublicStorageUrl(signed.signedUrl);
+
+  if (req.nextUrl.searchParams.get("formato") === "json") {
+    return ok(
+      { url },
+      {
+        requestId,
+        headers: { "Cache-Control": `private, max-age=${BROWSER_CACHE_SECONDS}` },
+      },
+    );
+  }
+
   // Response.redirect() devolve headers imutáveis — não dá pra anexar o
   // Cache-Control depois. Por isso o 307 é montado à mão.
   return new Response(null, {
     status: 307,
     headers: {
-      Location: toPublicStorageUrl(signed.signedUrl),
+      Location: url,
       "Cache-Control": `private, max-age=${BROWSER_CACHE_SECONDS}`,
     },
   });

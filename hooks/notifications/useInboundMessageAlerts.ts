@@ -123,11 +123,19 @@ export async function contactNotifyBits(contactId: string): Promise<{
   // Evita disparar GET /avatar para contatos sem foto (que responderia 404 no console).
   if (bits.avatarStoragePath && !bits.isAnonymized) {
     try {
-      const r = await fetch(`/api/v1/contacts/${contactId}/avatar`, {
+      // `formato=json` em vez do 307: o aviso do navegador busca o ícone sem
+      // cookie, e o redirect cross-origin do Storage era recusado por CORS.
+      // O JSON é same-origin e devolve a URL assinada no corpo.
+      const r = await fetch(`/api/v1/contacts/${contactId}/avatar?formato=json`, {
         credentials: "include",
-        redirect: "follow",
       });
-      icon = r.ok ? avatarUrlServivel(r.url, window.location.origin) : undefined;
+      if (r.ok) {
+        const json = (await r.json()) as { data?: { url?: unknown } };
+        icon =
+          typeof json.data?.url === "string"
+            ? avatarUrlServivel(json.data.url, window.location.origin)
+            : undefined;
+      }
     } catch {
       // sem foto ou erro de rede: badge da marca
     }

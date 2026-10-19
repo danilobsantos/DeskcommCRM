@@ -221,7 +221,10 @@ describe("0150 — a dívida de RBAC não cresce", () => {
        where schemaname = 'public'
          and tablename in (${corrigidas.map((t) => `'${t}'`).join(",")})
          and cmd = 'ALL'
-         and (coalesce(qual, '') || coalesce(with_check, '')) not like '%role_at_least%';
+         -- fn_orgs_com_papel é o fn_role_at_least em conjunto (migration
+         -- 9021): continua sendo piso de papel, avaliado uma vez por organização.
+         and (coalesce(qual, '') || coalesce(with_check, '')) not like '%role_at_least%'
+         and (coalesce(qual, '') || coalesce(with_check, '')) not like '%fn_orgs_com_papel%';
     `);
     expect(semRole.trim()).toBe("");
   });
@@ -231,7 +234,10 @@ describe("0150 — a dívida de RBAC não cresce", () => {
       select coalesce(string_agg(distinct tablename, ',' order by tablename), '') from pg_policies
        where schemaname = 'public'
          and cmd = 'ALL'
-         and (coalesce(qual, '') || coalesce(with_check, '')) not like '%role_at_least%';
+         -- Mesmo reconhecimento do caso acima: a migration 9021 trocou o piso
+         -- por fn_orgs_com_papel, que é papel em conjunto, não ausência de papel.
+         and (coalesce(qual, '') || coalesce(with_check, '')) not like '%role_at_least%'
+         and (coalesce(qual, '') || coalesce(with_check, '')) not like '%fn_orgs_com_papel%';
     `)
       .trim()
       .split(",")

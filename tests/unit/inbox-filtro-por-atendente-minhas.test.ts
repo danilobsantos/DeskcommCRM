@@ -24,6 +24,7 @@ function consulta(filtros: Array<(l: Linha) => boolean> = []) {
     in: (c: string, vs: unknown[]) => com((l) => vs.includes(l[c])),
     not: (c: string, _op: "in", lista: string) =>
       com((l) => !lista.slice(1, -1).split(",").includes(String(l[c]))),
+    is: (c: string, v: null) => com((l) => (l[c] ?? null) === v),
     gt: (c: string, v: number) => com((l) => Number(l[c]) > v),
     or: () => q,
     then: (ok: (r: { count: number; error: null }) => unknown) =>

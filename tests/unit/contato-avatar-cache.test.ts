@@ -75,7 +75,13 @@ vi.mock("@/lib/supabase/admin", () => ({
 const { GET } = await import("@/app/api/v1/contacts/[id]/avatar/route");
 
 function chamar(id = "contato-1") {
-  return GET({} as never, { params: Promise.resolve({ id }) });
+  const req = { nextUrl: new URL(`http://localhost/api/v1/contacts/${id}/avatar`) };
+  return GET(req as never, { params: Promise.resolve({ id }) });
+}
+
+function chamarJson(id = "contato-1") {
+  const req = { nextUrl: new URL(`http://localhost/api/v1/contacts/${id}/avatar?formato=json`) };
+  return GET(req as never, { params: Promise.resolve({ id }) });
 }
 
 describe("GET /api/v1/contacts/{id}/avatar — cache do redirect", () => {
@@ -141,6 +147,27 @@ describe("GET /api/v1/contacts/{id}/avatar — cache do redirect", () => {
   it("não cacheia quando a assinatura falha", async () => {
     erroDeAssinatura = { message: "storage indisponível" };
     const res = await chamar();
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Cache-Control") ?? "").not.toMatch(/max-age=[1-9]/);
+  });
+
+  it("formato=json devolve a URL assinada no corpo — o aviso do navegador não segue redirect cross-origin", async () => {
+    const res = await chamarJson();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type") ?? "").toContain("application/json");
+    await expect(res.json()).resolves.toEqual({ data: { url: SIGNED_URL } });
+
+    const cc = res.headers.get("Cache-Control") ?? "";
+    const ttlAssinatura = createSignedUrl.mock.calls[0]?.[1] ?? 0;
+    expect(cc).toContain("private");
+    expect(Number(/max-age=(\d+)/.exec(cc)?.[1])).toBeLessThan(ttlAssinatura);
+  });
+
+  it("formato=json não cacheia o 404 — anonimização é irreversível", async () => {
+    contatoRow = { avatar_storage_path: "org-1/avatars/contato-1.jpg", is_anonimizado: true };
+    const res = await chamarJson();
 
     expect(res.status).toBe(404);
     expect(res.headers.get("Cache-Control") ?? "").not.toMatch(/max-age=[1-9]/);
