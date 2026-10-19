@@ -9,6 +9,7 @@ type Config = {
   confirmation_delay_minutes: number;
   unknown_protection_minutes: number;
   pending_expires_after_minutes: number;
+  pedir_presenca?: boolean;
 };
 export function PrazosDePresenca({ podeEditar }: { podeEditar: boolean }) {
   const t = useT();
@@ -44,6 +45,23 @@ export function PrazosDePresenca({ podeEditar }: { podeEditar: boolean }) {
         </Button>
       ) : value ? (
         <>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={value.pedir_presenca !== false}
+              disabled={!podeEditar}
+              onChange={(e) => setDraft({ ...value, pedir_presenca: e.target.checked })}
+              className="size-4 shrink-0 rounded-sm border-border accent-accent"
+            />
+            {t("Pedir confirmação de presença à equipe")}
+          </label>
+          {value.pedir_presenca === false ? (
+            <p className="text-xs text-text-muted">
+              {t(
+                "Desligado: o sistema para de criar o aviso de presença na Central de avisos e encerra os que estavam abertos. Os prazos abaixo continuam valendo para o resto.",
+              )}
+            </p>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label
