@@ -44,6 +44,7 @@ const ATOR = "22222222-2222-4222-8222-222222222222";
 interface Linha {
   id: string;
   organization_id: string;
+  para_user_id: string | null;
   status: "open" | "ack" | "resolved";
 }
 
@@ -71,6 +72,11 @@ function adminFalso() {
         or() {
           return cadeia;
         },
+        /** O `is(coluna, null)` do corte de destinatário (conjunto do aviso de empresa). */
+        is(coluna: keyof Linha, valor: unknown) {
+          filtros.push([coluna, valor]);
+          return cadeia;
+        },
         select() {
           if (erroDoBanco) return Promise.resolve({ data: null, error: erroDoBanco });
           const alvo = tabela.filter((linha) => filtros.every(([c, v]) => linha[c] === v));
@@ -90,10 +96,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   erroDoBanco = null;
   tabela = [
-    { id: "a1", organization_id: ORG, status: "open" },
-    { id: "a2", organization_id: ORG, status: "open" },
-    { id: "a3", organization_id: ORG, status: "resolved" },
-    { id: "b1", organization_id: OUTRA_ORG, status: "open" },
+    { id: "a1", organization_id: ORG, para_user_id: null, status: "open" },
+    { id: "a2", organization_id: ORG, para_user_id: null, status: "open" },
+    { id: "a3", organization_id: ORG, para_user_id: null, status: "resolved" },
+    { id: "b1", organization_id: OUTRA_ORG, para_user_id: null, status: "open" },
   ];
   vi.mocked(requireSupportWrite).mockResolvedValue(null);
   vi.mocked(requireRole).mockResolvedValue({

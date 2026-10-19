@@ -279,14 +279,23 @@ async function aplicaPatchComGuarda(
   patch: Patch,
   agoraIso: string,
 ): Promise<{ ok: true } | FalhaDaIntervencao> {
-  const { data, error } = await deps.supabase
-    .from("followup_enrollments")
-    .update(patch)
-    .eq("id", alvo.id)
-    .eq("organization_id", deps.orgId)
-    .eq("status", alvo.status)
-    .or(`claimed_until.is.null,claimed_until.lt.${agoraIso}`)
-    .select("id");
+  // Os dois predicados são disjuntos: `.is` pega quem nunca foi reclamado, e
+  // `.lt`, a reclamação vencida (órfã de processo derrubado). Junto do
+  // RETURNING, um `.or` unindo-os era o combo que o PostgREST ≤14.3 quebra
+  // (42703 em coluna que existe; pin v12.2.11 do Supabase, corrigido só no
+  // 14.4) — por isso DUAS requisições, a segunda só quando a primeira casa
+  // zero linhas.
+  const base = () =>
+    deps.supabase
+      .from("followup_enrollments")
+      .update(patch)
+      .eq("id", alvo.id)
+      .eq("organization_id", deps.orgId)
+      .eq("status", alvo.status);
+  const livre = await base().is("claimed_until", null).select("id");
+  if (livre.error) return { ok: false, codigo: "erro_interno", mensagem: livre.error.message };
+  const { data, error } =
+    (livre.data?.length ?? 0) > 0 ? livre : await base().lt("claimed_until", agoraIso).select("id");
 
   if (error) return { ok: false, codigo: "erro_interno", mensagem: error.message };
   if ((data ?? []).length > 0) return { ok: true };

@@ -203,20 +203,26 @@ export async function processLgpdExport(event: EventRow): Promise<HandlerResult>
   // invariante 4 do Sistema Vivo aplicado ao pedido, como o reaper do
   // `event_log` faz com a fila.
   const limiteDaReivindicacao = new Date(Date.now() - EXPORT_CLAIM_STALE_MS).toISOString();
-  const { data: reivindicado, error: erroDaReivindicacao } = await admin
+  // Os dois predicados são disjuntos: `.is` cobre quem vem sem reivindicação, e
+  // o `.lt` retoma a órfã de processo derrubado. Junto do RETURNING, um `.or`
+  // unindo os dois era o combo que o PostgREST ≤14.3 quebra (42703 em coluna
+  // que existe; pin v12.2.11 do Supabase, corrigido só no 14.4) — por isso são
+  // DUAS requisições, e a exportação inteira não ficaria presa em
+  // `claim_failed: 42703` para sempre.
+  const trava = {
+    status: "processing" as const,
+    attempts: nextAttempts,
+    export_claimed_at: new Date().toISOString(),
+  };
+  const primeiraReivindicacao = await admin
     .from("lgpd_requests")
-    .update({
-      status: "processing",
-      attempts: nextAttempts,
-      export_claimed_at: new Date().toISOString(),
-    })
+    .update(trava)
     .eq("organization_id", orgId)
     .eq("id", requestId)
     .neq("status", "completed")
-    .or(`export_claimed_at.is.null,export_claimed_at.lt.${limiteDaReivindicacao}`)
+    .is("export_claimed_at", null)
     .select("id");
-
-  if (erroDaReivindicacao) {
+  if (primeiraReivindicacao.error) {
     // O banco não respondeu à trava: não sabemos se reivindicou. Lido como
     // "outro está exportando", o dreno consumiria o evento e o pedido ficaria
     // sem exportação nem nova tentativa. `error` faz o dreno contar a tentativa
@@ -224,7 +230,30 @@ export async function processLgpdExport(event: EventRow): Promise<HandlerResult>
     return {
       consumer_key: "lgpd-export-worker.v1",
       status: "error",
-      detail: `claim_failed: ${erroDaReivindicacao.code}`,
+      detail: `claim_failed: ${primeiraReivindicacao.error.code}`,
+    };
+  }
+  const { data: reivindicado, error } =
+    (primeiraReivindicacao.data?.length ?? 0) > 0
+      ? primeiraReivindicacao
+      : await admin
+          .from("lgpd_requests")
+          .update(trava)
+          .eq("organization_id", orgId)
+          .eq("id", requestId)
+          .neq("status", "completed")
+          .lt("export_claimed_at", limiteDaReivindicacao)
+          .select("id");
+
+  if (error) {
+    // O banco não respondeu à trava: não sabemos se reivindicou. Lido como
+    // "outro está exportando", o dreno consumiria o evento e o pedido ficaria
+    // sem exportação nem nova tentativa. `error` faz o dreno contar a tentativa
+    // e reagendar. Só o código: a mensagem do Postgres pode trazer a linha.
+    return {
+      consumer_key: "lgpd-export-worker.v1",
+      status: "error",
+      detail: `claim_failed: ${error.code}`,
     };
   }
 

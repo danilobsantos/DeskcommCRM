@@ -32,9 +32,9 @@ import { randomUUID } from "node:crypto";
 
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { avisoVisivelPara } from "@/lib/ai/inbox-destino";
 import { requireRole } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -58,20 +58,26 @@ export async function POST(): Promise<Response> {
   // Service role bypassa RLS: o filtro por organização é EXPLÍCITO e vem da org
   // ativa resolvida do cookie, nunca do corpo. Sem ele o update alcançaria os
   // avisos de todos os tenants da instalação.
+  //
+  // A visibilidade em DUAS cadeias disjuntas (o aviso da empresa, `para_user_id`
+  // nulo, e o pessoal, `= eu`), em vez de um `.or()`: PostgREST ≤14.3 quebra
+  // `or=` + RETURNING na mesma requisição (42703; pin v12.2.11 do Supabase,
+  // corrigido só no 14.4), e "marcar todos" precisava do retorno dos ids para
+  // contar. São conjuntos disjuntos, então a soma é a mesma de antes.
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("agent_inbox_items")
-    .update({ status: "resolved" })
-    .eq("organization_id", org.orgId)
-    // Só o que ESTA pessoa vê: o aviso pessoal do colega (0689) não é dela para resolver.
-    .or(avisoVisivelPara(authUser.id))
-    .eq("status", "open")
-    .select("id");
-  if (error) {
+  const aba = () => admin.from("agent_inbox_items").update({ status: "resolved" }).eq("organization_id", org.orgId).eq("status", "open");
+  const [empresa, pessoal] = await Promise.all([
+    aba().is("para_user_id", null).select("id"),
+    aba().eq("para_user_id", authUser.id).select("id"),
+  ]);
+  if (empresa.error || pessoal.error) {
+    logger.error("ai-inbox: falha ao resolver avisos em lote", {
+      request_id: requestId,
+      codigo: (empresa.error ?? pessoal.error)?.code ?? "sem_codigo",
+    });
     return fail("internal_error", t("Falha ao resolver os avisos."), 500, { requestId });
   }
-
-  const count = data?.length ?? 0;
+  const count = (empresa.data?.length ?? 0) + (pessoal.data?.length ?? 0);
   if (count > 0) {
     await audit({
       action: "ai.inbox_item_status_changed",

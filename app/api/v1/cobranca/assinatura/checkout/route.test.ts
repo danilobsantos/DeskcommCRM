@@ -42,7 +42,10 @@ function responder(c: Cadeia): Resposta {
   if (c.tabela === "organizations") return { data: { legal_name: "Loja Legal Ltda", display_name: "Loja" } };
   if (c.tabela === "cobranca_planos") return { data: { id: "plano-a", nome: "Essencial", preco_cents: 4990, intervalo: "mes" } };
   if (operacao(c) === "select") return { data: m.linha };
-  if (filtros(c).some((f) => f[0] === "or")) return m.reservaOk ? { data: { organization_id: ORG } } : { data: null };
+  // A reserva do checkout em DUAS cadeias (expira nula → expira vencida) — quem
+  // perde a corrida recebe zero linhas nas duas.
+  const ehDaReserva = filtros(c).some((f) => (f[0] === "is" || f[0] === "lt") && f[1] === "checkout_expira_em");
+  if (ehDaReserva) return m.reservaOk ? { data: { organization_id: ORG } } : { data: null };
   return { data: { organization_id: ORG } };
 }
 

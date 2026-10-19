@@ -14,6 +14,7 @@ import { avisoVisivelPara } from "@/lib/ai/inbox-destino";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -52,15 +53,18 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   }
 
   const admin = createAdminClient();
-  const { data, error } = await admin
+  const visivel = avisoVisivelPara(authUser.id);
+  // PostgREST ≤14.3 quebra `or=` + RETURNING na MESMA requisição (42703 num
+  // ENDEREÇO para uma coluna que existe; v12.2.11 é o pin do Supabase em produção,
+  // corrigido só no 14.4). Então a VISIBILIDADE fica no UPDATE (sem `.select()`),
+  // e é a leitura de volta — GET com `or`, que funciona em qualquer versão —
+  // que devolve a linha e distinguir inexistente/invisível (404).
+  const { error } = await admin
     .from("agent_inbox_items")
     .update({ status: parsed.data.status })
     .eq("id", id)
     .eq("organization_id", org.orgId)
-    // O aviso pessoal do colega (0689) não existe para quem não o vê: 404.
-    .or(avisoVisivelPara(authUser.id))
-    .select("id, kind, severity, title, body, ref_kind, ref_id, status, created_at")
-    .maybeSingle();
+    .or(visivel);
   if (error) {
     // `23505` — um índice único parcial das migrations 0491/0527/0538 recusou a
     // virada para `open`: já existe um aviso ABERTO com a mesma chave nesta
@@ -77,6 +81,24 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
         { requestId },
       );
     }
+    logger.error("ai-inbox: falha ao atualizar aviso", {
+      request_id: requestId,
+      codigo: error.code ?? "sem_codigo",
+    });
+    return fail("internal_error", t("Falha ao atualizar o aviso."), 500, { requestId });
+  }
+  const { data, error: erroDaLeitura } = await admin
+    .from("agent_inbox_items")
+    .select("id, kind, severity, title, body, ref_kind, ref_id, status, created_at")
+    .eq("id", id)
+    .eq("organization_id", org.orgId)
+    .or(visivel)
+    .maybeSingle();
+  if (erroDaLeitura) {
+    logger.error("ai-inbox: falha ao reler aviso atualizado", {
+      request_id: requestId,
+      codigo: erroDaLeitura.code ?? "sem_codigo",
+    });
     return fail("internal_error", t("Falha ao atualizar o aviso."), 500, { requestId });
   }
   if (!data) {
