@@ -73,16 +73,20 @@ function fazerAdmin(opts: {
   itensAbertos?: number;
 }) {
   const escritas: Escrita[] = [];
-  /** Os filtros `.or()` aplicados — quem o retrato alcança mora aí. */
-  const filtrosOr: string[] = [];
+  /** Os recortes de `ref_kind` do retrato (`is` nulo / `eq` do orçamento): quem
+   *  o retrato alcança mora aí. */
+  const filtrosRefKind: string[] = [];
   const from = (tabela: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {
       select: () => chain,
-      eq: () => chain,
+      eq: (coluna: string, valor: unknown) => {
+        if (coluna === "ref_kind") filtrosRefKind.push(`${coluna}.eq.${valor}`);
+        return chain;
+      },
       in: () => chain,
-      or: (filtro: string) => {
-        filtrosOr.push(filtro);
+      is: (coluna: string, valor: unknown) => {
+        if (coluna === "ref_kind") filtrosRefKind.push(`${coluna}.is.${valor}`);
         return chain;
       },
       maybeSingle: async () => ({
@@ -108,7 +112,7 @@ function fazerAdmin(opts: {
     };
     return chain;
   };
-  return { cliente: { from }, escritas, filtrosOr };
+  return { cliente: { from }, escritas, filtrosRefKind };
 }
 
 function estadoDaTela(over: Partial<BudgetStatus> = {}): BudgetStatus {
@@ -418,7 +422,7 @@ describe("PATCH /api/v1/ai/budget", () => {
   describe("o laço de retorno — afrouxar fecha o alerta na hora", () => {
     it("desarmar resolve os budget_exceeded/budget_warning abertos", async () => {
       sessao("admin");
-      const { cliente, escritas, filtrosOr } = fazerAdmin({
+      const { cliente, escritas, filtrosRefKind } = fazerAdmin({
         linha: {
           monthly_limit_cents: 5000,
           alarm_threshold_pct: 80,
@@ -443,8 +447,10 @@ describe("PATCH /api/v1/ai/budget", () => {
       expect(fechamento?.op).toBe("update");
       expect(fechamento?.payload).toEqual({ status: "resolved" });
       // Afrouxar o orçamento da ORG não fecha o aviso do teto do PLANO (spec da
-      // cobrança §5): o retrato alcança só os itens da org e o legado sem ref.
-      expect(filtrosOr).toEqual(["ref_kind.is.null,ref_kind.eq.ai_budget"]);
+      // cobrança §5): o retrato alcança só os itens da org — o legado sem ref e
+      // o ref_kind='ai_budget' — em DUAS cadeias disjuntas; o `.or` único junto
+      // do RETURNING é o combo que o PostgREST ≤14.3 quebra (42703).
+      expect(filtrosRefKind).toEqual(["ref_kind.is.null", "ref_kind.eq.ai_budget"]);
       // A tela não pode voltar do clique dizendo que a IA continua parada.
       expect((await corpo(res)).data?.blocked_now).toBe(false);
     });

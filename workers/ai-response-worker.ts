@@ -701,6 +701,9 @@ async function retratarItensDeOrcamento(
     .in("kind", ["budget_exceeded", "budget_warning"])
     // O mesmo recorte da CTE `retrata`: nunca o item do teto do PLANO.
     .or("ref_kind.is.null,ref_kind.eq.ai_budget");
+  // Este UPDATE sobrevive ao PostgREST ≤14.3 JUSTAMENTE por não pedir
+  // RETURNING: `or=` + `select=` numa mutação é o combo quebrado lá (42703 em
+  // coluna que existe; corrigido só no 14.4). Não acrescente `.select()` aqui.
   if (error) {
     logger.warn("[ai-response] retrato dos itens de orçamento falhou", {
       organization_id: orgId,

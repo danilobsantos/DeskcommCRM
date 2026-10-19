@@ -44,8 +44,11 @@ interface Mundo {
   /** A linha de `cobranca_planos` que a leitura do preço da conferência devolve. */
   plano: Record<string, unknown> | null;
   org: Record<string, unknown>;
-  /** Quantas compare-and-set seguidas perdem; `aoPerder` é o escritor concorrente. */
+  /** Quantas TENTATIVAS compare-and-set perdem; `aoPerder` é o escritor concorrente. */
   casPerdidos: number;
+  /** Os `updated_at` das tentativas que perderam — a tentativa é as DUAS cadeias
+   *  (relida nula → vencida), e o escritor concorrente agiu uma vez só. */
+  atualizadosPerdidos: unknown[];
   aoPerder: (() => void) | null;
   avisoGanho: boolean;
   suspensaoAceita: boolean;
@@ -63,11 +66,19 @@ function responder(c: Cadeia): Resposta {
   const op = operacao(c);
   if (op === "select") return { data: m.linha };
   const campos = argumentos(c, "update")?.[0] as Record<string, unknown>;
-  const ehCompareAndSet = filtros(c).some((f) => f[0] === "or" || (f[0] === "eq" && f[1] === "updated_at"));
-  if (ehCompareAndSet && m.casPerdidos > 0) {
-    m.casPerdidos -= 1;
-    m.aoPerder?.();
-    return { data: null };
+  // A guarda do compare-and-set é o `updated_at` da linha lida. UMA tentativa
+  // perdida cobre as DUAS cadeias que ela faz hoje (relida nula → relida
+  // vencida): o escritor concorrente mudou a linha uma vez e as duas são
+  // avaliadas sobre ela.
+  const guardaDaLinha = filtros(c).find((f) => f[0] === "eq" && f[1] === "updated_at")?.[2];
+  if (guardaDaLinha !== undefined) {
+    if (m.atualizadosPerdidos.includes(guardaDaLinha)) return { data: null };
+    if (m.casPerdidos > 0) {
+      m.casPerdidos -= 1;
+      m.atualizadosPerdidos.push(guardaDaLinha);
+      m.aoPerder?.();
+      return { data: null };
+    }
   }
   if (m.linha) m.linha = { ...m.linha, ...campos };
   return { data: { organization_id: ORG } };
@@ -97,6 +108,7 @@ beforeEach(() => {
     plano: { id: "plano-a", preco_cents: 4990 },
     org: { status: "active", suspended_kind: null, locale: "pt-BR", timezone: "America/Sao_Paulo" },
     casPerdidos: 0,
+    atualizadosPerdidos: [],
     aoPerder: null,
     avisoGanho: true,
     suspensaoAceita: true,
@@ -152,8 +164,11 @@ describe("sincronizar", () => {
     expect(filtros(cas)).toEqual([
       ["eq", "organization_id", ORG],
       ["eq", "updated_at", LINHA.updated_at],
-      ["or", `relida_em.is.null,relida_em.lt."${AGORA.toISOString()}"`],
+      ["is", "relida_em", null],
     ]);
+    // A alternativa (relida vencida) só corre quando a primeira casa zero
+    // linhas — na alegria, ela nem aconteceu.
+    expect(escritas()).toHaveLength(1);
     expect(Object.keys(argumentos(cas, "update")?.[0] as object)).not.toContain("plano_agendado_id");
     expect(h.audit).toHaveBeenCalledWith(expect.objectContaining({
       action: "cobranca.estado_mudou", organizationId: ORG, metadata: { de: "ativa", para: "em_atraso", status_bruto: "past_due" },
@@ -195,7 +210,8 @@ describe("sincronizar", () => {
       m.linha = { ...m.linha!, plano_agendado_id: "plano-b", updated_at: ha(0.5) };
     };
     expect(await rodar()).toMatchObject({ tipo: "aplicada" });
-    const segunda = escritas()[1]!;
+    // A tentativa perdida tem DUAS cadeias; a leitura refeita é a terceira.
+    const segunda = escritas()[2]!;
     expect(filtros(segunda)).toContainEqual(["eq", "updated_at", ha(0.5)]);
     expect(Object.keys(argumentos(segunda, "update")?.[0] as object)).not.toContain("plano_agendado_id");
     expect(m.linha?.plano_agendado_id).toBe("plano-b");
@@ -208,7 +224,7 @@ describe("sincronizar", () => {
     };
     expect(await rodar()).toEqual({ tipo: "descartada" });
     expect(m.linha?.estado).toBe("trial");
-    expect(escritas()).toHaveLength(1);
+    expect(escritas()).toHaveLength(2);
     expect(h.audit).not.toHaveBeenCalled();
   });
 

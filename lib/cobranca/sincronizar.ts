@@ -257,15 +257,26 @@ export async function sincronizar(
     };
     // Duas guardas: a linha é a que foi lida (updated_at) e nenhuma leitura
     // mais NOVA já foi aplicada (relida_em) — sinal e cron correm juntos.
-    const { data: aplicada, error } = await admin
-      .from("cobranca_assinaturas")
-      .update(campos)
-      .eq("organization_id", orgId)
-      .eq("updated_at", linha.updated_at)
-      .or(`relida_em.is.null,relida_em.lt."${lidoEm.toISOString()}"`)
-      .select("organization_id")
-      .maybeSingle();
-    if (error) throw new Error(`cobranca: gravação da leitura falhou (${error.code ?? "sem_codigo"})`);
+    // A segunda guarda fica em DUAS requisições disjuntas (relida_em nula →
+    // relida_em anterior a esta leitura): um `.or` junto do RETURNING é o
+    // combo que o PostgREST ≤14.3 quebra (42703 em coluna que existe; pin
+    // v12.2.11 do Supabase, corrigido só no 14.4), e o cron de cobrança
+    // lançaria "gravação da leitura falhou" em toda leitura.
+    const alvoDaLinha = linha!;
+    const aplicarComGuarda = async () => {
+      const cass = (tentativaIs: boolean) => {
+        const q = admin.from("cobranca_assinaturas").update(campos).eq("organization_id", orgId).eq("updated_at", alvoDaLinha.updated_at);
+        return tentativaIs ? q.is("relida_em", null) : q.lt("relida_em", lidoEm.toISOString());
+      };
+      const nuncaLida = await cass(true).select("organization_id").maybeSingle();
+      if (nuncaLida.error) throw new Error(`cobranca: gravação da leitura falhou (${nuncaLida.error.code ?? "sem_codigo"})`);
+      if (nuncaLida.data) return nuncaLida.data;
+      // Vencida: outra leitura mais antiga reclamou e nunca concluiu — retoma.
+      const vencida = await cass(false).select("organization_id").maybeSingle();
+      if (vencida.error) throw new Error(`cobranca: gravação da leitura falhou (${vencida.error.code ?? "sem_codigo"})`);
+      return vencida.data;
+    };
+    const aplicada = await aplicarComGuarda();
     if (aplicada) {
       if (r.mudouEstado) {
         auditar("cobranca.estado_mudou", orgId, { de: linha.estado, para: r.estado, status_bruto: situacao.statusBruto });
