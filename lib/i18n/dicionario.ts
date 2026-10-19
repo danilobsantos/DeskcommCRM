@@ -1277,6 +1277,8 @@ export const DICIONARIO: Traducoes = {
   "Confirmação de presença": { es: "Confirmación de asistencia" },
   "Depois do compromisso, peça confirmação à equipe. Sem confirmação, o sistema mantém a presença desconhecida e nunca presume falta.": { es: "Después de la cita, pide confirmación al equipo. Sin confirmación, la asistencia queda como desconocida y el sistema nunca da por hecha una ausencia." },
   "Pedir confirmação após o fim (minutos)": { es: "Pedir confirmación después del final (minutos)" },
+  "Pedir confirmação de presença à equipe": { es: "Pedir confirmación de asistencia al equipo" },
+  "Desligado: o sistema para de criar o aviso de presença na Central de avisos e encerra os que estavam abertos. Os prazos abaixo continuam valendo para o resto.": { es: "Desactivado: el sistema deja de crear el aviso de asistencia en la Central de avisos y cierra los que estaban abiertos. Los plazos de abajo siguen valiendo para el resto." },
   "Proteger de cobranças por silêncio após o fim (minutos)": { es: "Proteger de mensajes por silencio después del final (minutos)" },
   "Quando esse prazo acabar, a pendência continua visível. Outro compromisso vivo ainda protege o contato.": { es: "Al terminar este plazo, el pendiente sigue visible. Si el contacto tiene otra cita vigente, seguirá protegido." },
   "Salvar prazos": { es: "Guardar plazos" },

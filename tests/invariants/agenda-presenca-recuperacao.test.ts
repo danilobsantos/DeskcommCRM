@@ -185,6 +185,53 @@ describe("presença e recuperação transacionais", () => {
         .severity,
     ).toBe("critical");
   });
+  it("pedido desligado não cria aviso novo e encerra o que já estava aberto", async () => {
+    const original = (await pool.query("select settings from organizations where id=$1", [GOV_ORG]))
+      .rows[0].settings as Record<string, unknown> | null;
+    try {
+      const a = await fixture();
+      await pool.query("select fn_appointment_confirmation_sweep(500,now())");
+      expect(
+        (
+          await pool.query(
+            "select status from agent_inbox_items where ref_id=$1 and kind='appointment_outcome_required'",
+            [a.id],
+          )
+        ).rows[0].status,
+      ).toBe("open");
+
+      await pool.query(
+        `update organizations set settings = jsonb_set(coalesce(settings,'{}'::jsonb),'{agenda}',
+           coalesce(settings->'agenda','{}'::jsonb) || '{"pedir_presenca":false}'::jsonb) where id=$1`,
+        [GOV_ORG],
+      );
+
+      // Desligar encerra o que já estava aberto...
+      await pool.query("select fn_appointment_confirmation_sweep(500,now())");
+      expect(
+        (
+          await pool.query(
+            "select status from agent_inbox_items where ref_id=$1 and kind='appointment_outcome_required'",
+            [a.id],
+          )
+        ).rows[0].status,
+      ).toBe("resolved");
+
+      // ...e um compromisso novo não cria nada.
+      const b = await fixture();
+      await pool.query("select fn_appointment_confirmation_sweep(500,now()+interval '2 hours')");
+      expect(
+        (
+          await pool.query(
+            "select count(*)::int n from agent_inbox_items where ref_id=$1 and kind='appointment_outcome_required'",
+            [b.id],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+    } finally {
+      await pool.query("update organizations set settings=$2 where id=$1", [GOV_ORG, original]);
+    }
+  });
   it("sem configuração é decisão terminal, inclusive depois de configurar; recibo privado e evento ausente falham fechado", async () => {
     await stopFlows();
     const a = await fixture();
